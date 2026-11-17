@@ -43,6 +43,11 @@ func run(args []string, io streams) int {
 			return runInit(args[1:], io)
 		case "doctor":
 			return runDoctor(args[1:], io)
+		case "seed":
+			// Only a development build has the seed command.
+			if devDatabase != "" {
+				return runSeed(args[1:], io)
+			}
 		case "accounts", "ac":
 			return runAccounts(args[1:], io)
 		}
@@ -82,8 +87,12 @@ func welcome() string {
 	for i, line := range lines {
 		lines[i] = green.Render(line)
 	}
+	commands := "\n  init          Set up the database\n  doctor        Check the database\n"
+	if devDatabase != "" {
+		commands += "  seed          Add sample data to the development database\n"
+	}
 	return strings.Join(lines, "\n") + "\n\nYour personal finance manager\n\n" +
 		green.Render("Usage:") + " finux [command]\n\n" +
-		green.Render("Commands:") + "\n  init          Set up the database\n  doctor        Check the database\n  accounts, ac  Manage accounts\n  help          Show this help\n\n" +
+		green.Render("Commands:") + commands + "  accounts, ac  Manage accounts\n  help          Show this help\n\n" +
 		green.Render("Options:") + "\n  -h, --help    Show this help\n"
 }

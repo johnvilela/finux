@@ -34,7 +34,7 @@ func runInit(args []string, io streams) int {
 		fmt.Fprintf(io.stderr, "finux: init: unexpected argument: %s\nRun 'finux init --help' for usage.\n", args[0])
 		return 2
 	}
-	path, err := storage.Path()
+	path, err := databasePath()
 	if err == nil {
 		var created bool
 		if created, err = storage.Init(path, models...); err == nil {
@@ -52,7 +52,7 @@ func runInit(args []string, io streams) int {
 // openDatabase opens the database for a command. Only 'finux init'
 // creates and migrates it.
 func openDatabase() (*gorm.DB, error) {
-	path, err := storage.Path()
+	path, err := databasePath()
 	if err != nil {
 		return nil, err
 	}

@@ -41,7 +41,7 @@ func runDoctor(args []string, io streams) int {
 
 // checkDatabase reports if the database exists and has all migrations.
 func checkDatabase() (report string, healthy bool, err error) {
-	path, err := storage.Path()
+	path, err := databasePath()
 	if err != nil {
 		return "", false, err
 	}

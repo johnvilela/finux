@@ -73,6 +73,28 @@ make dev
 ./bin/finux-dev
 ```
 
+`make dev` also gives the development build its own database,
+`finux-dev.db` in the root of the project. Git ignores the file. After each
+build, `make dev` applies the migrations to it and adds sample data:
+
+- If the database does not exist, it is created with a base set of 8 accounts.
+- If the database exists, it keeps its data and gets 3 more random accounts.
+
+To delete the database and start again from the base accounts:
+
+```sh
+make dev NEW_DB=1
+```
+
+`./bin/finux-dev seed` and `./bin/finux-dev seed --new-db` do the same without a
+new build. Make does not accept `--new-db` after a target, so the Makefile uses
+`NEW_DB=1`.
+
+`./bin/finux-dev` uses `finux-dev.db` and never your real database, unless you
+set `FINUX_DB`. The `seed` command always uses `finux-dev.db`. The production
+build does not have the `seed` command. The path of `finux-dev.db` is fixed in
+the binary at build time: build again if you move the project.
+
 `make prod` uses Go's default optimizations, strips debug symbols, and omits
 local source paths. Both commands only build and keep separate binaries.
 Running `make` without a target builds development mode.
@@ -92,6 +114,8 @@ and tell you to run `finux init`.
 
 The database is a SQLite file. Its path is the value of the `FINUX_DB`
 environment variable. Without `FINUX_DB`, the path is `~/.finux/finux.db`.
+The development build uses `finux-dev.db` in the project root instead; see
+[Build and run](#build-and-run).
 
 `finux doctor` reports if the database exists and if it has all the migrations.
 It does not change the database. Its exit status is 1 when a check fails:
