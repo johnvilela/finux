@@ -1,0 +1,6 @@
+workspace = "default"
+project = "finux"
+project_strategy = "repo-root"
+
+[capture]
+ignore_paths = ["ai/**", "AGENTS.md", ".agents/**"]
