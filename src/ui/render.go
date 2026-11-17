@@ -91,8 +91,12 @@ func plainTable(headers []string, rows [][]string, rightAligned int) string {
 	return out.String()
 }
 
-// AccountCard renders the details of one account.
+// AccountCard renders the details of one account. Plain output has no
+// colors and no borders, for pipes and files.
 func AccountCard(current account.Account, plain bool) string {
+	if !plain {
+		return styledCard(current)
+	}
 	fields := [][2]string{
 		{"ID", strconv.FormatUint(uint64(current.ID), 10)},
 		{"Currency", current.Currency},
@@ -104,31 +108,63 @@ func AccountCard(current account.Account, plain bool) string {
 	if current.Archived() {
 		fields = append(fields, [2]string{"Status", "archived"})
 	}
-	label, bold, dim := styleDim.Width(10), styleBold, styleDim
-	header := swatch(current.Color, "●") + " "
-	if plain {
-		label, bold, dim = lipgloss.NewStyle().Width(10), lipgloss.NewStyle(), lipgloss.NewStyle()
-		header = ""
-	}
-	lines := []string{header + bold.Render(current.Code) + "  " + current.Name}
+	lines := []string{current.Code + "  " + current.Name}
 	if current.Description != "" {
-		lines = append(lines, dim.Render(current.Description))
+		lines = append(lines, current.Description)
 	}
 	lines = append(lines, "")
 	for _, field := range fields {
-		value := field[1]
-		if !plain && field[0] == "Balance" && current.Balance() < 0 {
-			value = styleError.Render(value)
-		}
-		lines = append(lines, label.Render(field[0])+value)
+		lines = append(lines, fmt.Sprintf("%-10s%s", field[0], field[1]))
 	}
-	body := strings.Join(lines, "\n")
-	if plain {
-		return body + "\n"
-	}
-	border := colorDim
+	return strings.Join(lines, "\n") + "\n"
+}
+
+const (
+	cardMinWidth = 38
+	cardMaxWidth = 60
+)
+
+// styledCard shows an account in three levels: the identity (code and
+// name) first, the balance as the main value, then the dates. The id and
+// the dates are dim because they matter least.
+func styledCard(current account.Account) string {
+	tint := colorDim
 	if color, ok := account.ColorByKey(current.Color); ok {
-		border = lipgloss.Color(color.Hex)
+		tint = lipgloss.Color(color.Hex)
 	}
-	return styleBox.Padding(0, 2).BorderForeground(border).Render(body) + "\n"
+
+	badge := lipgloss.NewStyle().Bold(true).Padding(0, 1).
+		Foreground(lipgloss.Color("#000000")).Background(tint).Render(current.Code)
+	header := badge + "  " + styleBold.Render(current.Name)
+	if current.Archived() {
+		header += "  " + styleDim.Render("ARCHIVED")
+	}
+	id := styleDim.Render("#" + strconv.FormatUint(uint64(current.ID), 10))
+	width := min(cardMaxWidth, max(cardMinWidth, lipgloss.Width(header)+2+lipgloss.Width(id)))
+	header += strings.Repeat(" ", max(2, width-lipgloss.Width(header)-lipgloss.Width(id))) + id
+
+	amount := lipgloss.NewStyle().Bold(true)
+	if current.Balance() < 0 {
+		amount = amount.Foreground(colorError)
+	}
+	balance := amount.Render(money.Format(current.Balance(), current.Currency))
+	currency := styleDim.Render(current.Currency)
+	gap := max(2, width-lipgloss.Width(balance)-lipgloss.Width(currency))
+
+	lines := []string{header}
+	if current.Description != "" {
+		lines = append(lines, styleDim.Italic(true).Width(width).Render(current.Description))
+	}
+	lines = append(lines,
+		"",
+		styleDim.Render("BALANCE"),
+		balance+strings.Repeat(" ", gap)+currency,
+		"",
+		styleDim.Render(strings.Repeat("─", width)),
+	)
+	lines = append(lines,
+		styleDim.Render("Created  "+current.CreatedAt.Local().Format(timeLayout)),
+		styleDim.Render("Updated  "+current.UpdatedAt.Local().Format(timeLayout)),
+	)
+	return styleBox.BorderForeground(tint).Width(width+6).Render(strings.Join(lines, "\n")) + "\n"
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"finux/src/account"
 )
@@ -171,28 +172,66 @@ func TestAccountTable(t *testing.T) {
 	}
 }
 
-func TestAccountCard(t *testing.T) {
+func TestAccountCardPlain(t *testing.T) {
 	account := sampleAccounts()[0]
-	styled := AccountCard(account, false)
-	if !strings.Contains(styled, "╭") {
-		t.Fatalf("styled card has no border:\n%s", styled)
-	}
 	bare := AccountCard(account, true)
-	if strings.ContainsAny(bare, "╭│\x1b") {
+	if strings.ContainsAny(bare, "╭│─\x1b") {
 		t.Fatalf("plain card has borders or colors:\n%s", bare)
 	}
-	for _, card := range []string{plain(styled), bare} {
-		for _, want := range []string{"INTER", "Banco Inter", "main account", "ID", "1", "Currency", "BRL", "Balance", "R$ 1.234,56", "Color", "orange", "Created", "Updated"} {
-			if !strings.Contains(card, want) {
-				t.Errorf("card lacks %q:\n%s", want, card)
-			}
+	for _, want := range []string{"INTER  Banco Inter\n", "main account\n", "ID        1\n", "Currency  BRL\n", "Balance   R$ 1.234,56\n", "Color     orange\n", "Created   ", "Updated   "} {
+		if !strings.Contains(bare, want) {
+			t.Errorf("plain card lacks %q:\n%s", want, bare)
 		}
 	}
 	if strings.Contains(bare, "archived") {
 		t.Fatal("active account shown as archived")
 	}
 	account.DeletedAt.Valid = true
-	if !strings.Contains(AccountCard(account, true), "archived") {
+	if !strings.Contains(AccountCard(account, true), "Status    archived\n") {
 		t.Fatal("archived account not marked")
 	}
 }
+
+func TestAccountCardStyled(t *testing.T) {
+	account := sampleAccounts()[0]
+	styled := AccountCard(account, false)
+	if !strings.Contains(styled, "\x1b[") || !strings.Contains(styled, "╭") {
+		t.Fatalf("styled card has no color or border:\n%s", styled)
+	}
+	card := plain(styled)
+	// The order is the hierarchy: who, how much, then the small details.
+	order := []string{"INTER", "Banco Inter", "#1", "main account", "BALANCE", "R$ 1.234,56", "BRL", "────", "Created", "Updated"}
+	position := 0
+	for _, want := range order {
+		index := strings.Index(card[position:], want)
+		if index < 0 {
+			t.Fatalf("styled card lacks %q after %q, or it is out of order:\n%s", want, card[:position], card)
+		}
+		position += index + len(want)
+	}
+	lines := strings.Split(strings.TrimRight(card, "\n"), "\n")
+	for _, line := range lines {
+		if lipglossWidth(line) != lipglossWidth(lines[0]) {
+			t.Fatalf("card lines have different widths:\n%s", card)
+		}
+	}
+	for _, unwanted := range []string{"ID", "Color", "orange", "ARCHIVED"} {
+		if strings.Contains(card, unwanted) {
+			t.Fatalf("styled card shows %q:\n%s", unwanted, card)
+		}
+	}
+	account.DeletedAt.Valid = true
+	account.Description = ""
+	account.OpeningBalance = -5
+	if archived := plain(AccountCard(account, false)); !strings.Contains(archived, "ARCHIVED") || !strings.Contains(archived, "-R$ 0,05") {
+		t.Fatalf("archived card:\n%s", archived)
+	}
+	account.Description = strings.Repeat("long description ", 12)
+	for _, line := range strings.Split(plain(AccountCard(account, false)), "\n") {
+		if lipglossWidth(line) > 70 {
+			t.Fatalf("long description makes the card too wide: %q", line)
+		}
+	}
+}
+
+func lipglossWidth(text string) int { return lipgloss.Width(text) }
