@@ -13,8 +13,8 @@ compiler, such as GCC, when the database driver is used.
 - GORM (`gorm.io/gorm`) for mapping Go structs to database tables.
 - GORM's official SQLite driver (`gorm.io/driver/sqlite`) for local storage, using CGO.
 
-These dependencies are pinned for upcoming UI and database work. The CLI currently
-prints hello world; it does not create a database yet.
+Lip Gloss styles the startup screen. Other dependencies are pinned for upcoming
+UI and database work. The CLI does not create a database yet.
 
 ## Test
 
@@ -33,10 +33,33 @@ make prod
 Output:
 
 ```text
-Hello, world!
+███████╗██╗███╗   ██╗██╗   ██╗██╗  ██╗
+██╔════╝██║████╗  ██║██║   ██║╚██╗██╔╝
+█████╗  ██║██╔██╗ ██║██║   ██║ ╚███╔╝
+██╔══╝  ██║██║╚██╗██║██║   ██║ ██╔██╗
+██║     ██║██║ ╚████║╚██████╔╝██╔╝ ██╗
+╚═╝     ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝
+
+Your personal finance manager
+
+Usage: finux [command]
+
+Commands:
+  help        Show this help
+
+Options:
+  -h, --help  Show this help
 ```
 
 The executable stays in the project; it is not installed on your PATH.
+
+Run `./bin/finux help`, `./bin/finux --help`, or `./bin/finux -h` for the same
+screen. Finux prints help and returns to the shell. Unsupported arguments exit
+with status 2 and a diagnostic on stderr.
+
+The logo and headings use green when the terminal supports colors. Redirected
+output is plain text unless color is explicitly forced with `CLICOLOR_FORCE=1`.
+Set `NO_COLOR=1` to disable colors, including forced colors.
 
 For a debuggable build with optimizations and inlining disabled:
 
