@@ -2,6 +2,7 @@ package account
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"finux/src/storage"
@@ -9,7 +10,11 @@ import (
 
 func newStore(t *testing.T) *Store {
 	t.Helper()
-	db, err := storage.Open(t.TempDir(), &Account{})
+	path := filepath.Join(t.TempDir(), "finux.db")
+	if _, err := storage.Init(path, &Account{}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

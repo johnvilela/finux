@@ -37,8 +37,15 @@ func main() {
 }
 
 func run(args []string, io streams) int {
-	if len(args) > 0 && (args[0] == "accounts" || args[0] == "ac") {
-		return runAccounts(args[1:], io)
+	if len(args) > 0 {
+		switch args[0] {
+		case "init":
+			return runInit(args[1:], io)
+		case "doctor":
+			return runDoctor(args[1:], io)
+		case "accounts", "ac":
+			return runAccounts(args[1:], io)
+		}
 	}
 	if len(args) > 1 || len(args) == 1 && !isHelp(args[0]) {
 		fmt.Fprintf(io.stderr, "finux: unsupported arguments: %s\nRun 'finux --help' for usage.\n", strings.Join(args, " "))
@@ -77,6 +84,6 @@ func welcome() string {
 	}
 	return strings.Join(lines, "\n") + "\n\nYour personal finance manager\n\n" +
 		green.Render("Usage:") + " finux [command]\n\n" +
-		green.Render("Commands:") + "\n  accounts, ac  Manage accounts\n  help          Show this help\n\n" +
+		green.Render("Commands:") + "\n  init          Set up the database\n  doctor        Check the database\n  accounts, ac  Manage accounts\n  help          Show this help\n\n" +
 		green.Render("Options:") + "\n  -h, --help    Show this help\n"
 }

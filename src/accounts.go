@@ -11,7 +11,6 @@ import (
 
 	"finux/src/account"
 	"finux/src/money"
-	"finux/src/storage"
 	"finux/src/ui"
 )
 
@@ -100,11 +99,7 @@ func runAccounts(args []string, io streams) int {
 			return write(io, accountsHelp())
 		}
 	}
-	dir, err := storage.Dir()
-	if err != nil {
-		return command.fail(err)
-	}
-	db, err := storage.Open(dir, &account.Account{})
+	db, err := openDatabase()
 	if err != nil {
 		return command.fail(err)
 	}

@@ -47,6 +47,8 @@ Your personal finance manager
 Usage: finux [command]
 
 Commands:
+  init          Set up the database
+  doctor        Check the database
   accounts, ac  Manage accounts
   help          Show this help
 
@@ -74,6 +76,30 @@ make dev
 `make prod` uses Go's default optimizations, strips debug symbols, and omits
 local source paths. Both commands only build and keep separate binaries.
 Running `make` without a target builds development mode.
+
+## Database
+
+Run `finux init` one time before the other commands:
+
+```sh
+./bin/finux init
+```
+
+`init` creates the database file if it does not exist, then applies the database
+migrations. Run it again after an update of Finux; it keeps your data. Other
+commands do not create or migrate the database. Without a database, they stop
+and tell you to run `finux init`.
+
+The database is a SQLite file. Its path is the value of the `FINUX_DB`
+environment variable. Without `FINUX_DB`, the path is `~/.finux/finux.db`.
+
+`finux doctor` reports if the database exists and if it has all the migrations.
+It does not change the database. Its exit status is 1 when a check fails:
+
+```text
+✓ Database found: /home/you/.finux/finux.db
+✓ Migrations up to date
+```
 
 ## Accounts
 
@@ -133,9 +159,6 @@ the same selector as `finux ac`. `delete` asks for confirmation unless you give
 When input or output is not a terminal, Finux does not open forms, selectors or
 prompts: give the values as options. `finux ac` then prints a plain table, and
 details are plain text without borders.
-
-Finux keeps its data in `~/.finux/finux.db`. Set `FINUX_HOME` to use a different
-directory.
 
 ## Development
 

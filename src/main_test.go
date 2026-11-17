@@ -22,6 +22,8 @@ Your personal finance manager
 Usage: finux [command]
 
 Commands:
+  init          Set up the database
+  doctor        Check the database
   accounts, ac  Manage accounts
   help          Show this help
 

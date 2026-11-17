@@ -9,12 +9,17 @@ import (
 	"testing"
 )
 
-// finux runs the CLI with its data in home. Input and output are not
+// finux runs the CLI with its database in home. Input and output are not
 // terminals, so output is plain and interactive screens do not open.
 func finux(t *testing.T, home string, args ...string) (stdout, stderr string, status int) {
 	t.Helper()
+	return finuxEnv(t, []string{"FINUX_DB=" + filepath.Join(home, "finux.db"), "HOME=" + home}, args...)
+}
+
+func finuxEnv(t *testing.T, env []string, args ...string) (stdout, stderr string, status int) {
+	t.Helper()
 	command := exec.Command(finuxBinary(t), args...)
-	command.Env = []string{"TERM=xterm-256color", "FINUX_HOME=" + home, "HOME=" + home}
+	command.Env = append([]string{"TERM=xterm-256color"}, env...)
 	var out, errOut bytes.Buffer
 	command.Stdout, command.Stderr = &out, &errOut
 	if err := command.Run(); err != nil {
@@ -46,12 +51,10 @@ func fail(t *testing.T, home string, wantStatus int, wantStderr string, args ...
 
 func TestAccountsLifecycle(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "data")
+	succeed(t, home, "init")
 	const empty = "No accounts yet. Run 'finux ac add'.\n"
 	if got := succeed(t, home, "ac"); got != empty {
 		t.Fatalf("empty list = %q", got)
-	}
-	if _, err := os.Stat(filepath.Join(home, "finux.db")); err != nil {
-		t.Fatalf("database not created in FINUX_HOME: %v", err)
 	}
 
 	got := succeed(t, home, "accounts", "add", "--name", "Banco Inter", "--currency", "brl", "--balance", "1234,56", "--color", "orange", "--description", "main account")
@@ -132,6 +135,7 @@ func TestAccountsLifecycle(t *testing.T) {
 
 func TestAccountsUsageErrors(t *testing.T) {
 	home := t.TempDir()
+	succeed(t, home, "init")
 	succeed(t, home, "ac", "add", "--name", "Wise", "--currency", "USD", "--balance", "-10.5")
 	if got := succeed(t, home, "ac", "show", "WISE"); !strings.Contains(got, "Balance   -$10.50\n") {
 		t.Fatalf("negative balance:\n%s", got)
