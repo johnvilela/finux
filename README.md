@@ -2,7 +2,19 @@
 
 A personal finance manager written in Go, starting with a CLI.
 
-Requires Go 1.27.3 or newer and Make. Uses only the Go standard library.
+Requires Go 1.27.3 or newer and Make. SQLite builds require CGO enabled and a C
+compiler, such as GCC, when the database driver is used.
+
+## Dependencies
+
+- Lip Gloss v2 (`charm.land/lipgloss/v2`) for terminal styling.
+- Bubbles v2 (`charm.land/bubbles/v2`) for terminal UI components.
+- Bubble Tea v2 (`charm.land/bubbletea/v2`), required by Bubbles, for the terminal UI event loop.
+- GORM (`gorm.io/gorm`) for mapping Go structs to database tables.
+- GORM's official SQLite driver (`gorm.io/driver/sqlite`) for local storage, using CGO.
+
+These dependencies are pinned for upcoming UI and database work. The CLI currently
+prints hello world; it does not create a database yet.
 
 ## Test
 
