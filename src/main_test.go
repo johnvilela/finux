@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -20,17 +22,45 @@ Your personal finance manager
 Usage: finux [command]
 
 Commands:
-  help        Show this help
+  accounts, ac  Manage accounts
+  help          Show this help
 
 Options:
-  -h, --help  Show this help
+  -h, --help    Show this help
 `
 
-func TestFinuxCLI(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "finux")
-	if output, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build finux: %v\n%s", err, output)
+var (
+	buildOnce   sync.Once
+	buildDir    string
+	buildOutput []byte
+	buildErr    error
+)
+
+// finuxBinary builds the CLI once for all tests and returns its path.
+func finuxBinary(t *testing.T) string {
+	t.Helper()
+	buildOnce.Do(func() {
+		buildDir, buildErr = os.MkdirTemp("", "finux-test-")
+		if buildErr == nil {
+			buildOutput, buildErr = exec.Command("go", "build", "-o", filepath.Join(buildDir, "finux"), ".").CombinedOutput()
+		}
+	})
+	if buildErr != nil {
+		t.Fatalf("build finux: %v\n%s", buildErr, buildOutput)
 	}
+	return filepath.Join(buildDir, "finux")
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if buildDir != "" {
+		os.RemoveAll(buildDir)
+	}
+	os.Exit(code)
+}
+
+func TestFinuxCLI(t *testing.T) {
+	binary := finuxBinary(t)
 	for _, args := range [][]string{nil, {"help"}, {"--help"}, {"-h"}, {"unknown"}, {"--unknown"}, {"help", "extra"}} {
 		name := strings.Join(args, " ")
 		if name == "" {
