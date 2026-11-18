@@ -55,6 +55,7 @@ Commands:
   transactions, tx  Manage transactions
   credit-card, cc   Manage credit cards
   mcp               Run the MCP server for AI agents
+  skills            Install the skills for AI agents
   help              Show this help
 
 Options:
@@ -543,6 +544,56 @@ The rules are the rules of the CLI, with these differences:
   read the others. Its totals are for all transactions that match the
   filters.
 - The development command `seed` is not a tool.
+
+## Skills for AI agents
+
+The folder [skills](skills) has workflows for an agent that manages your
+finances with Finux. Each one is a folder with a `SKILL.md` file, in the
+Agent Skills format that Claude Code, Codex and opencode read.
+
+| Skill | Use it to |
+| --- | --- |
+| `finux-log-transactions` | Turn loose text or a receipt into transactions |
+| `finux-import-statement` | Import a bank or card statement: CSV, OFX, PDF or pasted text |
+| `finux-period-review` | Report a month or a year |
+| `finux-credit-card-bills` | See the bills of the credit cards and pay them |
+| `finux-coach` | Analyze spending and warn about debts and bills |
+
+A skill that changes data shows a draft and waits for your approval. The
+skills use the MCP tools; without the MCP server they use the `finux`
+CLI. Install the [MCP server](#mcp-server-for-ai-agents) first.
+
+To install the skills, run `finux skills install` with your agent. The
+skills are in the binary, so the command needs no other file:
+
+```sh
+./bin/finux skills                    # list the skills
+./bin/finux skills install claude     # ~/.claude/skills
+./bin/finux skills install codex      # ~/.codex/skills
+./bin/finux skills install opencode   # ~/.config/opencode/skills
+./bin/finux skills install --dir .claude/skills   # a folder you choose
+./bin/finux skills remove claude      # remove them again
+```
+
+Run `install` again after you update Finux: it replaces the Finux skills
+and keeps all other skills in the folder. When you work on the skills in
+this repository, link them in place of the install, and `install` then
+leaves the links as they are:
+
+```sh
+ln -s "$PWD"/skills/finux-* ~/.claude/skills/
+```
+
+Then start a new session of the agent and ask, for example, "I spent 45 on
+lunch with Nubank" or "how was my month".
+
+[docs/agents](docs/agents) has the reference the skills use: the data model
+and the rules ([concepts.md](docs/agents/concepts.md)), the MCP tools
+([tools.md](docs/agents/tools.md)) and the CLI commands for an agent
+([access.md](docs/agents/access.md)). Each skill has a copy in its
+`references` folder. `tools.md` and the copies are generated: after a
+change to a tool or to `docs/agents`, run `make docs`. The tests fail when
+they are out of date, or when a skill names a tool that does not exist.
 
 ## Development
 

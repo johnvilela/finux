@@ -30,6 +30,7 @@ Commands:
   transactions, tx  Manage transactions
   credit-card, cc   Manage credit cards
   mcp               Run the MCP server for AI agents
+  skills            Install the skills for AI agents
   help              Show this help
 
 Options:

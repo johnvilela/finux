@@ -60,6 +60,8 @@ func run(args []string, io streams) int {
 			return runCreditCards(args[1:], io)
 		case "mcp":
 			return runMCP(args[1:], io)
+		case "skills":
+			return runSkills(args[1:], io)
 		}
 	}
 	if len(args) > 1 || len(args) == 1 && !isHelp(args[0]) {
@@ -103,6 +105,6 @@ func welcome() string {
 	}
 	return strings.Join(lines, "\n") + "\n\nYour personal finance manager\n\n" +
 		green.Render("Usage:") + " finux [command]\n\n" +
-		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  mcp               Run the MCP server for AI agents\n  help              Show this help\n\n" +
+		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  mcp               Run the MCP server for AI agents\n  skills            Install the skills for AI agents\n  help              Show this help\n\n" +
 		green.Render("Options:") + "\n  -h, --help        Show this help\n"
 }

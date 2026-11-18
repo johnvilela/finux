@@ -1,4 +1,4 @@
-.PHONY: dev prod
+.PHONY: dev prod docs
 
 # The development build uses its own database in the project root.
 DEV_DB := $(CURDIR)/finux-dev.db
@@ -12,3 +12,8 @@ dev:
 
 prod:
 	go build -trimpath -ldflags="-s -w" -o bin/finux ./src
+
+# Write the generated documentation for AI agents again: the reference of
+# the MCP tools and the copies of the references in each skill.
+docs:
+	FINUX_UPDATE_DOCS=1 go test -count=1 -run 'TestAgentToolReferenceIsCurrent|TestAgentSkillReferencesAreCopies' ./src
