@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -528,4 +532,141 @@ func TestMCPCreditCards(t *testing.T) {
 	h.want(list, "1", "total")
 	h.want(list, "expense", "transactions", 0, "type")
 	h.want(list, "OTHER", "transactions", 0, "category")
+}
+
+// startHTTP starts 'finux mcp --http' on a free port and returns the URL
+// of its endpoint. stop ends the server and returns its exit status.
+func (h mcpHome) startHTTP(env ...string) (endpoint string, stop func() int) {
+	h.t.Helper()
+	command := exec.Command(finuxBinary(h.t), "mcp", "--http", "127.0.0.1:0")
+	command.Env = append([]string{"FINUX_DB=" + h.path(), "HOME=" + h.home, "FINUX_TODAY=2026-11-17"}, env...)
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		h.t.Fatal(err)
+	}
+	stopped := false
+	stop = func() int {
+		if stopped {
+			return 0
+		}
+		stopped = true
+		command.Process.Signal(os.Interrupt)
+		io.Copy(io.Discard, stderr)
+		command.Wait()
+		return command.ProcessState.ExitCode()
+	}
+	h.t.Cleanup(func() { stop() })
+	line, err := bufio.NewReader(stderr).ReadString('\n')
+	_, endpoint, found := strings.Cut(strings.TrimSpace(line), "listens on ")
+	endpoint, _, _ = strings.Cut(endpoint, " ")
+	if err != nil || !found || !strings.HasPrefix(endpoint, "http://127.0.0.1:") || !strings.HasSuffix(endpoint, "/mcp") {
+		h.t.Fatalf("first line of stderr = %q, %v", line, err)
+	}
+	return endpoint, stop
+}
+
+// send posts one message and returns the status and the body.
+func send(t *testing.T, endpoint, token, message string) (int, string) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(message))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	text, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response.StatusCode, string(text)
+}
+
+func TestMCPHTTP(t *testing.T) {
+	h := newMCPHome(t)
+	endpoint, stop := h.startHTTP()
+	status, text := send(t, endpoint, "", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"account_add","arguments":{"name":"Nubank","currency":"BRL","code":"NU"}}}`)
+	if status != http.StatusOK || !strings.Contains(text, `\"code\":\"NU\"`) {
+		t.Fatalf("account_add: status %d, body %s", status, text)
+	}
+	if status, text := send(t, endpoint, "", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`); status != http.StatusOK || !strings.Contains(text, "credit_card_pay") {
+		t.Fatalf("tools/list: status %d, body %s", status, text)
+	}
+	if status, _ := send(t, strings.TrimSuffix(endpoint, "/mcp")+"/other", "", pingMessage); status != http.StatusNotFound {
+		t.Fatalf("other path: status %d, want 404", status)
+	}
+	if status := stop(); status != 0 {
+		t.Fatalf("exit status after interrupt = %d, want 0", status)
+	}
+	// The account is in the database of the CLI.
+	h.want(h.ok("account_list", nil), "NU", "accounts", 0, "code")
+}
+
+const pingMessage = `{"jsonrpc":"2.0","id":1,"method":"ping"}`
+
+func TestMCPHTTPToken(t *testing.T) {
+	h := newMCPHome(t)
+	endpoint, _ := h.startHTTP("FINUX_MCP_TOKEN=secret-token")
+	if status, _ := send(t, endpoint, "", pingMessage); status != http.StatusUnauthorized {
+		t.Fatalf("without token: status %d, want 401", status)
+	}
+	if status, _ := send(t, endpoint, "wrong", pingMessage); status != http.StatusUnauthorized {
+		t.Fatalf("wrong token: status %d, want 401", status)
+	}
+	if status, text := send(t, endpoint, "secret-token", pingMessage); status != http.StatusOK {
+		t.Fatalf("with token: status %d, body %s", status, text)
+	}
+}
+
+func TestMCPHTTPOptions(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "data")
+	// An address that other computers reach needs a token.
+	for _, address := range []string{":0", "0.0.0.0:0", "192.168.0.10:8765"} {
+		stdout, stderr, status := finux(t, home, "mcp", "--http", address)
+		if status != 2 || stdout != "" || !strings.Contains(stderr, "FINUX_MCP_TOKEN") {
+			t.Errorf("--http %s: status %d, stdout %q, stderr %q", address, status, stdout, stderr)
+		}
+	}
+	if _, stderr, status := finux(t, home, "mcp", "--http", "nonsense"); status != 2 || !strings.Contains(stderr, "invalid address") {
+		t.Errorf("--http nonsense: status %d, stderr %q", status, stderr)
+	}
+	if _, stderr, status := finux(t, home, "mcp", "config", "claude", "--http", "127.0.0.1:1"); status != 2 || !strings.Contains(stderr, "--url") {
+		t.Errorf("config --http: status %d, stderr %q", status, stderr)
+	}
+
+	url := "http://127.0.0.1:8765/mcp"
+	for agent, wants := range map[string][]string{
+		"claude":   {"claude mcp add --transport http --scope user finux " + url},
+		"codex":    {"[mcp_servers.finux]", `url = "` + url + `"`},
+		"opencode": {`"type": "remote"`, `"url": "` + url + `"`},
+	} {
+		got := succeed(t, home, "mcp", "config", agent, "--url", url)
+		for _, want := range append(wants, "finux mcp --http") {
+			if !strings.Contains(got, want) {
+				t.Errorf("config %s --url lacks %q:\n%s", agent, want, got)
+			}
+		}
+		if strings.Contains(got, "FINUX_MCP_TOKEN") {
+			t.Errorf("config %s --url has a token without FINUX_MCP_TOKEN:\n%s", agent, got)
+		}
+	}
+	for agent, want := range map[string]string{
+		"claude":   `--header "Authorization: Bearer $FINUX_MCP_TOKEN"`,
+		"codex":    `bearer_token_env_var = "FINUX_MCP_TOKEN"`,
+		"opencode": `"Authorization": "Bearer {env:FINUX_MCP_TOKEN}"`,
+	} {
+		stdout, stderr, status := finuxEnv(t, []string{"HOME=" + home, "FINUX_MCP_TOKEN=secret-token"}, "mcp", "config", agent, "--url", url)
+		if status != 0 || stderr != "" || !strings.Contains(stdout, want) || strings.Contains(stdout, "secret-token") {
+			t.Errorf("config %s with token: status %d, stderr %q, stdout:\n%s", agent, status, stderr, stdout)
+		}
+	}
 }

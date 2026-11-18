@@ -462,9 +462,8 @@ becomes an expense of the category `OTHER`, with a note in its description.
 
 `finux mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
 server. It gives an AI agent, such as Claude Code, Codex or opencode, the
-features of the CLI as tools. The agent starts the server and talks to it
-through standard input and output. The server uses only the Go standard
-library, and the same database as the CLI.
+features of the CLI as tools. The server uses only the Go standard library,
+and the same database as the CLI.
 
 ### Install
 
@@ -481,6 +480,41 @@ the agent.
 Add `--read-only` to give the agent only the tools that change nothing.
 To use a different database, set `FINUX_DB` in the environment of the
 server, in the configuration of the agent.
+
+### HTTP
+
+Without options, the agent starts the server and talks to it through
+standard input and output. With `--http`, the server is one process that
+you start, and agents connect to its URL:
+
+```sh
+./bin/finux mcp --http 127.0.0.1:8765
+# Finux MCP server listens on http://127.0.0.1:8765/mcp (no token)
+
+./bin/finux mcp config claude --url http://127.0.0.1:8765/mcp
+```
+
+This is the Streamable HTTP transport of the protocol: the agent sends each
+message as a `POST` to `/mcp` and gets the response as JSON. The server has
+no sessions and no event stream. Press `ctrl+c` to stop it.
+
+To protect the server, set a token in the `FINUX_MCP_TOKEN` environment
+variable before you start it. Each request then needs the header
+`Authorization: Bearer <token>`. With the variable set, `config --url`
+also shows how the agent sends the token; it shows the name of the
+variable, not the token.
+
+```sh
+export FINUX_MCP_TOKEN="$(openssl rand -hex 32)"
+./bin/finux mcp --http 0.0.0.0:8765
+```
+
+- An address that other computers can reach, such as `0.0.0.0:8765`, is
+  refused without a token.
+- The server refuses a request from a web page of a different host, so a
+  page in your browser cannot call it.
+- The server does not encrypt. To use it from a different computer, put it
+  behind a tunnel or a reverse proxy that has HTTPS.
 
 ### Tools
 
