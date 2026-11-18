@@ -191,19 +191,29 @@ func (c *creditCardsCommand) taken(exceptID uint) func(string) bool {
 // details renders a credit card with its open bill and the bills that
 // wait for a payment.
 func (c *creditCardsCommand) details(current card.Card) (string, error) {
+	details, err := c.gather(current)
+	if err != nil {
+		return "", err
+	}
+	return ui.CardDetailsView(details, c.plain), nil
+}
+
+// gather reads the open bill of a credit card, its transactions and the
+// bills that wait for a payment.
+func (c *creditCardsCommand) gather(current card.Card) (ui.CardDetails, error) {
 	details := ui.CardDetails{Card: current, Today: today()}
 	var err error
 	if details.Bill, err = c.store.Current(current, details.Today); err != nil {
-		return "", err
+		return details, err
 	}
 	if details.Bill.ID != 0 {
 		if details.Transactions, err = c.transactions.ByBill(details.Bill.ID); err != nil {
-			return "", err
+			return details, err
 		}
 	}
 	bills, err := c.store.Bills(current.ID)
 	if err != nil {
-		return "", err
+		return details, err
 	}
 	// The oldest bill comes first: it is the most urgent.
 	slices.Reverse(bills)
@@ -212,7 +222,7 @@ func (c *creditCardsCommand) details(current card.Card) (string, error) {
 			details.Pending = append(details.Pending, bill)
 		}
 	}
-	return ui.CardDetailsView(details, c.plain), nil
+	return details, nil
 }
 
 func (c *creditCardsCommand) list(args []string) error {
@@ -472,6 +482,37 @@ func (c *creditCardsCommand) bill(command string, owner card.Card, text string) 
 	return found, err
 }
 
+// waiting returns the oldest bill of a credit card that waits for a
+// payment on the given date: a bill that is closed or late.
+func (c *creditCardsCommand) waiting(owner card.Card, date string) (card.Bill, error) {
+	bills, err := c.store.Bills(owner.ID)
+	if err != nil {
+		return card.Bill{}, err
+	}
+	slices.Reverse(bills)
+	index := slices.IndexFunc(bills, func(current card.Bill) bool {
+		status := current.Status(date)
+		return status == card.StatusClosed || status == card.StatusLate
+	})
+	if index < 0 {
+		return card.Bill{}, fmt.Errorf("no bill of %s waits for a payment. To pay a different bill, use --bill", owner.Code)
+	}
+	return bills[index], nil
+}
+
+// lastPaid returns the newest paid bill of a credit card.
+func (c *creditCardsCommand) lastPaid(owner card.Card) (card.Bill, error) {
+	bills, err := c.store.Bills(owner.ID)
+	if err != nil {
+		return card.Bill{}, err
+	}
+	index := slices.IndexFunc(bills, card.Bill.IsPaid)
+	if index < 0 {
+		return card.Bill{}, fmt.Errorf("%s has no paid bill", owner.Code)
+	}
+	return bills[index], nil
+}
+
 func (c *creditCardsCommand) pay(args []string) error {
 	var from, value, date, billRef string
 	positional, given, err := parse("pay", args, func(f *flag.FlagSet) {
@@ -501,21 +542,8 @@ func (c *creditCardsCommand) pay(args []string) error {
 		if bill, err = c.bill("pay", owner, billRef); err != nil {
 			return err
 		}
-	} else {
-		// The oldest bill that waits for a payment.
-		bills, err := c.store.Bills(owner.ID)
-		if err != nil {
-			return err
-		}
-		slices.Reverse(bills)
-		index := slices.IndexFunc(bills, func(current card.Bill) bool {
-			status := current.Status(date)
-			return status == card.StatusClosed || status == card.StatusLate
-		})
-		if index < 0 {
-			return fmt.Errorf("no bill of %s waits for a payment. To pay a different bill, use --bill", owner.Code)
-		}
-		bill = bills[index]
+	} else if bill, err = c.waiting(owner, date); err != nil {
+		return err
 	}
 
 	accounts := account.NewStore(c.db)
@@ -598,17 +626,8 @@ func (c *creditCardsCommand) unpay(args []string) error {
 		if bill, err = c.bill("unpay", owner, billRef); err != nil {
 			return err
 		}
-	} else {
-		// The last bill that is paid.
-		bills, err := c.store.Bills(owner.ID)
-		if err != nil {
-			return err
-		}
-		index := slices.IndexFunc(bills, card.Bill.IsPaid)
-		if index < 0 {
-			return fmt.Errorf("%s has no paid bill", owner.Code)
-		}
-		bill = bills[index]
+	} else if bill, err = c.lastPaid(owner); err != nil {
+		return err
 	}
 	if !yes {
 		question := fmt.Sprintf("Delete the payment of %s (%s)? The bill opens again.", billName(owner, bill), money.Format(bill.Paid, owner.Currency))

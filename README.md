@@ -54,6 +54,7 @@ Commands:
   categories, ct    Manage categories
   transactions, tx  Manage transactions
   credit-card, cc   Manage credit cards
+  mcp               Run the MCP server for AI agents
   help              Show this help
 
 Options:
@@ -456,6 +457,58 @@ edited.
 transactions, but takes no new ones. `delete --hard` deletes the card, its
 bills and its transactions permanently. Each payment stays in its account: it
 becomes an expense of the category `OTHER`, with a note in its description.
+
+## MCP server for AI agents
+
+`finux mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server. It gives an AI agent, such as Claude Code, Codex or opencode, the
+features of the CLI as tools. The agent starts the server and talks to it
+through standard input and output. The server uses only the Go standard
+library, and the same database as the CLI.
+
+### Install
+
+`finux mcp config <agent>` shows the command or the configuration for an
+agent, with the path of the binary you ran. It does not change the files of
+the agent.
+
+```sh
+./bin/finux mcp config claude    # prints a 'claude mcp add' command
+./bin/finux mcp config codex     # prints a block for ~/.codex/config.toml
+./bin/finux mcp config opencode  # prints a block for opencode.json
+```
+
+Add `--read-only` to give the agent only the tools that change nothing.
+To use a different database, set `FINUX_DB` in the environment of the
+server, in the configuration of the agent.
+
+### Tools
+
+Each tool returns JSON. The tools with `*` need `confirm: true`.
+
+| Module | Read | Change |
+| --- | --- | --- |
+| Database | `database_doctor` | `database_init`, `database_reseed` |
+| Accounts | `account_list`, `account_show` | `account_add`, `account_edit`, `account_archive`, `account_restore`, `account_delete`* |
+| Categories | `category_list`, `category_show` | `category_add`, `category_edit`, `category_delete`* |
+| Transactions | `transaction_list`, `transaction_show`, `transaction_suggestions` | `transaction_add`, `transaction_edit`, `transaction_delete`* |
+| Credit cards | `credit_card_list`, `credit_card_show`, `credit_card_bills` | `credit_card_add`, `credit_card_edit`, `credit_card_pay`, `credit_card_unpay`*, `credit_card_archive`, `credit_card_restore`, `credit_card_delete`* |
+
+The rules are the rules of the CLI, with these differences:
+
+- A tool that deletes data does nothing without `confirm: true`. It returns
+  `confirm_required` and a message that tells what it will delete.
+- `delete` of the CLI is two tools: `*_archive` archives and `*_delete`
+  deletes permanently (`delete --hard`).
+- The agent sends money as a decimal string, for example `"1234.56"`. A
+  result gives money as `minor` (integer minor units), `decimal` and
+  `formatted`.
+- The agent sends a date as `YYYY-MM-DD` or `DD/MM/YYYY`. A result gives a
+  date as `YYYY-MM-DD` and a bill as `YYYY-MM`.
+- `transaction_list` returns at most 100 transactions; `limit` and `offset`
+  read the others. Its totals are for all transactions that match the
+  filters.
+- The development command `seed` is not a tool.
 
 ## Development
 

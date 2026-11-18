@@ -289,20 +289,62 @@ func (c *categoriesCommand) edit(args []string) error {
 		current.Color = changes.Color
 	}
 	// The transactions of the category must accept its color.
-	if transactionsReady(c.db) {
-		refused, err := transaction.NewStore(c.db).Mismatched(current.ID, current.Color)
-		if err != nil {
-			return err
-		}
-		if refused > 0 {
-			meaning, _ := category.ColorByKey(current.Color)
-			return fmt.Errorf("category %s has %s that a %s (%s) category cannot have", current.Code, plural(refused, "transaction"), meaning.Key, meaning.Meaning)
-		}
+	if err := c.accepts(current); err != nil {
+		return err
 	}
 	if err := c.store.Update(&current); err != nil {
 		return err
 	}
 	return c.print(ui.Success("Category "+current.Code+" updated") + "\n")
+}
+
+// accepts refuses a color that the transactions of the category cannot
+// have.
+func (c *categoriesCommand) accepts(current category.Category) error {
+	if !transactionsReady(c.db) {
+		return nil
+	}
+	refused, err := transaction.NewStore(c.db).Mismatched(current.ID, current.Color)
+	if err != nil {
+		return err
+	}
+	if refused > 0 {
+		meaning, _ := category.ColorByKey(current.Color)
+		return fmt.Errorf("category %s has %s that a %s (%s) category cannot have", current.Code, plural(refused, "transaction"), meaning.Key, meaning.Meaning)
+	}
+	return nil
+}
+
+// usage counts the transactions of a category and finds the category
+// OTHER, which receives them when the category is deleted.
+func (c *categoriesCommand) usage(current category.Category) (used int64, other category.Category, err error) {
+	if transactionsReady(c.db) {
+		if used, err = transaction.NewStore(c.db).CountByCategory(current.ID); err != nil {
+			return 0, other, err
+		}
+	}
+	if used == 0 {
+		return 0, other, nil
+	}
+	if current.Code == category.OtherCode {
+		return used, other, fmt.Errorf("category %s has %s and receives the transactions of deleted categories: it cannot be deleted", current.Code, plural(used, "transaction"))
+	}
+	if other, err = otherCategory(c.db); err != nil {
+		return used, other, fmt.Errorf("category %s has %s: %w", current.Code, plural(used, "transaction"), err)
+	}
+	return used, other, nil
+}
+
+// remove deletes a category and moves its transactions to other.
+func (c *categoriesCommand) remove(current category.Category, used int64, other category.Category) error {
+	return c.db.Transaction(func(tx *gorm.DB) error {
+		if used > 0 {
+			if err := transaction.NewStore(tx).MoveCategory(current.ID, other.ID); err != nil {
+				return err
+			}
+		}
+		return category.NewStore(tx).Delete(current.ID)
+	})
 }
 
 func (c *categoriesCommand) delete(args []string) error {
@@ -318,22 +360,12 @@ func (c *categoriesCommand) delete(args []string) error {
 	if err != nil {
 		return err
 	}
-	var used int64
-	if transactionsReady(c.db) {
-		if used, err = transaction.NewStore(c.db).CountByCategory(current.ID); err != nil {
-			return err
-		}
+	used, other, err := c.usage(current)
+	if err != nil {
+		return err
 	}
-	// The transactions of a deleted category go to the category OTHER.
-	var other category.Category
 	moved := ""
 	if used > 0 {
-		if current.Code == category.OtherCode {
-			return fmt.Errorf("category %s has %s and receives the transactions of deleted categories: it cannot be deleted", current.Code, plural(used, "transaction"))
-		}
-		if other, err = otherCategory(c.db); err != nil {
-			return fmt.Errorf("category %s has %s: %w", current.Code, plural(used, "transaction"), err)
-		}
 		moved = "; " + plural(used, "transaction") + " moved to " + other.Code
 	}
 	if !yes {
@@ -349,15 +381,7 @@ func (c *categoriesCommand) delete(args []string) error {
 			return cancelled
 		}
 	}
-	err = c.db.Transaction(func(tx *gorm.DB) error {
-		if used > 0 {
-			if err := transaction.NewStore(tx).MoveCategory(current.ID, other.ID); err != nil {
-				return err
-			}
-		}
-		return category.NewStore(tx).Delete(current.ID)
-	})
-	if err != nil {
+	if err := c.remove(current, used, other); err != nil {
 		return err
 	}
 	return c.print(ui.Success("Category "+current.Code+" deleted"+moved) + "\n")

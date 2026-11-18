@@ -229,35 +229,9 @@ func (c *transactionsCommand) list(args []string) error {
 	if err != nil {
 		return err
 	}
-	filter := transaction.Filter{Title: strings.TrimSpace(search), Type: strings.ToLower(strings.TrimSpace(kind))}
-	if given["type"] && !transaction.ValidType(filter.Type) && filter.Type != transaction.Payment {
-		return usageError(fmt.Sprintf("list: unknown type %q: use one of %s", kind, strings.Join(transaction.Types(), ", ")))
-	}
-	if given["date"] {
-		if filter.Period, err = transaction.ParsePeriod(date); err != nil {
-			return usageError("list: " + err.Error())
-		}
-	}
-	if given["tag"] {
-		parsed, err := transaction.ParseTags(tags)
-		if err != nil {
-			return usageError("list: " + err.Error())
-		}
-		filter.Tags = strings.Fields(parsed)
-	}
-	if given["category"] {
-		found, err := c.findCategory(categoryRef)
-		if err != nil {
-			return err
-		}
-		filter.Category = found.Code
-	}
-	if given["account"] {
-		found, _, err := c.findPlace(accountRef, true)
-		if err != nil {
-			return err
-		}
-		filter.Account = found.Code
+	filter, err := c.filter(listFlags{categoryRef, tags, search, date, accountRef, kind}, given)
+	if err != nil {
+		return err
 	}
 	views, err := c.store.List(filter)
 	if err != nil {
@@ -282,6 +256,47 @@ func (c *transactionsCommand) list(args []string) error {
 		return err
 	}
 	return c.print(ui.TransactionCard(selected, c.plain))
+}
+
+// listFlags holds the text of the filters of list.
+type listFlags struct {
+	category, tags, search, date, account, kind string
+}
+
+// filter makes the filter of a list from the options that were given.
+func (c *transactionsCommand) filter(values listFlags, given map[string]bool) (transaction.Filter, error) {
+	var err error
+	filter := transaction.Filter{Title: strings.TrimSpace(values.search), Type: strings.ToLower(strings.TrimSpace(values.kind))}
+	if given["type"] && !transaction.ValidType(filter.Type) && filter.Type != transaction.Payment {
+		return filter, usageError(fmt.Sprintf("list: unknown type %q: use one of %s", values.kind, strings.Join(transaction.Types(), ", ")))
+	}
+	if given["date"] {
+		if filter.Period, err = transaction.ParsePeriod(values.date); err != nil {
+			return filter, usageError("list: " + err.Error())
+		}
+	}
+	if given["tag"] {
+		parsed, err := transaction.ParseTags(values.tags)
+		if err != nil {
+			return filter, usageError("list: " + err.Error())
+		}
+		filter.Tags = strings.Fields(parsed)
+	}
+	if given["category"] {
+		found, err := c.findCategory(values.category)
+		if err != nil {
+			return filter, err
+		}
+		filter.Category = found.Code
+	}
+	if given["account"] {
+		found, _, err := c.findPlace(values.account, true)
+		if err != nil {
+			return filter, err
+		}
+		filter.Account = found.Code
+	}
+	return filter, nil
 }
 
 func (c *transactionsCommand) show(args []string) error {
@@ -372,75 +387,10 @@ func (c *transactionsCommand) add(args []string) error {
 	if err != nil {
 		return err
 	}
-	// A new transaction has the date of today.
-	draft := transaction.Draft{Date: today()}
-	if err := values.check("add", given, &draft); err != nil {
+	draft, complete, err := c.newDraft(values, given)
+	if err != nil {
 		return err
 	}
-	switch {
-	case given["received"] && !given["to"]:
-		return usageError("add: --received is only for a transfer: give --to")
-	case given["to"] && given["type"] && draft.Type != transaction.Transfer:
-		return usageError("add: only a transfer has a destination account (--to)")
-	case given["to"]:
-		draft.Type = transaction.Transfer
-	case draft.Type == transaction.Transfer && !c.interactive:
-		return usageError("add: --to is necessary for a transfer")
-	}
-
-	var from, to account.Account
-	if given["account"] {
-		if from, draft.CardID, err = c.findPlace(values.account, false); err != nil {
-			return err
-		}
-		draft.AccountID = from.ID
-	}
-	if given["to"] {
-		if to, err = c.findAccount(values.to, false); err != nil {
-			return err
-		}
-		draft.ToAccountID = to.ID
-	}
-	var chosen category.Category
-	switch {
-	case given["category"]:
-		if chosen, err = c.findCategory(values.category); err != nil {
-			return err
-		}
-	case draft.Type == transaction.Transfer:
-		// A transfer has the Transfer category when the user gives none.
-		if chosen, err = c.categories.Find(category.TransferCode); err != nil && !errors.Is(err, category.ErrNotFound) {
-			return err
-		}
-	}
-	draft.CategoryID = chosen.ID
-	// The color of the category gives the type: red is an expense and
-	// green is an income.
-	if draft.Type == "" {
-		switch chosen.Color {
-		case "red":
-			draft.Type = transaction.Expense
-		case "green":
-			draft.Type = transaction.Income
-		case "grey":
-			if !c.interactive {
-				return usageError(fmt.Sprintf("add: --type is necessary: the category %s is for all types", chosen.Code))
-			}
-		}
-	}
-	if given["value"] && given["account"] {
-		if draft.Value, err = amount("add", values.value, from.Currency); err != nil {
-			return err
-		}
-	}
-	if given["received"] {
-		if draft.Received, err = amount("add", values.received, to.Currency); err != nil {
-			return err
-		}
-	}
-
-	complete := given["title"] && given["value"] && given["account"] && draft.CategoryID != 0 && draft.Type != "" &&
-		(draft.Type != transaction.Transfer || given["to"])
 	if !complete {
 		if !c.interactive {
 			return usageError("add: --title, --value, --account and --category are necessary when input is not a terminal")
@@ -456,8 +406,76 @@ func (c *transactionsCommand) add(args []string) error {
 	return c.print(ui.Success(label(created, "created")) + "\n")
 }
 
-// form opens the form of a new transaction. It hides the fields whose
-// options were given.
+// newDraft makes the draft of a new transaction from the options that
+// were given. complete is false when the draft still needs the form.
+func (c *transactionsCommand) newDraft(values transactionFlags, given map[string]bool) (draft transaction.Draft, complete bool, err error) {
+	draft = transaction.Draft{Date: today()}
+	if err := values.check("add", given, &draft); err != nil {
+		return draft, false, err
+	}
+	switch {
+	case given["received"] && !given["to"]:
+		return draft, false, usageError("add: --received is only for a transfer: give --to")
+	case given["to"] && given["type"] && draft.Type != transaction.Transfer:
+		return draft, false, usageError("add: only a transfer has a destination account (--to)")
+	case given["to"]:
+		draft.Type = transaction.Transfer
+	case draft.Type == transaction.Transfer && !c.interactive:
+		return draft, false, usageError("add: --to is necessary for a transfer")
+	}
+
+	var from, to account.Account
+	if given["account"] {
+		if from, draft.CardID, err = c.findPlace(values.account, false); err != nil {
+			return draft, false, err
+		}
+		draft.AccountID = from.ID
+	}
+	if given["to"] {
+		if to, err = c.findAccount(values.to, false); err != nil {
+			return draft, false, err
+		}
+		draft.ToAccountID = to.ID
+	}
+	var chosen category.Category
+	switch {
+	case given["category"]:
+		if chosen, err = c.findCategory(values.category); err != nil {
+			return draft, false, err
+		}
+	case draft.Type == transaction.Transfer:
+		if chosen, err = c.categories.Find(category.TransferCode); err != nil && !errors.Is(err, category.ErrNotFound) {
+			return draft, false, err
+		}
+	}
+	draft.CategoryID = chosen.ID
+	if draft.Type == "" {
+		switch chosen.Color {
+		case "red":
+			draft.Type = transaction.Expense
+		case "green":
+			draft.Type = transaction.Income
+		case "grey":
+			if !c.interactive {
+				return draft, false, usageError(fmt.Sprintf("add: --type is necessary: the category %s is for all types", chosen.Code))
+			}
+		}
+	}
+	if given["value"] && given["account"] {
+		if draft.Value, err = amount("add", values.value, from.Currency); err != nil {
+			return draft, false, err
+		}
+	}
+	if given["received"] {
+		if draft.Received, err = amount("add", values.received, to.Currency); err != nil {
+			return draft, false, err
+		}
+	}
+	complete = given["title"] && given["value"] && given["account"] && draft.CategoryID != 0 && draft.Type != "" &&
+		(draft.Type != transaction.Transfer || given["to"])
+	return draft, complete, nil
+}
+
 func (c *transactionsCommand) form(title string, draft transaction.Draft, values transactionFlags, given map[string]bool) (transaction.Draft, error) {
 	accounts, err := c.accounts.List(false)
 	if err != nil {
@@ -540,6 +558,21 @@ func (c *transactionsCommand) edit(args []string) error {
 			return err
 		}
 	}
+	if draft, err = c.change(current, draft, changes, values, given); err != nil {
+		return err
+	}
+	updated, err := c.store.Update(current.ID, draft)
+	if err != nil {
+		return err
+	}
+	return c.print(ui.Success(label(updated, "updated")) + "\n")
+}
+
+// editForm opens the form with the values of a transaction.
+// change applies the options that were given to the draft of a
+// transaction that exists. changes holds the options values.check read.
+func (c *transactionsCommand) change(current transaction.View, draft, changes transaction.Draft, values transactionFlags, given map[string]bool) (transaction.Draft, error) {
+	var err error
 	if given["title"] {
 		draft.Title = changes.Title
 	}
@@ -558,7 +591,7 @@ func (c *transactionsCommand) edit(args []string) error {
 	if given["category"] {
 		found, err := c.findCategory(values.category)
 		if err != nil {
-			return err
+			return draft, err
 		}
 		draft.CategoryID = found.ID
 	}
@@ -566,29 +599,24 @@ func (c *transactionsCommand) edit(args []string) error {
 	if given["account"] {
 		found, cardID, err := c.findPlace(values.account, true)
 		if err != nil {
-			return err
+			return draft, err
 		}
 		if found.Archived() && (found.ID != current.AccountID || cardID != current.CardID) {
-			return fmt.Errorf("account not found: %s (it is archived; restore it first)", found.Code)
+			return draft, fmt.Errorf("account not found: %s (it is archived; restore it first)", found.Code)
 		}
 		if found.Currency != currency && !given["value"] {
-			return usageError(fmt.Sprintf("edit: give --value: the account %s is in %s, not in %s", found.Code, found.Currency, currency))
+			return draft, usageError(fmt.Sprintf("edit: give --value: the account %s is in %s, not in %s", found.Code, found.Currency, currency))
 		}
 		draft.AccountID, draft.CardID, currency = found.ID, cardID, found.Currency
 	}
 	if given["value"] {
 		if draft.Value, err = amount("edit", values.value, currency); err != nil {
-			return err
+			return draft, err
 		}
 	}
-	updated, err := c.store.Update(current.ID, draft)
-	if err != nil {
-		return err
-	}
-	return c.print(ui.Success(label(updated, "updated")) + "\n")
+	return draft, nil
 }
 
-// editForm opens the form with the values of a transaction.
 func (c *transactionsCommand) editForm(current transaction.View, draft transaction.Draft) (transaction.Draft, error) {
 	accounts, err := c.accounts.List(false)
 	if err != nil {
