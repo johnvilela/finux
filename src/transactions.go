@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 	"finux/src/money"
 	"finux/src/transaction"
@@ -35,8 +36,8 @@ func transactionsHelp() string {
   --tag <tags>          Transactions that have all these tags, for example "market weekly"
   --search <text>       Transactions whose title contains the text
   --date <date>         A year (2026), a month (11/2026 or 2026/11) or a date
-  --account <code>      Transactions of an account
-  --type <type>         ` + strings.Join(transaction.Types(), ", ") + `
+  --account <code>      Transactions of an account or a credit card
+  --type <type>         ` + strings.Join(transaction.Types(), ", ") + `, ` + transaction.Payment + `
 
 ` + green.Render("Options for add and edit:") + `
   --title <text>        Title, at most ` + strconv.Itoa(transaction.MaxTitle) + ` characters
@@ -46,7 +47,7 @@ func transactionsHelp() string {
                         (default: expense for a red category, income for a green one)
   --category <code>     Category; red is for expenses, green for incomes, grey for all
   --tags <tags>         Tags, for example "market weekly" or "#market #weekly"
-  --account <code>      Account of the transaction
+  --account <code>      Account or credit card of the transaction
   --date <date>         DD/MM/YYYY or YYYY/MM/DD (default: today)
 
 ` + green.Render("Options for add, for a transfer between accounts:") + `
@@ -68,6 +69,10 @@ or 17/11/2026.
 A transfer is two transactions, one in each account. A change or a delete of
 one of them also changes or deletes the other. A transfer keeps its type and
 its accounts. In a shell, write a tag without # or in quotes.
+
+A transaction of a credit card goes to a bill of the card. A credit card has
+no transfers. The payment of a bill is a transaction of the type payment: it
+comes from 'finux cc pay' and it cannot change. See 'finux cc --help'.
 `
 }
 
@@ -77,15 +82,19 @@ type transactionsCommand struct {
 	store      *transaction.Store
 	accounts   *account.Store
 	categories *category.Store
+	cards      *card.Store
 }
 
-// errOutdated means the database has no transactions table yet.
+// errOutdated means the database lacks tables or columns of this Finux.
 var errOutdated = errors.New("the database is out of date. Run 'finux init' to update it")
 
-// transactionsReady reports whether the database has the transactions
-// table. A database from an older Finux gets it with 'finux init'.
+// transactionsReady reports whether the database has the tables of the
+// transactions and the credit cards. A database from an older Finux
+// gets them with 'finux init'.
 func transactionsReady(db *gorm.DB) bool {
-	return db.Migrator().HasTable(&transaction.Transaction{})
+	migrator := db.Migrator()
+	return migrator.HasTable(&transaction.Transaction{}) && migrator.HasTable(&card.Card{}) && migrator.HasTable(&card.Bill{}) &&
+		migrator.HasColumn(&transaction.Transaction{}, "card_id") && migrator.HasColumn(&transaction.Transaction{}, "bill_id")
 }
 
 func runTransactions(args []string, io streams) int {
@@ -121,6 +130,7 @@ func runTransactions(args []string, io streams) int {
 		return exitStatus(io, "transactions", err)
 	}
 	command.store, command.accounts, command.categories = transaction.NewStore(db), account.NewStore(db), category.NewStore(db)
+	command.cards = card.NewStore(db)
 	return exitStatus(io, "transactions", handler(rest))
 }
 
@@ -172,6 +182,22 @@ func (c *transactionsCommand) resolve(command, ref, title string) (transaction.V
 	return c.choose(title, views)
 }
 
+// findPlace finds the account or the credit card of a transaction by
+// code or id. An account wins when the two have the same id. A credit
+// card comes back as an account with the ID 0, and its own id.
+func (c *transactionsCommand) findPlace(ref string, archived bool) (account.Account, uint, error) {
+	found, err := c.accounts.Find(ref, archived)
+	if !errors.Is(err, account.ErrNotFound) {
+		return found, 0, err
+	}
+	owner, err := c.cards.Find(ref, archived)
+	if errors.Is(err, card.ErrNotFound) {
+		return found, 0, fmt.Errorf("account not found: %s", ref)
+	}
+	shown := account.Account{Name: owner.Name, Code: owner.Code, Color: owner.Color, Currency: owner.Currency, DeletedAt: owner.DeletedAt}
+	return shown, owner.ID, err
+}
+
 // findAccount finds an account by code or id. Archived accounts are
 // found only when archived is true.
 func (c *transactionsCommand) findAccount(ref string, archived bool) (account.Account, error) {
@@ -204,7 +230,7 @@ func (c *transactionsCommand) list(args []string) error {
 		return err
 	}
 	filter := transaction.Filter{Title: strings.TrimSpace(search), Type: strings.ToLower(strings.TrimSpace(kind))}
-	if given["type"] && !transaction.ValidType(filter.Type) {
+	if given["type"] && !transaction.ValidType(filter.Type) && filter.Type != transaction.Payment {
 		return usageError(fmt.Sprintf("list: unknown type %q: use one of %s", kind, strings.Join(transaction.Types(), ", ")))
 	}
 	if given["date"] {
@@ -227,7 +253,7 @@ func (c *transactionsCommand) list(args []string) error {
 		filter.Category = found.Code
 	}
 	if given["account"] {
-		found, err := c.findAccount(accountRef, true)
+		found, _, err := c.findPlace(accountRef, true)
 		if err != nil {
 			return err
 		}
@@ -347,7 +373,7 @@ func (c *transactionsCommand) add(args []string) error {
 		return err
 	}
 	// A new transaction has the date of today.
-	draft := transaction.Draft{Date: transaction.Today()}
+	draft := transaction.Draft{Date: today()}
 	if err := values.check("add", given, &draft); err != nil {
 		return err
 	}
@@ -364,7 +390,7 @@ func (c *transactionsCommand) add(args []string) error {
 
 	var from, to account.Account
 	if given["account"] {
-		if from, err = c.findAccount(values.account, false); err != nil {
+		if from, draft.CardID, err = c.findPlace(values.account, false); err != nil {
 			return err
 		}
 		draft.AccountID = from.ID
@@ -437,7 +463,11 @@ func (c *transactionsCommand) form(title string, draft transaction.Draft, values
 	if err != nil {
 		return draft, err
 	}
-	if len(accounts) == 0 {
+	cards, err := c.cards.List(false)
+	if err != nil {
+		return draft, err
+	}
+	if len(accounts)+len(cards) == 0 {
 		return draft, notice("No accounts yet. Run 'finux ac add'.")
 	}
 	categories, err := c.categories.List()
@@ -464,7 +494,7 @@ func (c *transactionsCommand) form(title string, draft transaction.Draft, values
 	}
 	form, err := program(ui.NewTransactionForm(ui.TransactionFormOptions{
 		Title: title, Initial: draft, Value: values.value, Received: values.received,
-		Accounts: accounts, Categories: categories, Titles: titles, Tags: tags, Preset: preset,
+		Accounts: accounts, Cards: cards, Categories: categories, Titles: titles, Tags: tags, Preset: preset, Today: today(),
 	}))
 	if err != nil {
 		return draft, err
@@ -501,6 +531,9 @@ func (c *transactionsCommand) edit(args []string) error {
 	if err != nil {
 		return err
 	}
+	if current.Type == transaction.Payment {
+		return errors.New("a payment cannot change: delete it to open the bill again")
+	}
 	draft := transaction.DraftOf(current.Transaction)
 	if len(given) == 0 {
 		if draft, err = c.editForm(current, draft); err != nil {
@@ -531,17 +564,17 @@ func (c *transactionsCommand) edit(args []string) error {
 	}
 	currency := current.Account.Currency
 	if given["account"] {
-		found, err := c.findAccount(values.account, true)
+		found, cardID, err := c.findPlace(values.account, true)
 		if err != nil {
 			return err
 		}
-		if found.Archived() && found.ID != current.AccountID {
+		if found.Archived() && (found.ID != current.AccountID || cardID != current.CardID) {
 			return fmt.Errorf("account not found: %s (it is archived; restore it first)", found.Code)
 		}
 		if found.Currency != currency && !given["value"] {
 			return usageError(fmt.Sprintf("edit: give --value: the account %s is in %s, not in %s", found.Code, found.Currency, currency))
 		}
-		draft.AccountID, currency = found.ID, found.Currency
+		draft.AccountID, draft.CardID, currency = found.ID, cardID, found.Currency
 	}
 	if given["value"] {
 		if draft.Value, err = amount("edit", values.value, currency); err != nil {
@@ -561,9 +594,16 @@ func (c *transactionsCommand) editForm(current transaction.View, draft transacti
 	if err != nil {
 		return draft, err
 	}
-	// An archived account stays in the list of its transaction.
-	if !slices.ContainsFunc(accounts, func(a account.Account) bool { return a.ID == current.AccountID }) {
+	cards, err := c.cards.List(false)
+	if err != nil {
+		return draft, err
+	}
+	// An archived account or card stays in the list of its transaction.
+	switch {
+	case current.CardID == 0 && !slices.ContainsFunc(accounts, func(a account.Account) bool { return a.ID == current.AccountID }):
 		accounts = append(accounts, current.Account)
+	case current.CardID != 0 && current.Card != nil && !slices.ContainsFunc(cards, func(c card.Card) bool { return c.ID == current.CardID }):
+		cards = append(cards, *current.Card)
 	}
 	categories, err := c.categories.List()
 	if err != nil {
@@ -576,7 +616,7 @@ func (c *transactionsCommand) editForm(current transaction.View, draft transacti
 	form, err := program(ui.NewTransactionForm(ui.TransactionFormOptions{
 		Title: fmt.Sprintf("Edit transaction %d", current.ID), Initial: draft, Edit: true,
 		Value:    money.Input(current.Value(), current.Account.Currency),
-		Accounts: accounts, Categories: categories, Titles: titles, Tags: tags,
+		Accounts: accounts, Cards: cards, Categories: categories, Titles: titles, Tags: tags,
 	}))
 	if err != nil {
 		return draft, err
@@ -604,6 +644,9 @@ func (c *transactionsCommand) delete(args []string) error {
 		question := fmt.Sprintf("Delete transaction %d (%s) permanently?", current.ID, current.Title)
 		if current.PairID != 0 {
 			question = fmt.Sprintf("Delete the transfer %s (transactions %d and %d) permanently?", current.Title, current.ID, current.PairID)
+		}
+		if current.Type == transaction.Payment {
+			question = fmt.Sprintf("Delete the payment %d (%s)? The bill opens again.", current.ID, current.Title)
 		}
 		confirm, err := program(ui.NewConfirm(question, "Delete permanently", true))
 		if err != nil {

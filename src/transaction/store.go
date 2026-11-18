@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
+	"finux/src/money"
 
 	"gorm.io/gorm"
 )
@@ -40,6 +42,71 @@ func (s *Store) account(id uint, archived bool) (account.Account, error) {
 		return found, err
 	}
 	return found, nil
+}
+
+// card loads a credit card. An archived card is found only when
+// archived is true.
+func (s *Store) card(id uint, archived bool) (card.Card, error) {
+	query := s.db
+	if archived {
+		query = query.Unscoped()
+	}
+	var found card.Card
+	if err := query.Take(&found, id).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return found, fmt.Errorf("credit card not found: id %d", id)
+	} else if err != nil {
+		return found, err
+	}
+	return found, nil
+}
+
+// locked is the error for a change in a bill that is paid.
+func locked(owner card.Card, bill card.Bill) error {
+	return fmt.Errorf("bill %s of %s is paid: delete its payment first", card.FormatPeriod(bill.Period), owner.Code)
+}
+
+// unlocked checks that the bill with the id is not paid.
+func (s *Store) unlocked(billID uint) error {
+	bill, err := card.NewStore(s.db).Bill(billID)
+	if errors.Is(err, card.ErrBillNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if !bill.IsPaid() {
+		return nil
+	}
+	owner, err := s.card(bill.CardID, true)
+	if err != nil {
+		return err
+	}
+	return locked(owner, bill)
+}
+
+// billFor returns the bill of a card for a date. It creates the bill
+// if necessary. A paid bill is an error.
+func (s *Store) billFor(owner card.Card, date string) (card.Bill, error) {
+	bill, err := card.NewStore(s.db).BillFor(owner, date)
+	if err != nil {
+		return bill, err
+	}
+	if bill.IsPaid() {
+		return bill, locked(owner, bill)
+	}
+	return bill, nil
+}
+
+// place checks that a draft has an account or a credit card.
+func place(draft Draft) error {
+	switch {
+	case draft.AccountID != 0 && draft.CardID != 0:
+		return errors.New("a transaction has an account or a credit card, not the two")
+	case draft.AccountID == 0 && draft.CardID == 0:
+		return errors.New("account is required")
+	case draft.CardID != 0 && draft.Type == Transfer:
+		return errors.New("a credit card cannot have a transfer")
+	}
+	return nil
 }
 
 // category loads the category of a draft and checks that the type of
@@ -74,8 +141,27 @@ func (s *Store) Create(draft Draft) (Transaction, error) {
 	if err := draft.clean(); err != nil {
 		return Transaction{}, err
 	}
-	if draft.AccountID == 0 {
-		return Transaction{}, errors.New("account is required")
+	if err := place(draft); err != nil {
+		return Transaction{}, err
+	}
+	created := Transaction{
+		Title: draft.Title, Description: draft.Description, Type: draft.Type, Amount: signed(draft.Type, draft.Value),
+		AccountID: draft.AccountID, CardID: draft.CardID, CategoryID: draft.CategoryID, Date: draft.Date, Tags: draft.Tags,
+	}
+	if draft.CardID != 0 {
+		owner, err := s.card(draft.CardID, false)
+		if err != nil {
+			return Transaction{}, err
+		}
+		if _, err := s.category(draft); err != nil {
+			return Transaction{}, err
+		}
+		bill, err := s.billFor(owner, draft.Date)
+		if err != nil {
+			return Transaction{}, err
+		}
+		created.BillID = bill.ID
+		return created, s.db.Create(&created).Error
 	}
 	from, err := s.account(draft.AccountID, false)
 	if err != nil {
@@ -83,10 +169,6 @@ func (s *Store) Create(draft Draft) (Transaction, error) {
 	}
 	if _, err := s.category(draft); err != nil {
 		return Transaction{}, err
-	}
-	created := Transaction{
-		Title: draft.Title, Description: draft.Description, Type: draft.Type, Amount: signed(draft.Type, draft.Value),
-		AccountID: draft.AccountID, CategoryID: draft.CategoryID, Date: draft.Date, Tags: draft.Tags,
 	}
 	if draft.Type != Transfer {
 		if draft.ToAccountID != 0 {
@@ -152,20 +234,42 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 	if err != nil {
 		return Transaction{}, err
 	}
+	if current.Type == Payment {
+		return Transaction{}, errors.New("a payment cannot change: delete it to open the bill again")
+	}
 	if err := draft.clean(); err != nil {
 		return Transaction{}, err
 	}
 	if (current.Type == Transfer) != (draft.Type == Transfer) {
 		return Transaction{}, errors.New("a transfer cannot become an expense or an income, or the opposite: delete the transaction and create a new one")
 	}
-	if current.Type == Transfer && draft.AccountID != current.AccountID {
+	if current.Type == Transfer && (draft.AccountID != current.AccountID || draft.CardID != 0) {
 		return Transaction{}, errors.New("a transfer cannot change its accounts: delete the transaction and create a new one")
+	}
+	if err := place(draft); err != nil {
+		return Transaction{}, err
 	}
 	if _, err := s.category(draft); err != nil {
 		return Transaction{}, err
 	}
-	// The account a transaction already has can be archived.
-	if _, err := s.account(draft.AccountID, draft.AccountID == current.AccountID); err != nil {
+	if current.CardID != 0 {
+		if err := s.unlocked(current.BillID); err != nil {
+			return Transaction{}, err
+		}
+	}
+	// The account or the card a transaction already has can be archived.
+	var billID uint
+	if draft.CardID != 0 {
+		owner, err := s.card(draft.CardID, draft.CardID == current.CardID)
+		if err != nil {
+			return Transaction{}, err
+		}
+		bill, err := s.billFor(owner, draft.Date)
+		if err != nil {
+			return Transaction{}, err
+		}
+		billID = bill.ID
+	} else if _, err := s.account(draft.AccountID, draft.AccountID == current.AccountID); err != nil {
 		return Transaction{}, err
 	}
 
@@ -175,7 +279,8 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 	}
 	current.Title, current.Description, current.Type, current.Amount = draft.Title, draft.Description, draft.Type, amount
 	current.AccountID, current.CategoryID, current.Date, current.Tags = draft.AccountID, draft.CategoryID, draft.Date, draft.Tags
-	columns := append([]string{"Type", "Amount", "AccountID"}, shared...)
+	current.CardID, current.BillID = draft.CardID, billID
+	columns := append([]string{"Type", "Amount", "AccountID", "CardID", "BillID"}, shared...)
 	if current.PairID == 0 {
 		return current, s.db.Model(&current).Select(columns).Updates(&current).Error
 	}
@@ -208,11 +313,19 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 }
 
 // Delete removes a transaction permanently. For a transfer it removes
-// the two sides.
+// the two sides. For a payment it opens the bill again.
 func (s *Store) Delete(id uint) error {
 	current, err := s.take(id)
 	if err != nil {
 		return err
+	}
+	if current.Type == Payment {
+		return s.Unpay(current.BillID)
+	}
+	if current.CardID != 0 {
+		if err := s.unlocked(current.BillID); err != nil {
+			return err
+		}
 	}
 	ids := []uint{current.ID}
 	if current.PairID != 0 {
@@ -221,7 +334,14 @@ func (s *Store) Delete(id uint) error {
 	return s.db.Delete(&Transaction{}, ids).Error
 }
 
-// views adds the accounts and the categories to transactions.
+// asAccount shows a credit card as an account, for the screens that
+// show where a transaction is.
+func asAccount(owner card.Card) account.Account {
+	return account.Account{Name: owner.Name, Code: owner.Code, Color: owner.Color, Currency: owner.Currency, DeletedAt: owner.DeletedAt}
+}
+
+// views adds the accounts, the cards, the bills and the categories to
+// transactions.
 func (s *Store) views(transactions []Transaction) ([]View, error) {
 	var accounts []account.Account
 	if err := s.db.Unscoped().Find(&accounts).Error; err != nil {
@@ -238,6 +358,22 @@ func (s *Store) views(transactions []Transaction) ([]View, error) {
 	categoryByID := map[uint]category.Category{}
 	for _, current := range categories {
 		categoryByID[current.ID] = current
+	}
+	var cards []card.Card
+	if err := s.db.Unscoped().Find(&cards).Error; err != nil {
+		return nil, err
+	}
+	cardByID := map[uint]card.Card{}
+	for _, current := range cards {
+		cardByID[current.ID] = current
+	}
+	var bills []card.Bill
+	if err := s.db.Find(&bills).Error; err != nil {
+		return nil, err
+	}
+	billByID := map[uint]card.Bill{}
+	for _, current := range bills {
+		billByID[current.ID] = current
 	}
 	// The other side of a transfer can be outside the given transactions.
 	var pairIDs []uint
@@ -261,6 +397,18 @@ func (s *Store) views(transactions []Transaction) ([]View, error) {
 		views[i] = View{Transaction: current, Account: accountByID[current.AccountID], Category: categoryByID[current.CategoryID]}
 		if other, ok := accountByID[pairAccount[current.PairID]]; ok && current.PairID != 0 {
 			views[i].Other = &other
+		}
+		bill, ok := billByID[current.BillID]
+		if !ok || current.BillID == 0 {
+			continue
+		}
+		owner := cardByID[bill.CardID]
+		views[i].Bill, views[i].Card = &bill, &owner
+		shown := asAccount(owner)
+		if current.Type == Payment {
+			views[i].Other = &shown
+		} else {
+			views[i].Account = shown
 		}
 	}
 	return views, nil
@@ -341,7 +489,7 @@ func (s *Store) CountByCategory(categoryID uint) (int64, error) {
 // color would not accept. It tells if the category can change its color.
 func (s *Store) Mismatched(categoryID uint, color string) (int64, error) {
 	var accepted []string
-	for _, kind := range Types() {
+	for _, kind := range append(Types(), Payment) {
 		if Accepts(kind, color) {
 			accepted = append(accepted, kind)
 		}
@@ -355,8 +503,8 @@ func (s *Store) MoveCategory(from, to uint) error {
 	return s.db.Model(&Transaction{}).Where("category_id = ?", from).Update("category_id", to).Error
 }
 
-// AccountUsage returns the number of expenses and incomes of an account
-// and the number of its transfer sides.
+// AccountUsage returns the number of expenses, incomes and payments of
+// an account and the number of its transfer sides.
 func (s *Store) AccountUsage(accountID uint) (plain, transfers int64, err error) {
 	query := s.db.Model(&Transaction{}).Where("account_id = ?", accountID)
 	if err = query.Session(&gorm.Session{}).Where("type <> ?", Transfer).Count(&plain).Error; err != nil {
@@ -388,7 +536,198 @@ func (s *Store) PurgeAccount(deleted account.Account, other category.Category) e
 				return err
 			}
 		}
+		// A bill that the account paid stays paid, without its payment.
+		payments := tx.Model(&Transaction{}).Select("id").Where("account_id = ? AND type = ?", deleted.ID, Payment)
+		if err := tx.Model(&card.Bill{}).Where("payment_id IN (?)", payments).Update("payment_id", 0).Error; err != nil {
+			return err
+		}
 		return tx.Where("account_id = ?", deleted.ID).Delete(&Transaction{}).Error
+	})
+}
+
+// ByBill returns the transactions of a bill, the newest date first.
+// The payment of the bill is not one of them.
+func (s *Store) ByBill(billID uint) ([]View, error) {
+	var transactions []Transaction
+	err := s.db.Where("bill_id = ? AND card_id <> 0", billID).Order("date DESC, id DESC").Find(&transactions).Error
+	if err != nil {
+		return nil, err
+	}
+	return s.views(transactions)
+}
+
+// transferCategory returns the category of a payment.
+func (s *Store) transferCategory() (category.Category, error) {
+	var found category.Category
+	err := s.db.Where("code = ?", category.TransferCode).Take(&found).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return found, fmt.Errorf("a payment uses the category %s, but it does not exist. Run 'finux reseed' to add it", category.TransferCode)
+	case err != nil:
+		return found, err
+	case found.Color != "grey":
+		return found, fmt.Errorf("a payment uses the category %s, but it is not grey. Run 'finux ct edit %s --color grey'", category.TransferCode, category.TransferCode)
+	}
+	return found, nil
+}
+
+// PayBill pays a bill from an account on a date. The value 0 pays the
+// total. A smaller value is a partial payment: the bill is paid and
+// the remaining value goes to the next bill that is not paid. It
+// returns the payment transaction. A bill that owes nothing gets no
+// transaction: its credit goes to the next bill.
+func (s *Store) PayBill(billID, accountID uint, value int64, date string) (Transaction, error) {
+	cards := card.NewStore(s.db)
+	bill, err := cards.Bill(billID)
+	if err != nil {
+		return Transaction{}, err
+	}
+	owner, err := s.card(bill.CardID, true)
+	if err != nil {
+		return Transaction{}, err
+	}
+	name := "bill " + card.FormatPeriod(bill.Period) + " of " + owner.Code
+	if date, err = ParseDate(date); err != nil {
+		return Transaction{}, err
+	}
+	total := bill.Total()
+	switch {
+	case bill.IsPaid():
+		return Transaction{}, fmt.Errorf("%s is already paid", name)
+	case date <= bill.ClosesOn:
+		return Transaction{}, fmt.Errorf("%s is still open: it closes on %s", name, FormatDate(bill.ClosesOn))
+	case value < 0:
+		return Transaction{}, errors.New("value must be more than zero")
+	case value > max(total, 0):
+		return Transaction{}, fmt.Errorf("value is more than the total of the bill: %s", money.Format(max(total, 0), owner.Currency))
+	}
+	var payment Transaction
+	if total > 0 {
+		if value == 0 {
+			value = total
+		}
+		from, err := s.account(accountID, false)
+		if err != nil {
+			return Transaction{}, err
+		}
+		if from.Currency != owner.Currency {
+			return Transaction{}, fmt.Errorf("account %s is in %s and credit card %s is in %s: pay from an account in %s",
+				from.Code, from.Currency, owner.Code, owner.Currency, owner.Currency)
+		}
+		transfer, err := s.transferCategory()
+		if err != nil {
+			return Transaction{}, err
+		}
+		payment = Transaction{
+			Title: "Payment " + owner.Code + " " + card.FormatPeriod(bill.Period), Type: Payment, Amount: -value,
+			AccountID: from.ID, CategoryID: transfer.ID, Date: date, BillID: bill.ID,
+		}
+	}
+	bill.PaidOn, bill.Paid, bill.Remaining = date, value, total-value
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if payment.Type != "" {
+			if err := tx.Create(&payment).Error; err != nil {
+				return err
+			}
+			bill.PaymentID = payment.ID
+		}
+		if bill.Remaining != 0 {
+			// The remaining value goes to the next bill that is not paid.
+			bills, period := card.NewStore(tx), bill.Period
+			for {
+				period = card.NextPeriod(period)
+				next, err := bills.BillOf(owner, period)
+				if err != nil {
+					return err
+				}
+				if next.IsPaid() {
+					continue
+				}
+				bill.CarriedTo = next.ID
+				if err := tx.Model(&next).Update("carried", next.Carried+bill.Remaining).Error; err != nil {
+					return err
+				}
+				break
+			}
+		}
+		return tx.Model(&bill).Select("PaidOn", "Paid", "Remaining", "CarriedTo", "PaymentID").Updates(&bill).Error
+	})
+	return payment, err
+}
+
+// Unpay deletes the payment of a bill: the bill is not paid again and
+// the value it sent to the next bill comes back.
+func (s *Store) Unpay(billID uint) error {
+	cards := card.NewStore(s.db)
+	bill, err := cards.Bill(billID)
+	if err != nil {
+		return err
+	}
+	owner, err := s.card(bill.CardID, true)
+	if err != nil {
+		return err
+	}
+	if !bill.IsPaid() {
+		return fmt.Errorf("bill %s of %s is not paid", card.FormatPeriod(bill.Period), owner.Code)
+	}
+	var next card.Bill
+	if bill.CarriedTo != 0 {
+		if next, err = cards.Bill(bill.CarriedTo); err != nil {
+			return err
+		}
+		if next.IsPaid() {
+			return fmt.Errorf("%w (it has the remaining value of bill %s)", locked(owner, next), card.FormatPeriod(bill.Period))
+		}
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if bill.CarriedTo != 0 {
+			if err := tx.Model(&next).Update("carried", next.Carried-bill.Remaining).Error; err != nil {
+				return err
+			}
+		}
+		if bill.PaymentID != 0 {
+			if err := tx.Delete(&Transaction{}, bill.PaymentID).Error; err != nil {
+				return err
+			}
+		}
+		bill.PaidOn, bill.Paid, bill.Remaining, bill.CarriedTo, bill.PaymentID = "", 0, 0, 0, 0
+		return tx.Model(&bill).Select("PaidOn", "Paid", "Remaining", "CarriedTo", "PaymentID").Updates(&bill).Error
+	})
+}
+
+// CardUsage returns the number of transactions of a credit card and
+// the number of payments of its bills.
+func (s *Store) CardUsage(cardID uint) (purchases, payments int64, err error) {
+	if err = s.db.Model(&Transaction{}).Where("card_id = ?", cardID).Count(&purchases).Error; err != nil {
+		return 0, 0, err
+	}
+	bills := s.db.Model(&card.Bill{}).Select("id").Where("card_id = ?", cardID)
+	err = s.db.Model(&Transaction{}).Where("type = ? AND bill_id IN (?)", Payment, bills).Count(&payments).Error
+	return purchases, payments, err
+}
+
+// PurgeCard deletes the transactions and the bills of a credit card
+// that will be deleted. Each payment of its bills stays in its account:
+// it becomes an expense of the category other, with a note in its
+// description.
+func (s *Store) PurgeCard(deleted card.Card, other category.Category) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var payments []Transaction
+		bills := tx.Model(&card.Bill{}).Select("id").Where("card_id = ?", deleted.ID)
+		if err := tx.Where("type = ? AND bill_id IN (?)", Payment, bills).Find(&payments).Error; err != nil {
+			return err
+		}
+		for _, payment := range payments {
+			payment.Type, payment.BillID, payment.CategoryID = Expense, 0, other.ID
+			payment.Description = withNote(payment.Description, "Payment of "+deleted.Code+" (deleted card)")
+			if err := tx.Model(&payment).Select("Type", "BillID", "CategoryID", "Description").Updates(&payment).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("card_id = ?", deleted.ID).Delete(&Transaction{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("card_id = ?", deleted.ID).Delete(&card.Bill{}).Error
 	})
 }
 

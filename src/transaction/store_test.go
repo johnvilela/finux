@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 	"finux/src/storage"
 )
@@ -16,15 +17,17 @@ type fixture struct {
 	store      *Store
 	accounts   *account.Store
 	categories *category.Store
+	cards      *card.Store
 	// ids by code
 	account  map[string]uint
 	category map[string]uint
+	card     map[string]uint
 }
 
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "finux.db")
-	if _, err := storage.Init(path, &account.Account{}, &category.Category{}, &Transaction{}); err != nil {
+	if _, err := storage.Init(path, &account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &Transaction{}); err != nil {
 		t.Fatal(err)
 	}
 	db, err := storage.Open(path)
@@ -33,7 +36,17 @@ func newFixture(t *testing.T) fixture {
 	}
 	f := fixture{
 		store: NewStore(db), accounts: account.NewStore(db), categories: category.NewStore(db),
-		account: map[string]uint{}, category: map[string]uint{},
+		cards:   card.NewStore(db),
+		account: map[string]uint{}, category: map[string]uint{}, card: map[string]uint{},
+	}
+	for _, current := range []card.Card{
+		{Name: "Visa Gold", Code: "VISA", Color: "blue", Currency: "BRL", Limit: 500000, ClosingDay: 25, DueDay: 5},
+		{Name: "Amex", Code: "AMEX", Color: "teal", Currency: "USD", Limit: 200000, ClosingDay: 3, DueDay: 10},
+	} {
+		if err := f.cards.Create(&current); err != nil {
+			t.Fatal(err)
+		}
+		f.card[current.Code] = current.ID
 	}
 	for _, current := range []account.Account{
 		{Name: "Banco Inter", Code: "INTER", Color: "orange", Currency: "BRL", OpeningBalance: 100000},

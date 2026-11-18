@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 
 	tea "charm.land/bubbletea/v2"
 
 	"finux/src/category"
+	"finux/src/transaction"
 	"finux/src/ui"
 
 	"gorm.io/gorm"
@@ -100,6 +102,15 @@ func pick(title, singular, plural string, entries []ui.Entry) (int, error) {
 		return 0, cancelled
 	}
 	return index, nil
+}
+
+// today returns the current date as YYYY-MM-DD. The FINUX_TODAY
+// environment variable replaces it, for tests and demonstrations.
+func today() string {
+	if date, err := transaction.ParseDate(os.Getenv("FINUX_TODAY")); err == nil {
+		return date
+	}
+	return transaction.Today()
 }
 
 // plural returns a count with its noun: "1 transaction", "2 transactions".

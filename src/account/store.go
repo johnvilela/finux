@@ -45,12 +45,21 @@ func (s *Store) prepare(account *Account) error {
 	return nil
 }
 
-// CodeTaken reports whether an account other than exceptID has the code.
-// Archived accounts keep their codes.
+// CodeTaken reports whether an account other than exceptID, or a credit
+// card, has the code. Archived records keep their codes.
 func (s *Store) CodeTaken(value string, exceptID uint) (bool, error) {
+	value = code.Normalize(value)
 	var count int64
-	err := s.db.Unscoped().Model(&Account{}).
-		Where("code = ? AND id <> ?", code.Normalize(value), exceptID).Count(&count).Error
+	err := s.db.Unscoped().Model(&Account{}).Where("code = ? AND id <> ?", value, exceptID).Count(&count).Error
+	if err != nil || count > 0 {
+		return count > 0, err
+	}
+	// The cards table belongs to the card package; a database from
+	// before that package does not have it.
+	if !s.db.Migrator().HasTable("cards") {
+		return false, nil
+	}
+	err = s.db.Table("cards").Where("code = ?", value).Count(&count).Error
 	return count > 0, err
 }
 

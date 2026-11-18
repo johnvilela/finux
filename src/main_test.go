@@ -28,6 +28,7 @@ Commands:
   accounts, ac      Manage accounts
   categories, ct    Manage categories
   transactions, tx  Manage transactions
+  credit-card, cc   Manage credit cards
   help              Show this help
 
 Options:

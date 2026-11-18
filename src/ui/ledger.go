@@ -407,7 +407,7 @@ func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth
 	account += strings.Repeat(" ", max(0, accountWidth-lipgloss.Width(account)))
 	amount := money.Format(view.Amount, view.Account.Currency)
 	amount = strings.Repeat(" ", max(0, amountWidth-lipgloss.Width(amount))) + typeStyle(view.Type).Render(amount)
-	if view.Type == transaction.Transfer {
+	if transaction.Neutral(view.Type) {
 		amount = styleDim.Render(amount)
 	}
 	return marker + sign + " " + text + "  " + group + "  " + styleDim.Render(account) + "  " + amount

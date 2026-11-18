@@ -56,6 +56,8 @@ func run(args []string, io streams) int {
 			return runCategories(args[1:], io)
 		case "transactions", "tx":
 			return runTransactions(args[1:], io)
+		case "credit-card", "credit-cards", "cc":
+			return runCreditCards(args[1:], io)
 		}
 	}
 	if len(args) > 1 || len(args) == 1 && !isHelp(args[0]) {
@@ -99,6 +101,6 @@ func welcome() string {
 	}
 	return strings.Join(lines, "\n") + "\n\nYour personal finance manager\n\n" +
 		green.Render("Usage:") + " finux [command]\n\n" +
-		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  help              Show this help\n\n" +
+		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  help              Show this help\n\n" +
 		green.Render("Options:") + "\n  -h, --help        Show this help\n"
 }

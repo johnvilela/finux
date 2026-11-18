@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 )
 
@@ -20,6 +21,9 @@ const (
 	Expense  = "expense"
 	Income   = "income"
 	Transfer = "transfer"
+	// Payment is the payment of a credit card bill from an account.
+	// Only PayBill creates it.
+	Payment = "payment"
 )
 
 const (
@@ -33,43 +37,56 @@ const (
 	displayDate = "02/01/2006"
 )
 
-// Types returns the transaction types in display order.
+// Types returns the transaction types that a user can choose, in
+// display order.
 func Types() []string { return []string{Expense, Income, Transfer} }
 
-// ValidType reports whether kind is a transaction type.
+// Neutral reports whether a type moves money without being an expense
+// or an income: a transfer or a payment of a bill.
+func Neutral(kind string) bool { return kind == Transfer || kind == Payment }
+
+// ValidType reports whether kind is a type that a user can choose.
 func ValidType(kind string) bool {
 	return kind == Expense || kind == Income || kind == Transfer
 }
 
 // Accepts reports whether a transaction of the type kind can use a
 // category of the given color. Red is for expenses, green for incomes
-// and grey for all types. A transfer uses only grey.
+// and grey for all types. A transfer and a payment use only grey.
 func Accepts(kind, color string) bool {
 	switch kind {
 	case Expense:
 		return color == "red" || color == "grey"
 	case Income:
 		return color == "green" || color == "grey"
-	case Transfer:
+	case Transfer, Payment:
 		return color == "grey"
 	}
 	return false
 }
 
-// Transaction is one movement of money in an account. A transfer between
-// accounts is two transactions that point to each other with PairID: one
-// that takes the money out of an account and one that puts it in the
-// other account.
+// Transaction is one movement of money in an account, or one purchase
+// or refund on a credit card. It has an account or a card, never the
+// two. A transfer between accounts is two transactions that point to
+// each other with PairID: one that takes the money out of an account
+// and one that puts it in the other account.
 type Transaction struct {
 	ID          uint   `gorm:"primaryKey"`
 	Title       string `gorm:"size:60"`
 	Description string `gorm:"size:200"`
-	// Amount is in minor units of the currency of the account. It is
-	// negative when money leaves the account.
+	// Amount is in minor units of the currency of the account or the
+	// card. It is negative when money leaves the account, or for a
+	// purchase on a card.
 	Amount     int64
 	Type       string
 	CategoryID uint `gorm:"index"`
-	AccountID  uint `gorm:"index"`
+	// AccountID is 0 for a transaction of a credit card.
+	AccountID uint `gorm:"index"`
+	// CardID is the credit card, or 0 for a transaction of an account.
+	CardID uint `gorm:"index"`
+	// BillID is the bill of a card transaction, or the bill that a
+	// payment pays. It is 0 for the other transactions.
+	BillID uint `gorm:"index"`
 	// Date is the day of the transaction as YYYY-MM-DD.
 	Date string `gorm:"size:10;index"`
 	// Tags holds the tags separated by one space, for example
@@ -98,11 +115,19 @@ func (t Transaction) TagList() []string { return strings.Fields(t.Tags) }
 // View is a transaction with the records it points to.
 type View struct {
 	Transaction
+	// Account is where the transaction is. For a transaction of a
+	// credit card it holds the name, code, color and currency of the
+	// card, with the ID 0.
 	Account  account.Account
 	Category category.Category
-	// Other is the account on the other side of a transfer. It is nil
+	// Other is the account on the other side of a transfer, or the
+	// credit card that a payment pays, shown as an account. It is nil
 	// for an expense or an income.
 	Other *account.Account
+	// Card is the credit card of a card transaction or of a payment.
+	Card *card.Card
+	// Bill is the bill of a card transaction or of a payment.
+	Bill *card.Bill
 }
 
 // Draft holds the values of a transaction to create or to change.
@@ -115,6 +140,8 @@ type Draft struct {
 	AccountID, CategoryID uint
 	// Date is YYYY-MM-DD. Tags is text such as "#market #weekly".
 	Date, Tags string
+	// CardID is the credit card, in place of AccountID.
+	CardID uint
 	// ToAccountID is the account that receives a transfer.
 	ToAccountID uint
 	// Received is the amount the other account receives, for a transfer
@@ -126,7 +153,7 @@ type Draft struct {
 func DraftOf(t Transaction) Draft {
 	return Draft{
 		Title: t.Title, Description: t.Description, Type: t.Type, Value: t.Value(),
-		AccountID: t.AccountID, CategoryID: t.CategoryID, Date: t.Date, Tags: t.Tags,
+		AccountID: t.AccountID, CardID: t.CardID, CategoryID: t.CategoryID, Date: t.Date, Tags: t.Tags,
 	}
 }
 

@@ -61,7 +61,7 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	if got := must(nil); !strings.Contains(got, "\n  seed              Add sample data to the development database\n") {
 		t.Fatalf("dev help lacks the seed command:\n%s", got)
 	}
-	created := "✓ Development database created: " + database + " (8 accounts, 17 transactions)\n"
+	created := "✓ Development database created: " + database + " (8 accounts, 2 credit cards, 24 transactions)\n"
 	if got := must(nil, "seed"); got != created {
 		t.Fatalf("first seed = %q, want %q", got, created)
 	}
@@ -83,9 +83,29 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	// The sample transactions have all types, tags and a transfer between
 	// two currencies.
 	transactions := must(nil, "tx")
-	for _, want := range []string{"Salary", "Weekly market", "Card payment", "Travel money", "FOOD", "XFER", "-R$ 550,00", "$100.00", "\n17 transactions\n"} {
+	for _, want := range []string{"Salary", "Weekly market", "Card payment", "Travel money", "FOOD", "XFER", "-R$ 550,00", "$100.00", "Payment VISA", "\n24 transactions\n"} {
 		if !strings.Contains(transactions, want) {
 			t.Errorf("seeded transactions lack %q:\n%s", want, transactions)
+		}
+	}
+	// The sample credit cards have an open bill, a late bill with the
+	// rest of a partial payment, and a paid bill.
+	cards := must(nil, "cc")
+	for _, want := range []string{"VISA", "Visa Gold", "AMEX", "2 credit cards\n"} {
+		if !strings.Contains(cards, want) {
+			t.Errorf("seeded credit cards lack %q:\n%s", want, cards)
+		}
+	}
+	visa := must(nil, "cc", "VISA")
+	for _, want := range []string{"is late", "Open bill", "Streaming", "Total  R$ 277,80\n"} {
+		if !strings.Contains(visa, want) {
+			t.Errorf("seeded card details lack %q:\n%s", want, visa)
+		}
+	}
+	bills := must(nil, "cc", "bills", "VISA")
+	for _, want := range []string{"open", "late", "paid", "R$ 300,00", "3 bills\n"} {
+		if !strings.Contains(bills, want) {
+			t.Errorf("seeded bills lack %q:\n%s", want, bills)
 		}
 	}
 	if tagged := must(nil, "tx", "--tag", "market"); !strings.Contains(tagged, "\n3 transactions\n") {
@@ -98,8 +118,8 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	must(nil, "ac", "d", "CASH", "--hard", "--yes")
 	total := 8
 	for _, want := range []string{
-		"3 accounts and 5 transactions added; 11 accounts and 21 transactions in total",
-		"3 accounts and 5 transactions added; 14 accounts and 26 transactions in total",
+		"3 accounts and 5 transactions added; 11 accounts and 28 transactions in total",
+		"3 accounts and 5 transactions added; 14 accounts and 33 transactions in total",
 	} {
 		total += 3
 		if got := must(nil, "seed"); got != "✓ Development database updated: "+database+" ("+want+")\n" {

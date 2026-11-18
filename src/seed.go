@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/money"
@@ -91,6 +92,32 @@ var seedTransactions = []seedEntry{
 	{title: "Mining reward", account: "BTC", category: "INV", value: 250000, daysAgo: 40},
 }
 
+// seedCards is the base data of a new development database. The days
+// of VISA come from the date of today: see seedBaseCards.
+var seedCards = []card.Card{
+	{Name: "Visa Gold", Code: "VISA", Description: "Main credit card", Color: "blue", Currency: "BRL", Limit: 800000},
+	{Name: "Amex", Code: "AMEX", Description: "Travel", Color: "teal", Currency: "USD", Limit: 200000, ClosingDay: 3, DueDay: 10},
+}
+
+// seedPurchases are the transactions of the credit cards. With the
+// days of VISA, they are in three bills: one that is open, one that is
+// late and one that seedBaseCards pays in part.
+var seedPurchases = []seedEntry{
+	{title: "Streaming", account: "VISA", category: "FUN", tags: "#fixed", value: 5590, daysAgo: 2},
+	{title: "Restaurant", account: "VISA", category: "FOOD", tags: "#weekend", value: 17990, daysAgo: 6},
+	{title: "Pharmacy", account: "VISA", category: "HEALT", value: 4200, daysAgo: 12},
+	{title: "Running shoes", account: "VISA", category: "SHOP", value: 45990, daysAgo: 36},
+	{title: "Flight tickets", account: "VISA", category: "TRANS", tags: "#travel", value: 50000, daysAgo: 66},
+	{title: "Hotel", account: "AMEX", category: "FUN", tags: "#travel", value: 18000, daysAgo: 2},
+}
+
+// The payment of the oldest bill of VISA: a part of its total, from the
+// account INTER.
+const (
+	seedPaymentValue   = 30000
+	seedPaymentDaysAgo = 45
+)
+
 // seedMovementPool is the pool for the expenses and incomes a seed adds
 // to a database that exists.
 var seedMovementPool = []struct{ title, category, tags string }{
@@ -117,8 +144,8 @@ func seedHelp() string {
 		green.Render("Usage:") + ` finux seed [--new-db]
 
 Applies all migrations to the development database, then adds sample data:
-  - a database that does not exist is created with a base set of accounts
-    and transactions;
+  - a database that does not exist is created with a base set of accounts,
+    credit cards and transactions;
   - a database that exists keeps its data and gets ` + strconv.Itoa(seedBatch) + ` more random accounts
     and ` + strconv.Itoa(seedMovements) + ` more random transactions.
 'make dev' runs it after each build.
@@ -176,7 +203,12 @@ func seed(path string, fresh bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Development database created: %s (%d accounts, %d transactions)", path, len(seedAccounts), added), nil
+		purchases, err := seedBaseCards(db)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Development database created: %s (%d accounts, %d credit cards, %d transactions)",
+			path, len(seedAccounts), len(seedCards), added+purchases), nil
 	}
 	if err := seedMore(store, seedBatch); err != nil {
 		return "", err
@@ -200,6 +232,55 @@ func seed(path string, fresh bool) (string, error) {
 // daysAgo returns the date that many days before today.
 func daysAgo(days int) string {
 	return time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+}
+
+// seedBaseCards adds the base credit cards, their transactions and one
+// payment. It returns the number of transactions it added.
+//
+// The bill of VISA closes in 5 to 8 days from today, so the purchases
+// of the last days are in the open bill, the purchase of 36 days ago is
+// in a bill that is late, and the purchase of 66 days ago is in the
+// bill that gets the payment.
+func seedBaseCards(db *gorm.DB) (int, error) {
+	cards, categories, store := card.NewStore(db), category.NewStore(db), transaction.NewStore(db)
+	closing := min(time.Now().AddDate(0, 0, 8).Day(), 28)
+	owners := map[string]card.Card{}
+	for _, created := range seedCards {
+		if created.ClosingDay == 0 {
+			created.ClosingDay, created.DueDay = closing, (closing+6)%28+1
+		}
+		if err := cards.Create(&created); err != nil {
+			return 0, fmt.Errorf("create credit card %s: %w", created.Code, err)
+		}
+		owners[created.Code] = created
+	}
+	added := 0
+	var oldest transaction.Transaction
+	for _, entry := range seedPurchases {
+		group, err := categories.Find(entry.category)
+		if err != nil {
+			return added, fmt.Errorf("category %s: %w", entry.category, err)
+		}
+		created, err := store.Create(transaction.Draft{
+			Title: entry.title, Type: transaction.Expense, Value: entry.value, CardID: owners[entry.account].ID,
+			CategoryID: group.ID, Date: daysAgo(entry.daysAgo), Tags: entry.tags,
+		})
+		if err != nil {
+			return added, fmt.Errorf("create transaction %s: %w", entry.title, err)
+		}
+		added++
+		if entry.daysAgo > seedPaymentDaysAgo {
+			oldest = created
+		}
+	}
+	payer, err := account.NewStore(db).Find("INTER", false)
+	if err != nil {
+		return added, fmt.Errorf("account INTER: %w", err)
+	}
+	if _, err := store.PayBill(oldest.BillID, payer.ID, seedPaymentValue, daysAgo(seedPaymentDaysAgo)); err != nil {
+		return added, fmt.Errorf("pay bill: %w", err)
+	}
+	return added + 1, nil
 }
 
 // seedBaseTransactions adds the base transactions. It returns the number

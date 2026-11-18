@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -10,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/money"
@@ -18,19 +21,23 @@ import (
 // Field identifies one input of a form.
 type Field int
 
-// The fields of a form, in display order. The category form does not
-// have the currency and balance fields.
+// The fields of a form, in display order. Each form shows a part of
+// them: the limit and the days are only for a credit card, the opening
+// balance only for an account.
 const (
 	FieldName Field = iota
 	FieldCode
 	FieldDescription
 	FieldCurrency
 	FieldBalance
+	FieldLimit
+	FieldClosing
+	FieldDue
 	FieldColor
 	fieldCount
 )
 
-var fieldLabels = [fieldCount]string{"Name", "Code", "Description", "Currency", "Opening balance", "Color"}
+var fieldLabels = [fieldCount]string{"Name", "Code", "Description", "Currency", "Opening balance", "Limit", "Closing day", "Due day", "Color"}
 
 const (
 	labelWidth   = 17
@@ -82,6 +89,7 @@ type Form struct {
 	title       string
 	initial     account.Account
 	category    *category.Category
+	card        *card.Card
 	colors      []formColor
 	edit        bool
 	fields      []Field
@@ -111,14 +119,11 @@ func NewForm(options FormOptions) Form {
 	for _, field := range options.Preset {
 		hidden[field] = true
 	}
+	hidden[FieldLimit], hidden[FieldClosing], hidden[FieldDue] = true, true, true
 	if options.Edit {
 		hidden[FieldCurrency], hidden[FieldBalance] = true, true
 	}
-	colors := make([]formColor, len(account.Palette))
-	for i, color := range account.Palette {
-		colors[i] = formColor{color.Key, color.Hex, color.Key}
-	}
-	f := Form{title: title, initial: options.Initial, edit: options.Edit, taken: options.Taken, colors: colors}
+	f := Form{title: title, initial: options.Initial, edit: options.Edit, taken: options.Taken, colors: paletteColors()}
 	for i, code := range money.Codes() {
 		if code == options.Initial.Currency {
 			f.currency = i
@@ -130,6 +135,70 @@ func NewForm(options FormOptions) Form {
 		FieldDescription: options.Initial.Description,
 		FieldBalance:     options.Balance,
 	}, "Banco Inter", "INTER")
+	return f
+}
+
+// paletteColors returns the choices of the color field of an account
+// or a credit card.
+func paletteColors() []formColor {
+	colors := make([]formColor, len(account.Palette))
+	for i, color := range account.Palette {
+		colors[i] = formColor{color.Key, color.Hex, color.Key}
+	}
+	return colors
+}
+
+// CardFormOptions configures a credit card form.
+type CardFormOptions struct {
+	// Title is the heading of the form.
+	Title string
+	// Initial holds the starting values. In edit mode it is the card to change.
+	Initial card.Card
+	// Limit is the starting text of the limit field.
+	Limit string
+	// Edit hides the currency: it does not change after creation.
+	Edit bool
+	// Preset lists fields that already have a final value. The form hides them.
+	Preset []Field
+	// Taken reports whether an account or another card uses a code.
+	Taken func(code string) bool
+}
+
+// NewCardForm builds a credit card form. Its fields are name, code,
+// description, currency, limit, closing day, due day and color.
+func NewCardForm(options CardFormOptions) Form {
+	title := options.Title
+	if title == "" {
+		title = "New credit card"
+		if options.Edit {
+			title = "Edit credit card"
+		}
+	}
+	hidden := map[Field]bool{FieldBalance: true, FieldCurrency: options.Edit}
+	for _, field := range options.Preset {
+		hidden[field] = true
+	}
+	initial := options.Initial
+	f := Form{title: title, card: &initial, edit: options.Edit, taken: options.Taken, colors: paletteColors()}
+	for i, code := range money.Codes() {
+		if code == initial.Currency {
+			f.currency = i
+		}
+	}
+	day := func(value int) string {
+		if value == 0 {
+			return ""
+		}
+		return strconv.Itoa(value)
+	}
+	f.build(hidden, initial.Color, map[Field]string{
+		FieldName:        initial.Name,
+		FieldCode:        initial.Code,
+		FieldDescription: initial.Description,
+		FieldLimit:       options.Limit,
+		FieldClosing:     day(initial.ClosingDay),
+		FieldDue:         day(initial.DueDay),
+	}, "Visa Gold", "VISA")
 	return f
 }
 
@@ -157,7 +226,7 @@ func NewCategoryForm(options CategoryFormOptions) Form {
 			title = "Edit category"
 		}
 	}
-	hidden := map[Field]bool{FieldCurrency: true, FieldBalance: true}
+	hidden := map[Field]bool{FieldCurrency: true, FieldBalance: true, FieldLimit: true, FieldClosing: true, FieldDue: true}
 	for _, field := range options.Preset {
 		hidden[field] = true
 	}
@@ -191,8 +260,11 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 			f.color = i
 		}
 	}
-	placeholders := map[Field]string{FieldName: namePlaceholder, FieldCode: codePlaceholder, FieldDescription: "optional"}
-	for _, field := range []Field{FieldName, FieldCode, FieldDescription, FieldBalance} {
+	placeholders := map[Field]string{
+		FieldName: namePlaceholder, FieldCode: codePlaceholder, FieldDescription: "optional",
+		FieldClosing: "day of the month, 1 to 31", FieldDue: "day of the month, 1 to 31",
+	}
+	for _, field := range []Field{FieldName, FieldCode, FieldDescription, FieldBalance, FieldLimit, FieldClosing, FieldDue} {
 		input := textinput.New()
 		input.Prompt = ""
 		input.Placeholder = placeholders[field]
@@ -204,6 +276,9 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 	f.inputs[FieldName].CharLimit = 60
 	f.inputs[FieldDescription].CharLimit = 120
 	f.inputs[FieldBalance].CharLimit = 24
+	f.inputs[FieldLimit].CharLimit = 24
+	f.inputs[FieldClosing].CharLimit = 2
+	f.inputs[FieldDue].CharLimit = 2
 	f.codeTouched = values[FieldCode] != ""
 	f.suggestCode()
 	f.syncBalancePlaceholder()
@@ -230,7 +305,7 @@ func (f Form) Value(field Field) string {
 		return money.Codes()[f.currency]
 	case FieldColor:
 		return f.colors[f.color].key
-	case FieldName, FieldCode, FieldDescription, FieldBalance:
+	case FieldName, FieldCode, FieldDescription, FieldBalance, FieldLimit, FieldClosing, FieldDue:
 		return f.inputs[field].Value()
 	}
 	return ""
@@ -273,6 +348,32 @@ func (f Form) Category() category.Category {
 	return result
 }
 
+// Card returns the initial credit card with the values of the form
+// applied. Use it for a form that NewCardForm built.
+func (f Form) Card() card.Card {
+	var result card.Card
+	if f.card != nil {
+		result = *f.card
+	}
+	result.Name = strings.TrimSpace(f.Value(FieldName))
+	result.Code = f.Value(FieldCode)
+	result.Description = strings.TrimSpace(f.Value(FieldDescription))
+	result.Color = f.Value(FieldColor)
+	if !f.edit {
+		result.Currency = f.Value(FieldCurrency)
+	}
+	if limit, err := money.Parse(f.Value(FieldLimit), result.Currency); err == nil {
+		result.Limit = limit
+	}
+	if day, err := strconv.Atoi(strings.TrimSpace(f.Value(FieldClosing))); err == nil {
+		result.ClosingDay = day
+	}
+	if day, err := strconv.Atoi(strings.TrimSpace(f.Value(FieldDue))); err == nil {
+		result.DueDay = day
+	}
+	return result
+}
+
 // colorsInRow reports whether the color field is one row of choices,
 // not a grid.
 func (f Form) colorsInRow() bool { return len(f.colors) <= paletteWidth }
@@ -285,8 +386,17 @@ func (f Form) balance() int64 {
 	return amount
 }
 
+// currencyCode returns the currency of the record of the form. A card
+// form in edit mode does not show the currency field.
+func (f Form) currencyCode() string {
+	if f.card != nil && f.edit {
+		return f.card.Currency
+	}
+	return f.Value(FieldCurrency)
+}
+
 func (f Form) isText(field Field) bool {
-	return field == FieldName || field == FieldCode || field == FieldDescription || field == FieldBalance
+	return field != FieldCurrency && field != FieldColor && field < fieldCount
 }
 
 func (f *Form) suggestCode() {
@@ -299,6 +409,7 @@ func (f *Form) suggestCode() {
 
 func (f *Form) syncBalancePlaceholder() {
 	f.inputs[FieldBalance].Placeholder = money.Placeholder(f.Value(FieldCurrency))
+	f.inputs[FieldLimit].Placeholder = money.Placeholder(f.currencyCode())
 }
 
 func (f *Form) setFocus(index int) tea.Cmd {
@@ -333,6 +444,26 @@ func (f Form) validate(field Field) string {
 			// Keep only the reason; the field already shows the value.
 			message := err.Error()
 			return sentence(message[strings.LastIndex(message, ": ")+1:])
+		}
+	case FieldLimit:
+		if strings.TrimSpace(f.Value(FieldLimit)) == "" {
+			return "Limit is required"
+		}
+		limit, err := money.Parse(f.Value(FieldLimit), f.currencyCode())
+		if err != nil {
+			message := err.Error()
+			return sentence(message[strings.LastIndex(message, ": ")+1:])
+		}
+		if limit < 0 {
+			return "Limit cannot be negative"
+		}
+	case FieldClosing, FieldDue:
+		day, err := strconv.Atoi(strings.TrimSpace(f.Value(field)))
+		if err != nil {
+			day = 0
+		}
+		if err := card.CheckDay(strings.ToLower(fieldLabels[field]), day); err != nil {
+			return sentence(err.Error())
 		}
 	}
 	return ""
@@ -584,6 +715,26 @@ func (f Form) preview() string {
 		}
 		return styleDim.Width(labelWidth).Render("Preview") +
 			dot + " " + styleBold.Render(code) + "  " + name + "  " + styleDim.Render(current.Meaning())
+	}
+	if f.card != nil {
+		current := f.Card()
+		code, name := current.Code, current.Name
+		if code == "" {
+			code = "CODE"
+		}
+		if name == "" {
+			name = "Card name"
+		}
+		// The days show when they have a value.
+		details := money.Format(current.Limit, current.Currency)
+		if current.ClosingDay != 0 {
+			details += fmt.Sprintf(" · closes %d", current.ClosingDay)
+		}
+		if current.DueDay != 0 {
+			details += fmt.Sprintf(" · due %d", current.DueDay)
+		}
+		return styleDim.Width(labelWidth).Render("Preview") +
+			dot + " " + styleBold.Render(code) + "  " + cut(name, 24) + "  " + styleDim.Render(details)
 	}
 	current := f.Account()
 	code, name := current.Code, current.Name

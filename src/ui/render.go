@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2/table"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 	"finux/src/money"
 	"finux/src/transaction"
@@ -327,17 +328,33 @@ func TransactionCard(view transaction.View, plain bool) string {
 	date := transaction.FormatDate(view.Date)
 	created := view.CreatedAt.Local().Format(timeLayout)
 	updated := view.UpdatedAt.Local().Format(timeLayout)
+	// A transaction of a credit card shows the card in place of the
+	// account, and its bill.
+	purchase := view.CardID != 0
+	place, period := "Account", ""
+	if purchase {
+		place = "Card"
+	}
+	if view.Bill != nil {
+		period = card.FormatPeriod(view.Bill.Period)
+	}
 	if plain {
 		fields := [][2]string{
 			{"ID", id}, {"Type", view.Type}, {"Value", value},
-			{"Account", view.Account.Code + "  " + view.Account.Name},
+			{place, view.Account.Code + "  " + view.Account.Name},
 			{"Category", view.Category.Code + "  " + view.Category.Name},
 			{"Date", date},
+		}
+		if purchase {
+			fields = append(fields, [2]string{"Bill", period})
 		}
 		if view.Tags != "" {
 			fields = append(fields, [2]string{"Tags", view.Tags})
 		}
-		if view.Other != nil {
+		switch {
+		case view.Type == transaction.Payment && view.Other != nil:
+			fields = append(fields, [2]string{"Payment", "bill " + period + " of " + view.Other.Code + "  " + view.Other.Name})
+		case view.Other != nil:
 			direction, other := transferLine(view)
 			fields = append(fields, [2]string{"Transfer", fmt.Sprintf("%s %s (transaction %d)", direction, other, view.PairID)})
 		}
@@ -386,15 +403,21 @@ func TransactionCard(view transaction.View, plain bool) string {
 	row := func(label, text string) string { return styleDim.Width(10).Render(label) + text }
 	categoryColor, _ := category.ColorByKey(view.Category.Color)
 	lines = append(lines,
-		row("Account", swatch(view.Account.Color, "●")+" "+styleBold.Render(view.Account.Code)+"  "+view.Account.Name),
+		row(place, swatch(view.Account.Color, "●")+" "+styleBold.Render(view.Account.Code)+"  "+view.Account.Name),
 	)
 	if view.Other != nil {
 		label := "From"
 		if view.Outgoing() {
 			label = "To"
 		}
-		lines = append(lines, row(label, swatch(view.Other.Color, "●")+" "+styleBold.Render(view.Other.Code)+"  "+view.Other.Name+
-			styleDim.Render("  #"+strconv.FormatUint(uint64(view.PairID), 10))))
+		other := swatch(view.Other.Color, "●") + " " + styleBold.Render(view.Other.Code) + "  " + view.Other.Name
+		if view.PairID != 0 {
+			other += styleDim.Render("  #" + strconv.FormatUint(uint64(view.PairID), 10))
+		}
+		lines = append(lines, row(label, other))
+	}
+	if period != "" {
+		lines = append(lines, row("Bill", period))
 	}
 	lines = append(lines,
 		row("Category", paint(categoryColor.Hex, "●")+" "+styleBold.Render(view.Category.Code)+"  "+view.Category.Name),

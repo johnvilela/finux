@@ -53,6 +53,7 @@ Commands:
   accounts, ac      Manage accounts
   categories, ct    Manage categories
   transactions, tx  Manage transactions
+  credit-card, cc   Manage credit cards
   help              Show this help
 
 Options:
@@ -81,7 +82,8 @@ make dev
 build, `make dev` applies the migrations to it and adds sample data:
 
 - If the database does not exist, it is created with the base categories, a
-  base set of 8 accounts and 17 transactions.
+  base set of 8 accounts, 2 credit cards and 24 transactions. The credit card
+  `VISA` has an open bill, a late bill and a paid bill.
 - If the database exists, it keeps its data and gets 3 more random accounts and
   5 more random transactions.
 
@@ -172,8 +174,8 @@ currency and an opening balance.
 
 - **Code**: 1 to 5 letters and digits, with at least one letter, for example
   `INTER`. Finux suggests a code from the name (`Nubank` gives `NUBAN`,
-  `Banco Inter` gives `BINTE`) and you can change it. Each code is unique. An
-  archived account keeps its code.
+  `Banco Inter` gives `BINTE`) and you can change it. Each code is unique
+  across accounts and credit cards. An archived account keeps its code.
 - **Currency**: `USD`, `EUR`, `BRL` or `BTC`. It does not change after creation.
 - **Opening balance**: set on creation only. Use `1234.56` or `1234,56`; negative
   values are permitted. The balance of an account is its opening balance plus
@@ -201,6 +203,7 @@ An archived account keeps its transactions, but takes no new ones.
 `delete --hard` also deletes the transactions of the account. For each transfer
 of the account, the transaction in the other account stays: it becomes an
 expense or an income of the category `OTHER`, with a note in its description.
+A credit card bill that the account paid stays paid.
 
 When input or output is not a terminal, Finux does not open forms, selectors or
 prompts: give the values as options. `finux ac` then prints a plain table, and
@@ -276,7 +279,10 @@ account and a date.
 
 - **Type**: `expense`, `income` or `transfer`. A red category makes an expense
   and a green category makes an income, so `--type` is necessary only with a
-  grey category.
+  grey category. A fourth type, `payment`, comes only from the payment of a
+  credit card bill.
+- **Account**: an account or a credit card, never the two. `--account` accepts
+  the code of a credit card; see [Credit cards](#credit-cards).
 - **Value**: a positive amount in the currency of the account. The type gives
   the direction of the money.
 - **Category**: required. An expense uses a red or grey category, an income a
@@ -336,12 +342,120 @@ and create a new one.
 The interactive list reads like a bank statement: one line for each transaction
 under a heading for its day, the amounts in one column, and at the top the
 totals of the list for each currency (what came in, what went out and the
-difference; transfers do not count).
+difference; transfers and payments of credit card bills do not count).
 
 You can use many filters in one command. In the interactive list, the search
 input finds transactions by title and also reads filters: `#tag`, `@ACCOUNT`,
 `cat:CODE`, `type:TYPE` and a date such as `2026`, `2026-11`, `11/2026` or
 `17/11/2026`. For example: `market #weekly @inter 2026-11`.
+
+## Credit cards
+
+`finux credit-card` (short form: `finux cc`) manages your credit cards and
+their bills.
+
+```text
+finux cc                             List credit cards; select one to see its details
+finux cc list --all                  The same, with archived credit cards
+finux cc <code|id>                   Show a credit card and the transactions of its open bill
+finux cc add [options]               Create a credit card
+finux cc edit [code|id] [options]    Change a credit card
+finux cc bills [code|id]             List the bills of a credit card
+finux cc pay [code|id] [options]     Pay a bill from an account
+finux cc unpay [code|id]             Delete the payment of a bill
+finux cc delete [code|id]            Archive a credit card
+finux cc delete [code|id] --hard     Delete a credit card permanently
+finux cc restore [code|id]           Restore an archived credit card
+finux cc help                        Show all commands and options
+```
+
+Short forms: `l` for `list`, `a` for `add`, `e` for `edit`, `b` for `bills`,
+`p` for `pay`, `d` for `delete` and `r` for `restore`.
+
+A credit card has an id, a name, an optional description, a code, a color, a
+currency, a limit, a closing day and a due day. It has no opening balance: it
+starts empty.
+
+- **Code**: same rules as an account code. An account and a credit card cannot
+  have the same code, because transactions use the code for the two.
+- **Currency**: it does not change after creation.
+- **Limit**: the credit limit. The details show the used part (the total of the
+  bills that are not paid) and the available part.
+- **Closing day** and **due day**: days of the month, 1 to 31. A month with
+  fewer days uses its last day. New days apply to the bills that do not exist
+  yet.
+
+```sh
+./bin/finux cc add --name "Visa Gold" --code VISA --currency BRL --limit 5000 --closing 25 --due 5
+./bin/finux cc VISA
+./bin/finux cc e VISA --limit 8000
+```
+
+With `--name`, `--currency`, `--limit`, `--closing` and `--due`, `add` does not
+open the form.
+
+### Transactions of a credit card
+
+A transaction has an account or a credit card, never the two. Give the code of
+the card to `--account`:
+
+```sh
+./bin/finux tx add --title Market --value 100 --account VISA --category FOOD
+./bin/finux tx --account VISA
+```
+
+A credit card has expenses (purchases) and incomes (refunds). It has no
+transfers. Its transactions do not change the balance of an account.
+
+### Bills
+
+Each transaction of a credit card goes to a bill. Finux finds the bill from the
+date of the transaction and creates it when necessary: a transaction on or
+before the closing day goes to the bill that closes in that month, and a later
+transaction goes to the next bill. A bill has the name of the month it is due.
+With closing day 25 and due day 5, a purchase on 17/11/2026 is in the bill
+`12/2026`, which closes on 25/11/2026 and is due on 05/12/2026.
+
+A bill has one of four statuses:
+
+- `open`: the closing date did not pass; the bill receives transactions.
+- `closed`: the closing date passed; the bill waits for its payment.
+- `late`: the due date passed without a payment.
+- `paid`: the bill has a payment.
+
+`finux cc <code>` shows the transactions of the open bill, and one line for
+each bill that is closed or late. `finux cc bills <code>` lists all the bills.
+
+### Payments
+
+```sh
+./bin/finux cc pay VISA --from INTER                 # the total of the oldest closed or late bill
+./bin/finux cc pay VISA --from INTER --value 600     # a part of the total
+./bin/finux cc pay VISA --from INTER --bill 11/2026 --date 03/11/2026
+./bin/finux cc unpay VISA
+```
+
+`pay` creates a transaction of the type `payment` in the account, with the
+category `XFER`. It takes the value out of the account, but it is not an
+expense in the totals: the purchases already are. The account must have the
+currency of the card. An open bill cannot be paid.
+
+With a value smaller than the total, the bill is paid and the remaining value
+goes to the next bill that is not paid, as "Carried from the bill before".
+Finux does not calculate interest.
+
+A paid bill is locked: Finux refuses a new transaction in it, and a change or
+a delete of one of its transactions. To change them, delete the payment first
+with `finux cc unpay` or with `finux tx delete` of the payment transaction.
+The bill opens again and the carried value comes back. A payment cannot be
+edited.
+
+### Archive and delete
+
+`delete` archives a credit card, as in accounts: it keeps its bills and its
+transactions, but takes no new ones. `delete --hard` deletes the card, its
+bills and its transactions permanently. Each payment stays in its account: it
+becomes an expense of the category `OTHER`, with a note in its description.
 
 ## Development
 

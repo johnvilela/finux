@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 	"finux/src/money"
 	"finux/src/transaction"
@@ -54,6 +55,9 @@ type TransactionFormOptions struct {
 	// Accounts and Categories are the records the user can choose.
 	Accounts   []account.Account
 	Categories []category.Category
+	// Cards are the credit cards the user can choose in place of an
+	// account. A card is not for a transfer.
+	Cards []card.Card
 	// Titles and Tags are the values in use. The form suggests them
 	// while the user types.
 	Titles, Tags []string
@@ -68,6 +72,13 @@ var (
 	keySuggest = key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "other suggestions"))
 	keyJump    = key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→ or a letter", "choose"))
 )
+
+// cardOffset is added to the id of a credit card. The form keeps the
+// cards in its list of accounts, after the accounts; the offset tells
+// them apart.
+const cardOffset = 1 << 30
+
+func isCard(id uint) bool { return id >= cardOffset }
 
 // TransactionForm is the interactive screen that creates or edits a
 // transaction.
@@ -103,9 +114,17 @@ func NewTransactionForm(options TransactionFormOptions) TransactionForm {
 	}
 	f := TransactionForm{
 		title: title, initial: options.Initial, edit: options.Edit,
-		accounts: options.Accounts, categories: options.Categories, tags: options.Tags,
+		accounts: slices.Clone(options.Accounts), categories: options.Categories, tags: options.Tags,
 		accountID: options.Initial.AccountID, toID: options.Initial.ToAccountID, categoryID: options.Initial.CategoryID,
 		help: help.New(), width: formWidth,
+	}
+	for _, current := range options.Cards {
+		f.accounts = append(f.accounts, account.Account{
+			ID: cardOffset + current.ID, Name: current.Name, Code: current.Code, Color: current.Color, Currency: current.Currency,
+		})
+	}
+	if options.Initial.CardID != 0 {
+		f.accountID = cardOffset + options.Initial.CardID
 	}
 	for _, field := range options.Preset {
 		f.hidden[field] = true
@@ -192,9 +211,19 @@ func (f TransactionForm) accountByID(id uint) (account.Account, bool) {
 	return account.Account{}, false
 }
 
+// sources returns the accounts and the cards the current type can use.
+// A transfer is only between accounts.
+func (f TransactionForm) sources() []account.Account {
+	return slices.DeleteFunc(slices.Clone(f.accounts), func(current account.Account) bool {
+		return isCard(current.ID) && f.kindName() == transaction.Transfer
+	})
+}
+
 // destinations returns the accounts that can receive a transfer.
 func (f TransactionForm) destinations() []account.Account {
-	return slices.DeleteFunc(slices.Clone(f.accounts), func(current account.Account) bool { return current.ID == f.accountID })
+	return slices.DeleteFunc(slices.Clone(f.accounts), func(current account.Account) bool {
+		return current.ID == f.accountID || isCard(current.ID)
+	})
 }
 
 // choices returns the categories the current type can use.
@@ -218,8 +247,9 @@ func (f TransactionForm) twoCurrencies() bool {
 // sync makes the choices valid after the type or an account changed,
 // and updates the hints of the amount fields.
 func (f *TransactionForm) sync() {
-	if _, ok := f.accountByID(f.accountID); !ok && len(f.accounts) > 0 {
-		f.accountID = f.accounts[0].ID
+	sources := f.sources()
+	if !slices.ContainsFunc(sources, func(current account.Account) bool { return current.ID == f.accountID }) && len(sources) > 0 {
+		f.accountID = sources[0].ID
 	}
 	destinations := f.destinations()
 	if !slices.ContainsFunc(destinations, func(current account.Account) bool { return current.ID == f.toID }) {
@@ -288,7 +318,10 @@ func (f TransactionForm) Draft() transaction.Draft {
 	draft.Title = strings.TrimSpace(f.Value(TxTitle))
 	draft.Description = strings.TrimSpace(f.Value(TxDescription))
 	draft.Type = f.kindName()
-	draft.AccountID, draft.CategoryID = f.accountID, f.categoryID
+	draft.AccountID, draft.CardID, draft.CategoryID = f.accountID, 0, f.categoryID
+	if isCard(f.accountID) {
+		draft.AccountID, draft.CardID = 0, f.accountID-cardOffset
+	}
 	draft.Value, _ = f.amount(TxValue, f.accountID)
 	draft.ToAccountID, draft.Received = 0, 0
 	if draft.Type == transaction.Transfer && !f.edit {
@@ -481,7 +514,7 @@ func (f *TransactionForm) choose(press tea.KeyPressMsg) {
 			}
 		}
 	case TxAccount:
-		f.accountID = pickAccount(f.accounts, f.accountID, press)
+		f.accountID = pickAccount(f.sources(), f.accountID, press)
 	case TxTo:
 		f.toID = pickAccount(f.destinations(), f.toID, press)
 	case TxCategory:
@@ -605,7 +638,7 @@ func (f TransactionForm) row(field TxField, focused bool) string {
 		}
 		return label + strings.Join(pills, " ")
 	case TxAccount, TxTo:
-		id, accounts := f.accountID, f.accounts
+		id, accounts := f.accountID, f.sources()
 		if field == TxTo {
 			id, accounts = f.toID, f.destinations()
 		}
@@ -614,7 +647,11 @@ func (f TransactionForm) row(field TxField, focused bool) string {
 			return label + styleDim.Render("no account")
 		}
 		position := slices.IndexFunc(accounts, func(a account.Account) bool { return a.ID == id })
-		return label + choice(swatch(current.Color, "●"), current.Code, current.Name+" · "+current.Currency, position, len(accounts), focused)
+		name := current.Name + " · " + current.Currency
+		if isCard(id) {
+			name += " · credit card"
+		}
+		return label + choice(swatch(current.Color, "●"), current.Code, name, position, len(accounts), focused)
 	case TxCategory:
 		choices := f.choices()
 		position := slices.IndexFunc(choices, func(c category.Category) bool { return c.ID == f.categoryID })
