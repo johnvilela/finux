@@ -4,17 +4,14 @@ package account
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
+	"finux/src/code"
 	"finux/src/money"
 
 	"gorm.io/gorm"
 )
-
-// MaxCodeLength is the maximum number of characters in an account code.
-const MaxCodeLength = 5
 
 // Account is a place that holds money, such as a bank account or a wallet.
 type Account struct {
@@ -28,11 +25,14 @@ type Account struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      gorm.DeletedAt `gorm:"index"`
+	// Movement is the sum of the transactions of the account. The store
+	// fills it; it is not a column.
+	Movement int64 `gorm:"-"`
 }
 
-// Balance returns the current balance in minor units.
-// It is the opening balance until transactions exist.
-func (a Account) Balance() int64 { return a.OpeningBalance }
+// Balance returns the current balance in minor units: the opening
+// balance and the transactions of the account.
+func (a Account) Balance() int64 { return a.OpeningBalance + a.Movement }
 
 // Archived reports whether the account is soft-deleted.
 func (a Account) Archived() bool { return a.DeletedAt.Valid }
@@ -42,7 +42,7 @@ func (a Account) Validate() error {
 	if strings.TrimSpace(a.Name) == "" {
 		return errors.New("name is required")
 	}
-	if err := ValidateCode(a.Code); err != nil {
+	if err := code.Validate(a.Code); err != nil {
 		return err
 	}
 	if _, ok := ColorByKey(a.Color); !ok {
@@ -52,85 +52,6 @@ func (a Account) Validate() error {
 		return fmt.Errorf("unknown currency %q: use one of %s", a.Currency, strings.Join(money.Codes(), ", "))
 	}
 	return nil
-}
-
-// NormalizeCode trims a code and makes it uppercase.
-func NormalizeCode(code string) string {
-	return strings.ToUpper(strings.TrimSpace(code))
-}
-
-// ValidateCode checks that a code has 1 to 5 characters from A-Z and 0-9
-// and at least one letter, so that a code is never mistaken for an id.
-func ValidateCode(code string) error {
-	if code == "" {
-		return errors.New("code is required")
-	}
-	if len(code) > MaxCodeLength {
-		return fmt.Errorf("code %q is too long: maximum is %d characters", code, MaxCodeLength)
-	}
-	hasLetter := false
-	for _, r := range code {
-		switch {
-		case r >= 'A' && r <= 'Z':
-			hasLetter = true
-		case r >= '0' && r <= '9':
-		default:
-			return fmt.Errorf("code %q is invalid: use only letters A-Z and digits", code)
-		}
-	}
-	if !hasLetter {
-		return fmt.Errorf("code %q is invalid: use at least one letter", code)
-	}
-	return nil
-}
-
-var accents = strings.NewReplacer(
-	"Á", "A", "À", "A", "Â", "A", "Ã", "A", "Ä", "A", "Å", "A",
-	"É", "E", "È", "E", "Ê", "E", "Ë", "E",
-	"Í", "I", "Ì", "I", "Î", "I", "Ï", "I",
-	"Ó", "O", "Ò", "O", "Ô", "O", "Õ", "O", "Ö", "O",
-	"Ú", "U", "Ù", "U", "Û", "U", "Ü", "U",
-	"Ç", "C", "Ñ", "N",
-)
-
-// SuggestCode makes a code from an account name. One word gives its first
-// five characters. Many words give the initials of all words but the last,
-// then characters of the last word. If the code is taken, a number replaces
-// its tail. It returns "" when the name gives no valid code.
-func SuggestCode(name string, taken func(string) bool) string {
-	words := strings.FieldsFunc(accents.Replace(strings.ToUpper(name)), func(r rune) bool {
-		return (r < 'A' || r > 'Z') && (r < '0' || r > '9')
-	})
-	if len(words) == 0 {
-		return ""
-	}
-	var base string
-	for _, word := range words[:len(words)-1] {
-		if len(base) < MaxCodeLength-1 {
-			base += word[:1]
-		}
-	}
-	base += words[len(words)-1]
-	if len(base) > MaxCodeLength {
-		base = base[:MaxCodeLength]
-	}
-	if ValidateCode(base) != nil {
-		return ""
-	}
-	if !taken(base) {
-		return base
-	}
-	for number := 2; number <= 99; number++ {
-		suffix := strconv.Itoa(number)
-		stem := base
-		if len(stem) > MaxCodeLength-len(suffix) {
-			stem = stem[:MaxCodeLength-len(suffix)]
-		}
-		if code := stem + suffix; !taken(code) {
-			return code
-		}
-	}
-	return ""
 }
 
 // Color is one entry of the account color palette.

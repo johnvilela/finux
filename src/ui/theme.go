@@ -29,6 +29,31 @@ func swatch(key, text string) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(color.Hex)).Render(text)
 }
 
+// paint renders text in a hex color.
+func paint(hex, text string) string {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Render(text)
+}
+
+// The colors of an income and an expense. They are fixed colors, the
+// same as the green and red category dots: the colors of a terminal
+// theme can make red and green look the same.
+const (
+	colorIncome  = "#22C55E"
+	colorExpense = "#EF4444"
+)
+
+// typeStyle returns the style of a transaction type: red for an
+// expense, green for an income and no color for a transfer.
+func typeStyle(kind string) lipgloss.Style {
+	switch kind {
+	case "expense":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorExpense))
+	case "income":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorIncome))
+	}
+	return lipgloss.NewStyle()
+}
+
 // Success formats the feedback line of an action that worked.
 func Success(message string) string {
 	return styleAccent.Render("✓") + " " + message

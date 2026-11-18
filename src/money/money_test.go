@@ -95,3 +95,29 @@ func TestPlaceholder(t *testing.T) {
 		}
 	}
 }
+
+func TestInput(t *testing.T) {
+	for _, tc := range []struct {
+		amount int64
+		code   string
+		want   string
+	}{
+		{123456, "BRL", "1234,56"},
+		{5, "USD", "0.05"},
+		{-1050, "EUR", "-10,50"},
+		{150000000, "BTC", "1.50000000"},
+		{0, "BRL", "0,00"},
+		{12, "JPY", "12"},
+	} {
+		got := Input(tc.amount, tc.code)
+		if got != tc.want {
+			t.Errorf("Input(%d, %s) = %q, want %q", tc.amount, tc.code, got, tc.want)
+		}
+		if !Valid(tc.code) {
+			continue
+		}
+		if back, err := Parse(got, tc.code); err != nil || back != tc.amount {
+			t.Errorf("Parse(Input(%d, %s)) = %d, %v", tc.amount, tc.code, back, err)
+		}
+	}
+}

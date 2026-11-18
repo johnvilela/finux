@@ -8,6 +8,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"finux/src/account"
+	"finux/src/category"
+	"finux/src/transaction"
 )
 
 func selector(t *testing.T, model tea.Model) Selector {
@@ -21,7 +23,7 @@ func selector(t *testing.T, model tea.Model) Selector {
 
 func TestSelectorPicksAccount(t *testing.T) {
 	accounts := sampleAccounts()
-	var model tea.Model = NewSelector("Accounts", accounts)
+	var model tea.Model = NewSelector("Accounts", "account", "accounts", AccountEntries(accounts))
 	view := plain(selector(t, model).View().Content)
 	for _, want := range []string{"Accounts", "Search", "INTER", "Banco Inter", "main account", "R$ 1.234,56", "NUBAN", "-R$ 10,05", "WISE", "$500.00", "3 accounts", "enter", "esc"} {
 		if !strings.Contains(view, want) {
@@ -32,14 +34,14 @@ func TestSelectorPicksAccount(t *testing.T) {
 		t.Fatal("selected before enter")
 	}
 	model = send(t, model, keyDown, keyEnter)
-	if got, ok := selector(t, model).Selected(); !ok || got.Code != "NUBAN" {
+	if got, ok := selector(t, model).Selected(); !ok || got != 1 {
 		t.Fatalf("selected = %+v, %v; want NUBAN", got, ok)
 	}
 }
 
 func TestSelectorCancel(t *testing.T) {
 	for _, key := range []tea.Msg{keyEscape, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}} {
-		model := send(t, NewSelector("Accounts", sampleAccounts()), key)
+		model := send(t, NewSelector("Accounts", "account", "accounts", AccountEntries(sampleAccounts())), key)
 		if _, ok := selector(t, model).Selected(); ok || !selector(t, model).Cancelled() {
 			t.Fatalf("key %v did not cancel", key)
 		}
@@ -47,23 +49,23 @@ func TestSelectorCancel(t *testing.T) {
 }
 
 func TestSelectorSearch(t *testing.T) {
-	var model tea.Model = NewSelector("Accounts", sampleAccounts())
+	var model tea.Model = NewSelector("Accounts", "account", "accounts", AccountEntries(sampleAccounts()))
 	model = send(t, model, text("WIS")...)
 	view := plain(selector(t, model).View().Content)
 	if selector(t, model).Query() != "WIS" || !strings.Contains(view, "Wise") || strings.Contains(view, "Nubank") || !strings.Contains(view, "1 of 3 accounts") {
 		t.Fatalf("search by code:\n%s", view)
 	}
 	model = send(t, model, keyEnter)
-	if got, ok := selector(t, model).Selected(); !ok || got.Code != "WISE" {
+	if got, ok := selector(t, model).Selected(); !ok || got != 2 {
 		t.Fatalf("selected = %+v, %v; want WISE", got, ok)
 	}
 
-	model = send(t, NewSelector("Accounts", sampleAccounts()), text("co in")...)
+	model = send(t, NewSelector("Accounts", "account", "accounts", AccountEntries(sampleAccounts())), text("co in")...)
 	if view := plain(selector(t, model).View().Content); !strings.Contains(view, "Banco Inter") || strings.Contains(view, "Wise") {
 		t.Fatalf("search by name, lowercase:\n%s", view)
 	}
 
-	model = send(t, NewSelector("Accounts", sampleAccounts()), text("qjk?/")...)
+	model = send(t, NewSelector("Accounts", "account", "accounts", AccountEntries(sampleAccounts())), text("qjk?/")...)
 	s := selector(t, model)
 	if s.Cancelled() || s.Query() != "qjk?/" || !strings.Contains(plain(s.View().Content), "No accounts match") {
 		t.Fatalf("letters must go to the search: query %q, cancelled %v", s.Query(), s.Cancelled())
@@ -87,7 +89,7 @@ func TestSelectorShowsFiveAccounts(t *testing.T) {
 	for _, code := range []string{"AA", "BB", "CC", "DD", "EE", "FF", "GG", "HH"} {
 		accounts = append(accounts, account.Account{Name: "Bank " + code, Code: code, Color: "blue", Currency: "USD"})
 	}
-	var model tea.Model = NewSelector("Accounts", accounts)
+	var model tea.Model = NewSelector("Accounts", "account", "accounts", AccountEntries(accounts))
 	view := plain(selector(t, model).View().Content)
 	for _, code := range []string{"AA", "BB", "CC", "DD", "EE"} {
 		if !strings.Contains(view, "Bank "+code) {
@@ -103,8 +105,33 @@ func TestSelectorShowsFiveAccounts(t *testing.T) {
 	}
 	model = send(t, model, text("hh")...)
 	model = send(t, model, keyEnter)
-	if got, ok := selector(t, model).Selected(); !ok || got.Code != "HH" {
+	if got, ok := selector(t, model).Selected(); !ok || got != 7 {
 		t.Fatalf("search for an account off the first page = %+v, %v", got, ok)
+	}
+}
+
+func TestSelectorOfCategories(t *testing.T) {
+	categories := []category.Category{
+		{ID: 1, Name: "Food", Code: "FOOD", Color: "red", Description: "Groceries"},
+		{ID: 2, Name: "Salary", Code: "SAL", Color: "green"},
+	}
+	var model tea.Model = NewSelector("Categories", "category", "categories", CategoryEntries(categories))
+	view := plain(selector(t, model).View().Content)
+	for _, want := range []string{"Categories", "FOOD", "Food", "Groceries", "expense", "SAL", "Salary", "income", "2 categories"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view lacks %q:\n%s", want, view)
+		}
+	}
+	model = send(t, model, text("zz")...)
+	if view := plain(selector(t, model).View().Content); !strings.Contains(view, "No categories match the search") {
+		t.Fatalf("empty search:\n%s", view)
+	}
+	model = send(t, NewSelector("Categories", "category", "categories", CategoryEntries(categories[:1])), keyEnter)
+	if got, ok := selector(t, model).Selected(); !ok || got != 0 {
+		t.Fatalf("selected = %v, %v; want 0", got, ok)
+	}
+	if view := plain(NewSelector("Categories", "category", "categories", CategoryEntries(categories[:1])).View().Content); !strings.Contains(view, "1 category") {
+		t.Fatalf("singular count:\n%s", view)
 	}
 }
 
@@ -235,3 +262,200 @@ func TestAccountCardStyled(t *testing.T) {
 }
 
 func lipglossWidth(text string) int { return lipgloss.Width(text) }
+
+func sampleCategories() []category.Category {
+	return []category.Category{
+		{ID: 1, Name: "Food", Code: "FOOD", Color: "red", Description: "Groceries and restaurants"},
+		{ID: 2, Name: "Salary", Code: "SAL", Color: "green"},
+		{ID: 3, Name: "Transfer", Code: "XFER", Color: "grey"},
+	}
+}
+
+func TestCategoryTable(t *testing.T) {
+	categories := sampleCategories()
+	styled := CategoryTable(categories, false)
+	if !strings.Contains(styled, "\x1b[") || !strings.Contains(styled, "╭") {
+		t.Fatalf("styled table has no color or border:\n%s", styled)
+	}
+	for _, want := range []string{"CODE", "NAME", "TYPE", "FOOD", "Food", "expense", "SAL", "income", "XFER", "neutral", "3 categories"} {
+		if !strings.Contains(plain(styled), want) {
+			t.Errorf("styled table lacks %q:\n%s", want, plain(styled))
+		}
+	}
+	const want = "" +
+		"CODE  NAME      TYPE\n" +
+		"FOOD  Food      expense\n" +
+		"SAL   Salary    income\n" +
+		"XFER  Transfer  neutral\n" +
+		"3 categories\n"
+	if got := CategoryTable(categories, true); got != want {
+		t.Fatalf("plain table =\n%s\nwant\n%s", got, want)
+	}
+	if got := CategoryTable(categories[:1], true); !strings.HasSuffix(got, "\n1 category\n") {
+		t.Fatalf("singular count missing:\n%s", got)
+	}
+	if got := CategoryTable(nil, true); got != "No categories yet. Run 'finux reseed' or 'finux ct add'.\n" {
+		t.Fatalf("empty table = %q", got)
+	}
+}
+
+func TestCategoryCard(t *testing.T) {
+	food := sampleCategories()[0]
+	bare := CategoryCard(food, true)
+	if strings.ContainsAny(bare, "╭│─\x1b") {
+		t.Fatalf("plain card has borders or colors:\n%s", bare)
+	}
+	for _, want := range []string{"FOOD  Food\n", "Groceries and restaurants\n", "ID        1\n", "Type      expense\n", "Color     red\n", "Created   ", "Updated   "} {
+		if !strings.Contains(bare, want) {
+			t.Errorf("plain card lacks %q:\n%s", want, bare)
+		}
+	}
+	styled := CategoryCard(food, false)
+	if !strings.Contains(styled, "\x1b[") || !strings.Contains(styled, "╭") {
+		t.Fatalf("styled card has no color or border:\n%s", styled)
+	}
+	card := plain(styled)
+	position := 0
+	for _, want := range []string{"FOOD", "Food", "#1", "Groceries and restaurants", "expense", "Created", "Updated"} {
+		index := strings.Index(card[position:], want)
+		if index < 0 {
+			t.Fatalf("styled card lacks %q or it is out of order:\n%s", want, card)
+		}
+		position += index + len(want)
+	}
+	lines := strings.Split(strings.TrimRight(card, "\n"), "\n")
+	for _, line := range lines {
+		if lipglossWidth(line) != lipglossWidth(lines[0]) {
+			t.Fatalf("card lines have different widths:\n%s", card)
+		}
+	}
+}
+
+func sampleTransactions() []transaction.View {
+	accounts := sampleAccounts()
+	categories := sampleCategories()
+	return []transaction.View{
+		{
+			Transaction: transaction.Transaction{ID: 12, Title: "Weekly market", Description: "fruit and vegetables", Amount: -5025, Type: transaction.Expense, Date: "2026-11-17", Tags: "#market #weekly"},
+			Account:     accounts[0], Category: categories[0],
+		},
+		{
+			Transaction: transaction.Transaction{ID: 11, Title: "Salary", Amount: 300000, Type: transaction.Income, Date: "2026-11-05"},
+			Account:     accounts[0], Category: categories[1],
+		},
+		{
+			Transaction: transaction.Transaction{ID: 9, Title: "Travel money", Amount: -55000, Type: transaction.Transfer, Date: "2026-10-30", PairID: 10},
+			Account:     accounts[0], Category: categories[2], Other: &accounts[2],
+		},
+		{
+			Transaction: transaction.Transaction{ID: 10, Title: "Travel money", Amount: 10000, Type: transaction.Transfer, Date: "2026-10-30", PairID: 9},
+			Account:     accounts[2], Category: categories[2], Other: &accounts[0],
+		},
+	}
+}
+
+func TestTransactionTable(t *testing.T) {
+	views := sampleTransactions()
+	styled := TransactionTable(views, false)
+	if !strings.Contains(styled, "\x1b[") || !strings.Contains(styled, "╭") {
+		t.Fatalf("styled table has no color or border:\n%s", styled)
+	}
+	const want = "" +
+		"ID  DATE        TITLE          CATEGORY  ACCOUNT        VALUE\n" +
+		"12  17/11/2026  Weekly market  FOOD      INTER      -R$ 50,25\n" +
+		"11  05/11/2026  Salary         SAL       INTER    R$ 3.000,00\n" +
+		"9   30/10/2026  Travel money   XFER      INTER     -R$ 550,00\n" +
+		"10  30/10/2026  Travel money   XFER      WISE         $100.00\n" +
+		"4 transactions\n"
+	if got := TransactionTable(views, true); got != want {
+		t.Fatalf("plain table =\n%s\nwant\n%s", got, want)
+	}
+	for _, text := range []string{"Weekly market", "FOOD", "INTER", "-R$ 50,25", "17/11/2026", "4 transactions"} {
+		if !strings.Contains(plain(styled), text) {
+			t.Errorf("styled table lacks %q:\n%s", text, plain(styled))
+		}
+	}
+	if got := TransactionTable(views[:1], true); !strings.HasSuffix(got, "\n1 transaction\n") {
+		t.Fatalf("singular count missing:\n%s", got)
+	}
+	if got := TransactionTable(nil, true); got != "No transactions yet. Run 'finux tx add'.\n" {
+		t.Fatalf("empty table = %q", got)
+	}
+}
+
+func TestTransactionCard(t *testing.T) {
+	views := sampleTransactions()
+	bare := TransactionCard(views[0], true)
+	if strings.ContainsAny(bare, "╭│─\x1b") {
+		t.Fatalf("plain card has borders or colors:\n%s", bare)
+	}
+	for _, want := range []string{"Weekly market\n", "fruit and vegetables\n", "ID        12\n", "Type      expense\n", "Value     -R$ 50,25\n", "Account   INTER  Banco Inter\n", "Category  FOOD  Food\n", "Date      17/11/2026\n", "Tags      #market #weekly\n", "Created   ", "Updated   "} {
+		if !strings.Contains(bare, want) {
+			t.Errorf("plain card lacks %q:\n%s", want, bare)
+		}
+	}
+	if strings.Contains(bare, "Transfer") {
+		t.Fatalf("expense card has a transfer line:\n%s", bare)
+	}
+	if got := TransactionCard(views[1], true); strings.Contains(got, "Tags") || !strings.Contains(got, "Value     R$ 3.000,00\n") {
+		t.Fatalf("income without tags:\n%s", got)
+	}
+	if got := TransactionCard(views[2], true); !strings.Contains(got, "Transfer  to WISE  Wise (transaction 10)\n") {
+		t.Fatalf("outgoing side:\n%s", got)
+	}
+	if got := TransactionCard(views[3], true); !strings.Contains(got, "Transfer  from INTER  Banco Inter (transaction 9)\n") || !strings.Contains(got, "Value     $100.00\n") {
+		t.Fatalf("incoming side:\n%s", got)
+	}
+
+	styled := TransactionCard(views[0], false)
+	if !strings.Contains(styled, "\x1b[") || !strings.Contains(styled, "╭") {
+		t.Fatalf("styled card has no color or border:\n%s", styled)
+	}
+	card := plain(styled)
+	// The order is the hierarchy: what, how much, where, then the small details.
+	position := 0
+	for _, want := range []string{"EXPENSE", "Weekly market", "#12", "fruit and vegetables", "-R$ 50,25", "BRL", "Account", "INTER", "Category", "FOOD", "Date", "17/11/2026", "Tags", "#market #weekly", "────", "Created", "Updated"} {
+		index := strings.Index(card[position:], want)
+		if index < 0 {
+			t.Fatalf("styled card lacks %q or it is out of order:\n%s", want, card)
+		}
+		position += index + len(want)
+	}
+	lines := strings.Split(strings.TrimRight(card, "\n"), "\n")
+	for _, line := range lines {
+		if lipglossWidth(line) != lipglossWidth(lines[0]) {
+			t.Fatalf("card lines have different widths:\n%s", card)
+		}
+	}
+	// An income card is green and an expense card is red: the border,
+	// the badge, the amount and the tags. The colors are fixed, because
+	// the colors of a terminal theme can make red and green look the same.
+	const green, red = "34;197;94", "239;68;68"
+	income := TransactionCard(views[1], false)
+	for _, want := range []string{"\x1b[38;2;" + green + "m╭", "48;2;" + green + "m", "38;2;" + green + "mR$ 3.000,00"} {
+		if !strings.Contains(income, want) {
+			t.Errorf("income card lacks %q:\n%q", want, income)
+		}
+	}
+	for _, want := range []string{"\x1b[38;2;" + red + "m╭", "48;2;" + red + "m", "38;2;" + red + "m-R$ 50,25", "\x1b[38;2;" + red + "m#market #weekly"} {
+		if !strings.Contains(styled, want) {
+			t.Errorf("expense card lacks %q:\n%q", want, styled)
+		}
+	}
+	if strings.Contains(income, red) || strings.Contains(styled, green) {
+		t.Fatalf("a card has the color of the other type:\n%q\n%q", income, styled)
+	}
+	if neutral := TransactionCard(views[2], false); strings.Contains(neutral, red+"m╭") || strings.Contains(neutral, green+"m╭") {
+		t.Fatalf("transfer card has the border of an income or an expense:\n%q", neutral)
+	}
+	if transfer := plain(TransactionCard(views[2], false)); !strings.Contains(transfer, "TRANSFER") || !strings.Contains(transfer, "To") || !strings.Contains(transfer, "WISE") {
+		t.Fatalf("styled transfer card:\n%s", transfer)
+	}
+	long := views[0]
+	long.Title, long.Description = strings.Repeat("t", 60), strings.Repeat("long description ", 12)
+	for _, line := range strings.Split(plain(TransactionCard(long, false)), "\n") {
+		if lipglossWidth(line) > 74 {
+			t.Fatalf("long text makes the card too wide: %q", line)
+		}
+	}
+}

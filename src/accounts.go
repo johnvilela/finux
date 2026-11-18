@@ -4,28 +4,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
-
 	"finux/src/account"
+	"finux/src/category"
+	"finux/src/code"
 	"finux/src/money"
+	"finux/src/transaction"
 	"finux/src/ui"
+
+	"gorm.io/gorm"
 )
-
-// usageError is a mistake in the command line. It gives exit status 2.
-type usageError string
-
-func (e usageError) Error() string { return string(e) }
-
-// notice ends a command with a message and exit status 0, for example
-// when the user cancels a prompt.
-type notice string
-
-func (n notice) Error() string { return string(n) }
-
-const cancelled = notice("Cancelled.")
 
 func accountsHelp() string {
 	return "Manage accounts\n\n" +
@@ -57,19 +46,24 @@ func accountsHelp() string {
   --name, --code, --description, --color
 
 ` + green.Render("Options for delete:") + `
-  --hard                Delete permanently; also works on archived accounts
+  --hard                Delete permanently, with the transactions of the account;
+                        also works on archived accounts
   --yes                 Do not ask for confirmation
 
 Without options, add and edit open a form.
 Without a code or id, edit, delete and restore open a selector.
 A command name wins over an account code: use 'finux ac show L' for an
 account with the code L.
+An archived account keeps its transactions. A permanent delete also deletes
+them. The other side of each transfer stays in its account as an expense or
+an income of the category OTHER.
 `
 }
 
 // accountsCommand runs one accounts subcommand.
 type accountsCommand struct {
 	streams
+	db    *gorm.DB
 	store *account.Store
 }
 
@@ -103,74 +97,17 @@ func runAccounts(args []string, io streams) int {
 	if err != nil {
 		return command.fail(err)
 	}
-	command.store = account.NewStore(db)
+	command.db, command.store = db, account.NewStore(db)
 	return command.fail(handler(rest))
 }
 
-// fail reports err and returns the exit status: 0 for nil and notices,
-// 2 for usage errors, 1 for the rest.
 func (c *accountsCommand) fail(err error) int {
-	var usage usageError
-	var message notice
-	switch {
-	case err == nil:
-		return 0
-	case errors.As(err, &message):
-		return write(c.streams, ui.Hint(string(message))+"\n")
-	case errors.As(err, &usage):
-		fmt.Fprintf(c.stderr, "finux: accounts: %v\nRun 'finux accounts --help' for usage.\n", err)
-		return 2
-	}
-	fmt.Fprintf(c.stderr, "finux: %v\n", err)
-	return 1
+	return exitStatus(c.streams, "accounts", err)
 }
 
 func (c *accountsCommand) print(text string) error {
 	_, err := fmt.Fprint(c.stdout, text)
 	return err
-}
-
-// parse reads flags and positional arguments in any order. It returns the
-// positional arguments and the names of the flags that were given.
-func parse(name string, args []string, define func(*flag.FlagSet), maxPositional int) ([]string, map[string]bool, error) {
-	flags := flag.NewFlagSet(name, flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	if define != nil {
-		define(flags)
-	}
-	var positional []string
-	for {
-		if err := flags.Parse(args); err != nil {
-			return nil, nil, usageError(name + ": " + err.Error())
-		}
-		if flags.NArg() == 0 {
-			break
-		}
-		positional = append(positional, flags.Arg(0))
-		args = flags.Args()[1:]
-	}
-	if len(positional) > maxPositional {
-		return nil, nil, usageError(name + ": unexpected argument: " + positional[maxPositional])
-	}
-	given := map[string]bool{}
-	flags.Visit(func(f *flag.Flag) { given[f.Name] = true })
-	return positional, given, nil
-}
-
-func reference(positional []string) string {
-	if len(positional) == 0 {
-		return ""
-	}
-	return positional[0]
-}
-
-// program runs an interactive screen and returns its final state.
-func program[M tea.Model](model M) (M, error) {
-	final, err := tea.NewProgram(model).Run()
-	if err != nil {
-		return model, fmt.Errorf("run screen: %w", err)
-	}
-	return final.(M), nil
 }
 
 type scope int
@@ -212,15 +149,11 @@ func (c *accountsCommand) resolve(command, ref, title string, in scope) (account
 	if len(accounts) == 0 {
 		return account.Account{}, empty
 	}
-	selector, err := program(ui.NewSelector(title, accounts))
+	index, err := pick(title, "account", "accounts", ui.AccountEntries(accounts))
 	if err != nil {
 		return account.Account{}, err
 	}
-	selected, ok := selector.Selected()
-	if !ok {
-		return selected, cancelled
-	}
-	return selected, nil
+	return accounts[index], nil
 }
 
 func (c *accountsCommand) taken(exceptID uint) func(string) bool {
@@ -242,14 +175,15 @@ func (c *accountsCommand) list(args []string) error {
 	if len(accounts) == 0 || !c.interactive {
 		return c.print(ui.AccountTable(accounts, c.plain))
 	}
-	selector, err := program(ui.NewSelector("Accounts", accounts))
+	index, err := pick("Accounts", "account", "accounts", ui.AccountEntries(accounts))
+	if errors.Is(err, cancelled) {
+		// Leaving the list is not worth a message.
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	if selected, ok := selector.Selected(); ok {
-		return c.print(ui.AccountCard(selected, c.plain))
-	}
-	return nil
+	return c.print(ui.AccountCard(accounts[index], c.plain))
 }
 
 func (c *accountsCommand) show(args []string) error {
@@ -271,7 +205,7 @@ func checkFlags(command string, draft account.Account, given map[string]bool) er
 	case given["name"] && draft.Name == "":
 		err = errors.New("name is empty")
 	case given["code"]:
-		err = account.ValidateCode(draft.Code)
+		err = code.Validate(draft.Code)
 	}
 	if err == nil && given["color"] {
 		if _, ok := account.ColorByKey(draft.Color); !ok {
@@ -302,7 +236,7 @@ func (c *accountsCommand) add(args []string) error {
 		return err
 	}
 	draft.Name = strings.TrimSpace(draft.Name)
-	draft.Code = account.NormalizeCode(draft.Code)
+	draft.Code = code.Normalize(draft.Code)
 	draft.Currency = strings.ToUpper(strings.TrimSpace(draft.Currency))
 	draft.Color = strings.ToLower(strings.TrimSpace(draft.Color))
 	if err := checkFlags("add", draft, given); err != nil {
@@ -320,7 +254,7 @@ func (c *accountsCommand) add(args []string) error {
 	}
 	if given["name"] && given["currency"] {
 		if !given["code"] {
-			if draft.Code = account.SuggestCode(draft.Name, c.taken(0)); draft.Code == "" {
+			if draft.Code = code.Suggest(draft.Name, c.taken(0)); draft.Code == "" {
 				return usageError(fmt.Sprintf("add: cannot make a code from the name %q; use --code", draft.Name))
 			}
 		}
@@ -383,7 +317,7 @@ func (c *accountsCommand) edit(args []string) error {
 		return err
 	}
 	changes.Name = strings.TrimSpace(changes.Name)
-	changes.Code = account.NormalizeCode(changes.Code)
+	changes.Code = code.Normalize(changes.Code)
 	changes.Color = strings.ToLower(strings.TrimSpace(changes.Color))
 	if err := checkFlags("edit", changes, given); err != nil {
 		return err
@@ -449,10 +383,21 @@ func (c *accountsCommand) delete(args []string) error {
 	if current.Archived() && !hard {
 		return fmt.Errorf("account %s is already archived; use --hard to delete it permanently", current.Code)
 	}
+	// A permanent delete also deletes the transactions of the account.
+	var plain, transfers int64
+	if hard && transactionsReady(c.db) {
+		if plain, transfers, err = transaction.NewStore(c.db).AccountUsage(current.ID); err != nil {
+			return err
+		}
+	}
+	usage := ""
+	if plain+transfers > 0 {
+		usage = ", with " + plural(plain, "transaction") + " and " + plural(transfers, "transfer")
+	}
 	if !yes {
 		question, label := fmt.Sprintf("Archive account %s (%s)?", current.Code, current.Name), "Archive"
 		if hard {
-			question, label = fmt.Sprintf("Delete account %s (%s) permanently?", current.Code, current.Name), "Delete permanently"
+			question, label = fmt.Sprintf("Delete account %s (%s) permanently%s?", current.Code, current.Name, usage), "Delete permanently"
 		}
 		confirm, err := program(ui.NewConfirm(question, label, hard))
 		if err != nil {
@@ -463,15 +408,35 @@ func (c *accountsCommand) delete(args []string) error {
 		}
 	}
 	if hard {
-		if err := c.store.Delete(current.ID); err != nil {
+		if err := c.purge(current, transfers > 0); err != nil {
 			return err
 		}
-		return c.print(ui.Success("Account "+current.Code+" deleted permanently") + "\n")
+		return c.print(ui.Success("Account "+current.Code+" deleted permanently"+usage) + "\n")
 	}
 	if err := c.store.Archive(current.ID); err != nil {
 		return err
 	}
 	return c.print(ui.Success("Account "+current.Code+" archived") + "\n")
+}
+
+// purge deletes an account and its transactions in one step. The other
+// side of each of its transfers goes to the category OTHER.
+func (c *accountsCommand) purge(current account.Account, hasTransfers bool) error {
+	return c.db.Transaction(func(tx *gorm.DB) error {
+		if transactionsReady(tx) {
+			var other category.Category
+			if hasTransfers {
+				var err error
+				if other, err = otherCategory(tx); err != nil {
+					return fmt.Errorf("account %s has transfers: %w", current.Code, err)
+				}
+			}
+			if err := transaction.NewStore(tx).PurgeAccount(current, other); err != nil {
+				return err
+			}
+		}
+		return account.NewStore(tx).Delete(current.ID)
+	})
 }
 
 func (c *accountsCommand) restore(args []string) error {

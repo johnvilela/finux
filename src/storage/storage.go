@@ -28,26 +28,44 @@ func Path() (string, error) {
 	return filepath.Join(home, ".finux", "finux.db"), nil
 }
 
+// Report says what Init did.
+type Report struct {
+	// Created is true when Init created the database file.
+	Created bool
+	// NewTables lists the tables Init created, in the order of the models.
+	NewTables []string
+}
+
 // Init creates the database file and its directory if necessary, then
-// migrates models. It keeps existing data. It reports whether it created
-// the file.
-func Init(path string, models ...any) (created bool, err error) {
+// migrates models. It keeps existing data.
+func Init(path string, models ...any) (Report, error) {
+	var report Report
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		created = true
+		report.Created = true
 	} else if err != nil {
-		return false, fmt.Errorf("check database %s: %w", path, err)
+		return Report{}, fmt.Errorf("check database %s: %w", path, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return false, fmt.Errorf("create database directory: %w", err)
+		return Report{}, fmt.Errorf("create database directory: %w", err)
 	}
 	db, err := connect(path)
 	if err != nil {
-		return false, err
+		return Report{}, err
+	}
+	for _, model := range models {
+		if db.Migrator().HasTable(model) {
+			continue
+		}
+		statement := &gorm.Statement{DB: db}
+		if err := statement.Parse(model); err != nil {
+			return Report{}, fmt.Errorf("read model %T: %w", model, err)
+		}
+		report.NewTables = append(report.NewTables, statement.Schema.Table)
 	}
 	if err := db.AutoMigrate(models...); err != nil {
-		return false, fmt.Errorf("migrate database %s: %w", path, err)
+		return Report{}, fmt.Errorf("migrate database %s: %w", path, err)
 	}
-	return created, nil
+	return report, nil
 }
 
 // Open opens a database that Init created. It does not create or migrate

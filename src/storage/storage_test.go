@@ -28,9 +28,9 @@ func TestPath(t *testing.T) {
 
 func TestInitCreatesAndMigrates(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "dir", "finux.db")
-	created, err := Init(path, &note{})
-	if err != nil || !created {
-		t.Fatalf("first Init = %v, %v; want created", created, err)
+	report, err := Init(path, &note{})
+	if err != nil || !report.Created || len(report.NewTables) != 1 || report.NewTables[0] != "notes" {
+		t.Fatalf("first Init = %+v, %v; want created with the new table notes", report, err)
 	}
 	db, err := Open(path)
 	if err != nil {
@@ -39,9 +39,14 @@ func TestInitCreatesAndMigrates(t *testing.T) {
 	if err := db.Create(&note{Text: "hello"}).Error; err != nil {
 		t.Fatalf("table not migrated: %v", err)
 	}
-	created, err = Init(path, &note{})
-	if err != nil || created {
-		t.Fatalf("second Init = %v, %v; want not created", created, err)
+	report, err = Init(path, &note{})
+	if err != nil || report.Created || len(report.NewTables) != 0 {
+		t.Fatalf("second Init = %+v, %v; want not created and no new tables", report, err)
+	}
+	// A new model in a database that exists gives only its table.
+	report, err = Init(path, &note{}, &entry{})
+	if err != nil || report.Created || len(report.NewTables) != 1 || report.NewTables[0] != "entries" {
+		t.Fatalf("Init with a new model = %+v, %v; want only the new table entries", report, err)
 	}
 	reopened, err := Open(path)
 	if err != nil {

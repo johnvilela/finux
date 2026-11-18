@@ -22,13 +22,16 @@ Your personal finance manager
 Usage: finux [command]
 
 Commands:
-  init          Set up the database
-  doctor        Check the database
-  accounts, ac  Manage accounts
-  help          Show this help
+  init              Set up the database
+  doctor            Check the database
+  reseed            Add missing base data
+  accounts, ac      Manage accounts
+  categories, ct    Manage categories
+  transactions, tx  Manage transactions
+  help              Show this help
 
 Options:
-  -h, --help    Show this help
+  -h, --help        Show this help
 `
 
 var (

@@ -7,10 +7,17 @@ import (
 	"os"
 	"strconv"
 
+	"time"
+
 	"finux/src/account"
+	"finux/src/category"
+	"finux/src/code"
 	"finux/src/money"
 	"finux/src/storage"
+	"finux/src/transaction"
 	"finux/src/ui"
+
+	"gorm.io/gorm"
 )
 
 // devDatabase is the database of a development build. 'make dev' sets it
@@ -45,8 +52,53 @@ var seedAccounts = []struct {
 }
 
 // seedBatch is the number of accounts a seed adds to a database that
-// exists.
-const seedBatch = 3
+// exists. seedMovements is the number of transactions it adds: one
+// transfer, which is two transactions, and expenses or incomes.
+const (
+	seedBatch     = 3
+	seedMovements = 5
+)
+
+// seedEntry is one sample transaction. The account and the category are
+// codes. to is the destination of a transfer and received its amount in
+// the other currency.
+type seedEntry struct {
+	title, account, category, tags string
+	value                          int64
+	daysAgo                        int
+	to                             string
+	received                       int64
+}
+
+// seedTransactions is the base data of a new development database. It
+// has all types, tags in use by many transactions, a transfer in one
+// currency and a transfer between two currencies.
+var seedTransactions = []seedEntry{
+	{title: "Salary", account: "INTER", category: "SAL", tags: "#work", value: 650000, daysAgo: 20},
+	{title: "Rent", account: "INTER", category: "HOME", tags: "#fixed", value: 180000, daysAgo: 18},
+	{title: "Electricity", account: "INTER", category: "BILLS", tags: "#fixed", value: 21050, daysAgo: 15},
+	{title: "Internet", account: "INTER", category: "BILLS", tags: "#fixed", value: 9990, daysAgo: 15},
+	{title: "Travel money", account: "INTER", category: "XFER", tags: "#travel", value: 55000, daysAgo: 14, to: "WISE", received: 10000},
+	{title: "Weekly market", account: "NUBAN", category: "FOOD", tags: "#market #weekly", value: 34270, daysAgo: 12},
+	{title: "Headphones", account: "WISE", category: "SHOP", tags: "#tech", value: 7999, daysAgo: 11},
+	{title: "Cinema", account: "NUBAN", category: "FUN", tags: "#weekend", value: 6400, daysAgo: 9},
+	{title: "Website project", account: "INTER", category: "FREE", tags: "#work", value: 240000, daysAgo: 8},
+	{title: "Fuel", account: "NUBAN", category: "TRANS", tags: "#car", value: 25000, daysAgo: 7},
+	{title: "Weekly market", account: "NUBAN", category: "FOOD", tags: "#market #weekly", value: 29815, daysAgo: 5},
+	{title: "Bakery", account: "CASH", category: "FOOD", tags: "#market", value: 1850, daysAgo: 3},
+	{title: "Card payment", account: "INTER", category: "XFER", tags: "#fixed", value: 35075, daysAgo: 2, to: "NUBAN"},
+	{title: "Concert tickets", account: "REVOL", category: "FUN", tags: "#weekend", value: 4500, daysAgo: 30},
+	{title: "Mining reward", account: "BTC", category: "INV", value: 250000, daysAgo: 40},
+}
+
+// seedMovementPool is the pool for the expenses and incomes a seed adds
+// to a database that exists.
+var seedMovementPool = []struct{ title, category, tags string }{
+	{"Weekly market", "FOOD", "#market #weekly"}, {"Bakery", "FOOD", "#market"}, {"Restaurant", "FOOD", "#weekend"},
+	{"Fuel", "TRANS", "#car"}, {"Bus pass", "TRANS", ""}, {"Pharmacy", "HEALT", ""}, {"Cinema", "FUN", "#weekend"},
+	{"Books", "EDU", ""}, {"Clothes", "SHOP", ""}, {"Phone bill", "BILLS", "#fixed"}, {"Electricity", "BILLS", "#fixed"},
+	{"Salary", "SAL", "#work"}, {"Website project", "FREE", "#work"}, {"Dividends", "INV", ""}, {"Gift", "OTHER", ""},
+}
 
 // seedNames and seedDescriptions are the pools for the accounts a seed
 // adds to a database that exists.
@@ -65,12 +117,14 @@ func seedHelp() string {
 		green.Render("Usage:") + ` finux seed [--new-db]
 
 Applies all migrations to the development database, then adds sample data:
-  - a database that does not exist is created with a base set of accounts;
-  - a database that exists keeps its data and gets ` + strconv.Itoa(seedBatch) + ` more random accounts.
+  - a database that does not exist is created with a base set of accounts
+    and transactions;
+  - a database that exists keeps its data and gets ` + strconv.Itoa(seedBatch) + ` more random accounts
+    and ` + strconv.Itoa(seedMovements) + ` more random transactions.
 'make dev' runs it after each build.
 
 ` + green.Render("Options:") + `
-  --new-db  Delete the database first, then create it with the base accounts
+  --new-db  Delete the database first, then create it with the base data
 
 It only works on the development database of this build:
   ` + devDatabase + `
@@ -105,7 +159,7 @@ func seed(path string, fresh bool) (string, error) {
 			return "", fmt.Errorf("remove old database: %w", err)
 		}
 	}
-	created, err := storage.Init(path, models...)
+	setup, err := setupDatabase(path)
 	if err != nil {
 		return "", err
 	}
@@ -113,21 +167,139 @@ func seed(path string, fresh bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	store := account.NewStore(db)
-	if created {
+	store, transactions := account.NewStore(db), transaction.NewStore(db)
+	if setup.created {
 		if err := seedBase(store); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Development database created: %s (%d accounts)", path, len(seedAccounts)), nil
+		added, err := seedBaseTransactions(db)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Development database created: %s (%d accounts, %d transactions)", path, len(seedAccounts), added), nil
 	}
 	if err := seedMore(store, seedBatch); err != nil {
+		return "", err
+	}
+	added, err := seedMoreTransactions(db, seedMovements)
+	if err != nil {
 		return "", err
 	}
 	all, err := store.List(true)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Development database updated: %s (%d accounts added, %d in total)", path, seedBatch, len(all)), nil
+	movements, err := transactions.List(transaction.Filter{})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Development database updated: %s (%d accounts and %d transactions added; %d accounts and %d transactions in total)",
+		path, seedBatch, added, len(all), len(movements)), nil
+}
+
+// daysAgo returns the date that many days before today.
+func daysAgo(days int) string {
+	return time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+}
+
+// seedBaseTransactions adds the base transactions. It returns the number
+// of transactions in the database: a transfer is two.
+func seedBaseTransactions(db *gorm.DB) (int, error) {
+	accounts, categories, store := account.NewStore(db), category.NewStore(db), transaction.NewStore(db)
+	added := 0
+	for _, entry := range seedTransactions {
+		from, err := accounts.Find(entry.account, false)
+		if err != nil {
+			return added, fmt.Errorf("account %s: %w", entry.account, err)
+		}
+		group, err := categories.Find(entry.category)
+		if err != nil {
+			return added, fmt.Errorf("category %s: %w", entry.category, err)
+		}
+		draft := transaction.Draft{
+			Title: entry.title, Value: entry.value, AccountID: from.ID, CategoryID: group.ID,
+			Date: daysAgo(entry.daysAgo), Tags: entry.tags, Received: entry.received, Type: transaction.Expense,
+		}
+		added++
+		switch {
+		case entry.to != "":
+			to, err := accounts.Find(entry.to, false)
+			if err != nil {
+				return added, fmt.Errorf("account %s: %w", entry.to, err)
+			}
+			draft.Type, draft.ToAccountID = transaction.Transfer, to.ID
+			added++
+		case group.Color == "green":
+			draft.Type = transaction.Income
+		}
+		if _, err := store.Create(draft); err != nil {
+			return added, fmt.Errorf("create transaction %s: %w", entry.title, err)
+		}
+	}
+	return added, nil
+}
+
+// seedMoreTransactions adds count transactions with random values in the
+// last 60 days: one transfer, which is two transactions, and expenses or
+// incomes. It uses the accounts and the categories the database has, so
+// it adds fewer when they are missing. It returns the number it added.
+func seedMoreTransactions(db *gorm.DB, count int) (int, error) {
+	accounts, err := account.NewStore(db).List(false)
+	if err != nil {
+		return 0, err
+	}
+	categories, store := category.NewStore(db), transaction.NewStore(db)
+	value := func(currency string) int64 {
+		// Up to 500.00 in a normal currency or 0.005 BTC.
+		if currency == "BTC" {
+			return 1_000 + rand.Int64N(499_000)
+		}
+		return 100 + rand.Int64N(49_900)
+	}
+	added := 0
+	if transfer, err := categories.Find(category.TransferCode); err == nil && len(accounts) > 1 && count > 1 {
+		from, to := rand.IntN(len(accounts)), rand.IntN(len(accounts)-1)
+		if to >= from {
+			to++
+		}
+		draft := transaction.Draft{
+			Title: "Transfer to " + accounts[to].Name, Type: transaction.Transfer, Value: value(accounts[from].Currency),
+			AccountID: accounts[from].ID, ToAccountID: accounts[to].ID, CategoryID: transfer.ID, Date: daysAgo(rand.IntN(60)),
+		}
+		if accounts[from].Currency != accounts[to].Currency {
+			draft.Received = value(accounts[to].Currency)
+		}
+		if _, err := store.Create(draft); err != nil {
+			return added, fmt.Errorf("create transfer: %w", err)
+		}
+		added += 2
+	}
+	for len(accounts) > 0 && added < count {
+		entry := seedMovementPool[rand.IntN(len(seedMovementPool))]
+		group, err := categories.Find(entry.category)
+		if err != nil {
+			// The user deleted this category: use what is there.
+			all, err := categories.List()
+			if err != nil || len(all) == 0 {
+				return added, err
+			}
+			group = all[rand.IntN(len(all))]
+		}
+		kind := transaction.Expense
+		if group.Color == "green" {
+			kind = transaction.Income
+		}
+		current := accounts[rand.IntN(len(accounts))]
+		_, err = store.Create(transaction.Draft{
+			Title: entry.title, Type: kind, Value: value(current.Currency), AccountID: current.ID, CategoryID: group.ID,
+			Date: daysAgo(rand.IntN(60)), Tags: entry.tags,
+		})
+		if err != nil {
+			return added, fmt.Errorf("create transaction %s: %w", entry.title, err)
+		}
+		added++
+	}
+	return added, nil
 }
 
 func seedBase(store *account.Store) error {
@@ -181,7 +353,7 @@ func seedMore(store *account.Store, count int) error {
 		}
 		created := account.Account{
 			Name:           name,
-			Code:           account.SuggestCode(name, taken),
+			Code:           code.Suggest(name, taken),
 			Description:    seedDescriptions[rand.IntN(len(seedDescriptions))],
 			Color:          account.Palette[rand.IntN(len(account.Palette))].Key,
 			Currency:       currency,

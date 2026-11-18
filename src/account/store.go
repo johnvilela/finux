@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"finux/src/code"
+
 	"gorm.io/gorm"
 )
 
@@ -29,7 +31,7 @@ func NewStore(db *gorm.DB) *Store {
 func (s *Store) prepare(account *Account) error {
 	account.Name = strings.TrimSpace(account.Name)
 	account.Description = strings.TrimSpace(account.Description)
-	account.Code = NormalizeCode(account.Code)
+	account.Code = code.Normalize(account.Code)
 	if err := account.Validate(); err != nil {
 		return err
 	}
@@ -45,10 +47,10 @@ func (s *Store) prepare(account *Account) error {
 
 // CodeTaken reports whether an account other than exceptID has the code.
 // Archived accounts keep their codes.
-func (s *Store) CodeTaken(code string, exceptID uint) (bool, error) {
+func (s *Store) CodeTaken(value string, exceptID uint) (bool, error) {
 	var count int64
 	err := s.db.Unscoped().Model(&Account{}).
-		Where("code = ? AND id <> ?", NormalizeCode(code), exceptID).Count(&count).Error
+		Where("code = ? AND id <> ?", code.Normalize(value), exceptID).Count(&count).Error
 	return count > 0, err
 }
 
@@ -77,14 +79,46 @@ func (s *Store) List(includeArchived bool) ([]Account, error) {
 		query = query.Unscoped()
 	}
 	var accounts []Account
-	return accounts, query.Order("name COLLATE NOCASE, id").Find(&accounts).Error
+	if err := query.Order("name COLLATE NOCASE, id").Find(&accounts).Error; err != nil {
+		return nil, err
+	}
+	return accounts, s.movements(accounts)
+}
+
+// movements fills the Movement of accounts: the sum of the amounts of
+// their transactions. The transactions table belongs to the transaction
+// package; a database from before that package does not have it.
+func (s *Store) movements(accounts []Account) error {
+	if len(accounts) == 0 || !s.db.Migrator().HasTable("transactions") {
+		return nil
+	}
+	var sums []struct {
+		AccountID uint
+		Total     int64
+	}
+	err := s.db.Table("transactions").Select("account_id, SUM(amount) AS total").Group("account_id").Scan(&sums).Error
+	if err != nil {
+		return err
+	}
+	totals := map[uint]int64{}
+	for _, sum := range sums {
+		totals[sum.AccountID] = sum.Total
+	}
+	for i := range accounts {
+		accounts[i].Movement = totals[accounts[i].ID]
+	}
+	return nil
 }
 
 // ListArchived returns only archived accounts ordered by name.
 func (s *Store) ListArchived() ([]Account, error) {
 	var accounts []Account
-	return accounts, s.db.Unscoped().Where("deleted_at IS NOT NULL").
+	err := s.db.Unscoped().Where("deleted_at IS NOT NULL").
 		Order("name COLLATE NOCASE, id").Find(&accounts).Error
+	if err != nil {
+		return nil, err
+	}
+	return accounts, s.movements(accounts)
 }
 
 // Find returns the account with the given id (all digits) or code.
@@ -93,7 +127,7 @@ func (s *Store) Find(reference string, includeArchived bool) (Account, error) {
 	if includeArchived {
 		query = query.Unscoped()
 	}
-	reference = NormalizeCode(reference)
+	reference = code.Normalize(reference)
 	if id, err := strconv.ParseUint(reference, 10, 64); err == nil {
 		query = query.Where("id = ?", id)
 	} else {
@@ -105,7 +139,11 @@ func (s *Store) Find(reference string, includeArchived bool) (Account, error) {
 	} else if err != nil {
 		return Account{}, err
 	}
-	return account, nil
+	found := []Account{account}
+	if err := s.movements(found); err != nil {
+		return Account{}, err
+	}
+	return found[0], nil
 }
 
 // Archive soft-deletes an account. It stays in the database.

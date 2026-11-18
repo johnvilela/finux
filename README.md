@@ -13,8 +13,8 @@ compiler, such as GCC, when the database driver is used.
 - GORM (`gorm.io/gorm`) for mapping Go structs to database tables.
 - GORM's official SQLite driver (`gorm.io/driver/sqlite`) for local storage, using CGO.
 
-Lip Gloss styles all output. Bubble Tea and Bubbles run the account form, the
-account selector and the confirmation prompt. GORM stores accounts in SQLite.
+Lip Gloss styles all output. Bubble Tea and Bubbles run the forms, the
+selectors and the confirmation prompt. GORM stores the data in SQLite.
 `github.com/charmbracelet/x/term` (already required by Bubble Tea) detects if
 input and output are terminals.
 
@@ -47,13 +47,16 @@ Your personal finance manager
 Usage: finux [command]
 
 Commands:
-  init          Set up the database
-  doctor        Check the database
-  accounts, ac  Manage accounts
-  help          Show this help
+  init              Set up the database
+  doctor            Check the database
+  reseed            Add missing base data
+  accounts, ac      Manage accounts
+  categories, ct    Manage categories
+  transactions, tx  Manage transactions
+  help              Show this help
 
 Options:
-  -h, --help    Show this help
+  -h, --help        Show this help
 ```
 
 The executable stays in the project; it is not installed on your PATH.
@@ -77,10 +80,12 @@ make dev
 `finux-dev.db` in the root of the project. Git ignores the file. After each
 build, `make dev` applies the migrations to it and adds sample data:
 
-- If the database does not exist, it is created with a base set of 8 accounts.
-- If the database exists, it keeps its data and gets 3 more random accounts.
+- If the database does not exist, it is created with the base categories, a
+  base set of 8 accounts and 17 transactions.
+- If the database exists, it keeps its data and gets 3 more random accounts and
+  5 more random transactions.
 
-To delete the database and start again from the base accounts:
+To delete the database and start again from the base data:
 
 ```sh
 make dev NEW_DB=1
@@ -108,7 +113,8 @@ Run `finux init` one time before the other commands:
 ```
 
 `init` creates the database file if it does not exist, then applies the database
-migrations. Run it again after an update of Finux; it keeps your data. Other
+migrations. The first setup also adds the base categories. Run it again after an
+update of Finux; it keeps your data. Other
 commands do not create or migrate the database. Without a database, they stop
 and tell you to run `finux init`.
 
@@ -124,6 +130,17 @@ It does not change the database. Its exit status is 1 when a check fails:
 ✓ Database found: /home/you/.finux/finux.db
 ✓ Migrations up to date
 ```
+
+`init` adds the base categories one time only. A base category that you delete
+does not come back on the next `init`. To add the base categories that are
+missing, run:
+
+```sh
+./bin/finux reseed
+```
+
+`reseed` finds base categories by code and does not change the categories you
+have.
 
 ## Accounts
 
@@ -159,8 +176,8 @@ currency and an opening balance.
   archived account keeps its code.
 - **Currency**: `USD`, `EUR`, `BRL` or `BTC`. It does not change after creation.
 - **Opening balance**: set on creation only. Use `1234.56` or `1234,56`; negative
-  values are permitted. The balance of an account is its opening balance until
-  transactions exist.
+  values are permitted. The balance of an account is its opening balance plus
+  its transactions.
 - **Color**: one of 16 colors: red, orange, amber, yellow, lime, green, emerald,
   teal, cyan, sky, blue, indigo, violet, purple, pink, slate.
 
@@ -180,9 +197,151 @@ the form:
 the same selector as `finux ac`. `delete` asks for confirmation unless you give
 `--yes`.
 
+An archived account keeps its transactions, but takes no new ones.
+`delete --hard` also deletes the transactions of the account. For each transfer
+of the account, the transaction in the other account stays: it becomes an
+expense or an income of the category `OTHER`, with a note in its description.
+
 When input or output is not a terminal, Finux does not open forms, selectors or
 prompts: give the values as options. `finux ac` then prints a plain table, and
 details are plain text without borders.
+
+## Categories
+
+`finux categories` (short form: `finux ct`) manages the categories of your
+money movements.
+
+```text
+finux ct                             List categories; select one to see its details
+finux ct <code|id>                   Show the details of a category
+finux ct add [options]               Create a category
+finux ct edit [code|id] [options]    Change the name, code, description or color
+finux ct delete [code|id]            Delete a category permanently
+finux ct help                        Show all commands and options
+```
+
+Short forms: `l` for `list`, `a` for `add`, `e` for `edit` and `d` for `delete`.
+
+A category has an id, a name, an optional description, a code and a color. The
+code follows the same rules as an account code. The color gives the type of the
+category:
+
+- `red`: expense
+- `green`: income
+- `grey`: neutral, for example a transfer between your accounts
+
+The base categories are Food, Housing, Transport, Health, Education, Leisure,
+Shopping, Bills and Taxes (red); Salary, Freelance and Investments (green);
+Transfer and Other (grey).
+
+The screens are the same as in accounts: a list with a search input, and a form
+for `add` and `edit`. The options are `--name`, `--code`, `--description` and
+`--color`. With `--name` and `--color`, `add` does not open the form:
+
+```sh
+./bin/finux ct add --name "Pet Care" --color red
+./bin/finux ct PCARE
+./bin/finux ct e PCARE --code PETS
+./bin/finux ct d PETS --yes
+```
+
+Delete is permanent; categories have no archive. `delete` asks for confirmation
+unless you give `--yes`. The transactions of a deleted category go to the
+category `OTHER`. `OTHER` cannot be deleted while it has transactions.
+
+The color limits the transactions of a category: red is for expenses, green for
+incomes and grey for all types. Finux refuses a new color that the transactions
+of the category do not accept.
+
+## Transactions
+
+`finux transactions` (short form: `finux tx`) manages the movements of money in
+your accounts.
+
+```text
+finux tx                         List transactions; select one to see its details
+finux tx [filters]               The same, for the transactions the filters select
+finux tx <id>                    Show the details of a transaction
+finux tx add [options]           Create a transaction
+finux tx edit [id] [options]     Change a transaction
+finux tx delete [id]             Delete a transaction permanently
+finux tx help                    Show all commands and options
+```
+
+Short forms: `l` for `list`, `a` for `add`, `e` for `edit` and `d` for `delete`.
+
+A transaction has an id, a title (at most 60 characters), an optional
+description (at most 200 characters), a value, a type, a category, tags, an
+account and a date.
+
+- **Type**: `expense`, `income` or `transfer`. A red category makes an expense
+  and a green category makes an income, so `--type` is necessary only with a
+  grey category.
+- **Value**: a positive amount in the currency of the account. The type gives
+  the direction of the money.
+- **Category**: required. An expense uses a red or grey category, an income a
+  green or grey one, and a transfer a grey one.
+- **Tags**: words such as `#market #weekly`: letters, digits and `_`, in
+  lowercase. The `#` is optional on the command line; a shell reads a bare `#`
+  as a comment, so write `--tags "market weekly"`.
+- **Date**: `DD/MM/YYYY` or `YYYY/MM/DD`. The default is today. Finux shows
+  dates as `DD/MM/YYYY`.
+
+```sh
+./bin/finux tx add --title "Weekly market" --value 50,25 --account INTER --category FOOD --tags "market weekly"
+./bin/finux tx add --title Salary --value 3000 --account INTER --category SAL --date 05/11/2026
+./bin/finux tx 1
+./bin/finux tx e 1 --value 60 --date 2026/11/18
+./bin/finux tx d 1 --yes
+```
+
+With `--title`, `--value`, `--account` and `--category`, `add` does not open the
+form. The form suggests the titles and the tags that other transactions have:
+type `wee` and the title shows `Weekly market`; type `#mar` and the tags show
+`#market`. Press Tab to accept the suggestion, the up and down arrows to see
+other suggestions, or continue to type a different value.
+
+### Transfers
+
+A transfer between accounts is two transactions that point to each other: one
+takes the money out of an account and one puts it in the other account.
+
+```sh
+./bin/finux tx add --title "Card payment" --value 200 --account INTER --to NU
+./bin/finux tx add --title "Travel money" --value 550 --account INTER --to WISE --received 100
+```
+
+`--to` makes a transfer. Its category is `XFER` unless you give one. When the
+two accounts have different currencies, `--received` gives the amount that the
+other account receives.
+
+A change or a delete of one of the two transactions also changes or deletes the
+other. Between two currencies, a new value changes only its transaction. A
+transfer keeps its type and its accounts: to change them, delete the transfer
+and create a new one.
+
+### Filters
+
+```sh
+./bin/finux tx --category FOOD
+./bin/finux tx --tag market
+./bin/finux tx --search market
+./bin/finux tx --date 2026            # a year
+./bin/finux tx --date 11/2026         # a month; 2026/11 is the same
+./bin/finux tx --date 17/11/2026      # a date
+./bin/finux tx --account INTER
+./bin/finux tx --type expense
+```
+
+The interactive list reads like a bank statement: one line for each transaction
+under a heading for its day, the amounts in one column, and at the top the
+totals of the list for each currency (what came in, what went out and the
+difference; transfers do not count).
+
+You can use many filters in one command. In the interactive list, the search
+input finds transactions by title and also reads filters: `#tag`, `@ACCOUNT`,
+`cat:CODE`, `type:TYPE` and a date such as `2026`, `2026-11`, `11/2026` or
+`17/11/2026`. For example: `market #weekly @inter 2026-11`.
 
 ## Development
 

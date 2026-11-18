@@ -10,13 +10,16 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"finux/src/account"
+	"finux/src/category"
+	"finux/src/code"
 	"finux/src/money"
 )
 
-// Field identifies one input of the account form.
+// Field identifies one input of a form.
 type Field int
 
-// The fields of the account form, in display order.
+// The fields of a form, in display order. The category form does not
+// have the currency and balance fields.
 const (
 	FieldName Field = iota
 	FieldCode
@@ -32,7 +35,7 @@ var fieldLabels = [fieldCount]string{"Name", "Code", "Description", "Currency", 
 const (
 	labelWidth   = 17
 	paletteWidth = 4
-	formWidth    = 72
+	formWidth    = 78
 )
 
 // FormOptions configures an account form.
@@ -66,10 +69,20 @@ var formKeyMap = formKeys{
 	Down:   key.NewBinding(key.WithKeys("down")),
 }
 
-// Form is the interactive screen that creates or edits an account.
+// formColor is one choice of the color field.
+type formColor struct {
+	key, hex string
+	// label is the text of the choice, for example "red expense".
+	label string
+}
+
+// Form is the interactive screen that creates or edits an account or a
+// category.
 type Form struct {
 	title       string
 	initial     account.Account
+	category    *category.Category
+	colors      []formColor
 	edit        bool
 	fields      []Field
 	focus       int
@@ -87,64 +100,116 @@ type Form struct {
 
 // NewForm builds an account form.
 func NewForm(options FormOptions) Form {
-	f := Form{title: options.Title, initial: options.Initial, edit: options.Edit, taken: options.Taken, help: help.New(), width: formWidth}
-	if f.taken == nil {
-		f.taken = func(string) bool { return false }
-	}
-	if f.title == "" {
-		f.title = "New account"
-		if f.edit {
-			f.title = "Edit account"
+	title := options.Title
+	if title == "" {
+		title = "New account"
+		if options.Edit {
+			title = "Edit account"
 		}
 	}
 	hidden := map[Field]bool{}
 	for _, field := range options.Preset {
 		hidden[field] = true
 	}
-	if f.edit {
+	if options.Edit {
 		hidden[FieldCurrency], hidden[FieldBalance] = true, true
+	}
+	colors := make([]formColor, len(account.Palette))
+	for i, color := range account.Palette {
+		colors[i] = formColor{color.Key, color.Hex, color.Key}
+	}
+	f := Form{title: title, initial: options.Initial, edit: options.Edit, taken: options.Taken, colors: colors}
+	for i, code := range money.Codes() {
+		if code == options.Initial.Currency {
+			f.currency = i
+		}
+	}
+	f.build(hidden, options.Initial.Color, map[Field]string{
+		FieldName:        options.Initial.Name,
+		FieldCode:        options.Initial.Code,
+		FieldDescription: options.Initial.Description,
+		FieldBalance:     options.Balance,
+	}, "Banco Inter", "INTER")
+	return f
+}
+
+// CategoryFormOptions configures a category form.
+type CategoryFormOptions struct {
+	// Title is the heading of the form.
+	Title string
+	// Initial holds the starting values. In edit mode it is the category to change.
+	Initial category.Category
+	// Edit keeps the code as it is when the name changes.
+	Edit bool
+	// Preset lists fields that already have a final value. The form hides them.
+	Preset []Field
+	// Taken reports whether another category uses a code.
+	Taken func(code string) bool
+}
+
+// NewCategoryForm builds a category form. Its fields are name, code,
+// description and color.
+func NewCategoryForm(options CategoryFormOptions) Form {
+	title := options.Title
+	if title == "" {
+		title = "New category"
+		if options.Edit {
+			title = "Edit category"
+		}
+	}
+	hidden := map[Field]bool{FieldCurrency: true, FieldBalance: true}
+	for _, field := range options.Preset {
+		hidden[field] = true
+	}
+	colors := make([]formColor, len(category.Colors))
+	for i, color := range category.Colors {
+		colors[i] = formColor{color.Key, color.Hex, color.Key + " " + color.Meaning}
+	}
+	initial := options.Initial
+	f := Form{title: title, category: &initial, edit: options.Edit, taken: options.Taken, colors: colors}
+	f.build(hidden, initial.Color, map[Field]string{
+		FieldName:        initial.Name,
+		FieldCode:        initial.Code,
+		FieldDescription: initial.Description,
+	}, "Groceries", "FOOD")
+	return f
+}
+
+// build sets up the fields, the inputs and the first focus of a form.
+func (f *Form) build(hidden map[Field]bool, color string, values map[Field]string, namePlaceholder, codePlaceholder string) {
+	f.help, f.width = help.New(), formWidth
+	if f.taken == nil {
+		f.taken = func(string) bool { return false }
 	}
 	for field := FieldName; field < fieldCount; field++ {
 		if !hidden[field] {
 			f.fields = append(f.fields, field)
 		}
 	}
-	for i, code := range money.Codes() {
-		if code == options.Initial.Currency {
-			f.currency = i
-		}
-	}
-	for i, color := range account.Palette {
-		if color.Key == options.Initial.Color {
+	for i, choice := range f.colors {
+		if choice.key == color {
 			f.color = i
 		}
 	}
-	values := map[Field]string{
-		FieldName:        options.Initial.Name,
-		FieldCode:        options.Initial.Code,
-		FieldDescription: options.Initial.Description,
-		FieldBalance:     options.Balance,
-	}
-	placeholders := map[Field]string{FieldName: "Banco Inter", FieldCode: "INTER", FieldDescription: "optional"}
-	for field, value := range values {
+	placeholders := map[Field]string{FieldName: namePlaceholder, FieldCode: codePlaceholder, FieldDescription: "optional"}
+	for _, field := range []Field{FieldName, FieldCode, FieldDescription, FieldBalance} {
 		input := textinput.New()
 		input.Prompt = ""
 		input.Placeholder = placeholders[field]
 		input.SetWidth(40)
-		input.SetValue(value)
+		input.SetValue(values[field])
 		f.inputs[field] = input
 	}
-	f.inputs[FieldCode].CharLimit = account.MaxCodeLength
+	f.inputs[FieldCode].CharLimit = code.MaxLength
 	f.inputs[FieldName].CharLimit = 60
 	f.inputs[FieldDescription].CharLimit = 120
 	f.inputs[FieldBalance].CharLimit = 24
-	f.codeTouched = options.Initial.Code != ""
+	f.codeTouched = values[FieldCode] != ""
 	f.suggestCode()
 	f.syncBalancePlaceholder()
 	if len(f.fields) > 0 && f.isText(f.fields[0]) {
 		f.inputs[f.fields[0]].Focus()
 	}
-	return f
 }
 
 // Init starts the cursor blink.
@@ -164,7 +229,7 @@ func (f Form) Value(field Field) string {
 	case FieldCurrency:
 		return money.Codes()[f.currency]
 	case FieldColor:
-		return account.Palette[f.color].Key
+		return f.colors[f.color].key
 	case FieldName, FieldCode, FieldDescription, FieldBalance:
 		return f.inputs[field].Value()
 	}
@@ -194,6 +259,24 @@ func (f Form) Account() account.Account {
 	return result
 }
 
+// Category returns the initial category with the values of the form
+// applied. Use it for a form that NewCategoryForm built.
+func (f Form) Category() category.Category {
+	var result category.Category
+	if f.category != nil {
+		result = *f.category
+	}
+	result.Name = strings.TrimSpace(f.Value(FieldName))
+	result.Code = f.Value(FieldCode)
+	result.Description = strings.TrimSpace(f.Value(FieldDescription))
+	result.Color = f.Value(FieldColor)
+	return result
+}
+
+// colorsInRow reports whether the color field is one row of choices,
+// not a grid.
+func (f Form) colorsInRow() bool { return len(f.colors) <= paletteWidth }
+
 func (f Form) balance() int64 {
 	amount, err := money.Parse(f.Value(FieldBalance), f.Value(FieldCurrency))
 	if err != nil {
@@ -210,7 +293,7 @@ func (f *Form) suggestCode() {
 	if f.edit || f.codeTouched {
 		return
 	}
-	f.inputs[FieldCode].SetValue(account.SuggestCode(f.Value(FieldName), f.taken))
+	f.inputs[FieldCode].SetValue(code.Suggest(f.Value(FieldName), f.taken))
 	f.inputs[FieldCode].CursorEnd()
 }
 
@@ -235,12 +318,12 @@ func (f Form) validate(field Field) string {
 			return "Name is required"
 		}
 	case FieldCode:
-		code := f.Value(FieldCode)
-		if err := account.ValidateCode(code); err != nil {
+		value := f.Value(FieldCode)
+		if err := code.Validate(value); err != nil {
 			return sentence(err.Error())
 		}
-		if f.taken(code) {
-			return "Code " + code + " is already in use"
+		if f.taken(value) {
+			return "Code " + value + " is already in use"
 		}
 	case FieldBalance:
 		if strings.TrimSpace(f.Value(FieldBalance)) == "" {
@@ -312,7 +395,11 @@ func (f Form) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		f.syncBalancePlaceholder()
 		return f, nil
 	case FieldColor:
-		f.color = move(f.color, len(account.Palette), press, 1, paletteWidth)
+		vertical := paletteWidth
+		if f.colorsInRow() {
+			vertical = 0
+		}
+		f.color = move(f.color, len(f.colors), press, 1, vertical)
 		return f, nil
 	}
 	return f.updateInput(msg)
@@ -403,7 +490,11 @@ func (f Form) bindings() []key.Binding {
 	case FieldCurrency:
 		bindings = append(bindings, formKeyMap.Left)
 	case FieldColor:
-		bindings = append(bindings, formKeyMap.Up)
+		if f.colorsInRow() {
+			bindings = append(bindings, formKeyMap.Left)
+		} else {
+			bindings = append(bindings, formKeyMap.Up)
+		}
 	}
 	return append(bindings, formKeyMap.Save, formKeyMap.Cancel)
 }
@@ -417,6 +508,9 @@ func (f Form) row(field Field, focused bool) string {
 	case FieldCurrency:
 		return label + f.currencyRow(focused)
 	case FieldColor:
+		if f.colorsInRow() {
+			return label + f.colorRow(focused)
+		}
 		return lipgloss.JoinHorizontal(lipgloss.Top, label, f.colorGrid(focused))
 	}
 	return label + f.inputs[field].View()
@@ -437,10 +531,28 @@ func (f Form) currencyRow(focused bool) string {
 	return strings.Join(pills, " ")
 }
 
+// colorRow shows a few colors as pills with their labels.
+func (f Form) colorRow(focused bool) string {
+	var pills []string
+	for index, choice := range f.colors {
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(choice.hex))
+		if index == f.color {
+			style = style.Bold(true)
+			if focused {
+				style = style.Reverse(true)
+			} else {
+				style = style.Underline(true)
+			}
+		}
+		pills = append(pills, style.Render(" "+choice.label+" "))
+	}
+	return strings.Join(pills, " ")
+}
+
 func (f Form) colorGrid(focused bool) string {
 	var lines []string
 	var line strings.Builder
-	for index, color := range account.Palette {
+	for index, color := range f.colors {
 		left, right := " ", " "
 		if index == f.color {
 			left, right = "[", "]"
@@ -450,7 +562,7 @@ func (f Form) colorGrid(focused bool) string {
 				left, right = styleDim.Render(left), styleDim.Render(right)
 			}
 		}
-		line.WriteString(left + swatch(color.Key, "██") + right)
+		line.WriteString(left + paint(color.hex, "██") + right)
 		if index%paletteWidth == paletteWidth-1 {
 			lines = append(lines, line.String())
 			line.Reset()
@@ -460,6 +572,19 @@ func (f Form) colorGrid(focused bool) string {
 }
 
 func (f Form) preview() string {
+	dot := paint(f.colors[f.color].hex, "●")
+	if f.category != nil {
+		current := f.Category()
+		code, name := current.Code, current.Name
+		if code == "" {
+			code = "CODE"
+		}
+		if name == "" {
+			name = "Category name"
+		}
+		return styleDim.Width(labelWidth).Render("Preview") +
+			dot + " " + styleBold.Render(code) + "  " + name + "  " + styleDim.Render(current.Meaning())
+	}
 	current := f.Account()
 	code, name := current.Code, current.Name
 	if code == "" {
@@ -470,5 +595,5 @@ func (f Form) preview() string {
 	}
 	balance := money.Format(current.Balance(), current.Currency)
 	return styleDim.Width(labelWidth).Render("Preview") +
-		swatch(current.Color, "●") + " " + styleBold.Render(code) + "  " + name + "  " + styleDim.Render(balance)
+		dot + " " + styleBold.Render(code) + "  " + name + "  " + styleDim.Render(balance)
 }

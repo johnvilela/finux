@@ -58,10 +58,10 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 		return stdout
 	}
 
-	if got := must(nil); !strings.Contains(got, "\n  seed          Add sample data to the development database\n") {
+	if got := must(nil); !strings.Contains(got, "\n  seed              Add sample data to the development database\n") {
 		t.Fatalf("dev help lacks the seed command:\n%s", got)
 	}
-	created := "✓ Development database created: " + database + " (8 accounts)\n"
+	created := "✓ Development database created: " + database + " (8 accounts, 17 transactions)\n"
 	if got := must(nil, "seed"); got != created {
 		t.Fatalf("first seed = %q, want %q", got, created)
 	}
@@ -74,15 +74,33 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 			t.Errorf("seeded list lacks %q:\n%s", want, first)
 		}
 	}
+	if categories := must(nil, "ct"); !strings.Contains(categories, "\n14 categories\n") {
+		t.Fatalf("a new development database lacks the base categories:\n%s", categories)
+	}
 	if active := must(nil, "ac"); !strings.Contains(active, "7 accounts\n") {
 		t.Fatalf("active seeded accounts:\n%s", active)
 	}
+	// The sample transactions have all types, tags and a transfer between
+	// two currencies.
+	transactions := must(nil, "tx")
+	for _, want := range []string{"Salary", "Weekly market", "Card payment", "Travel money", "FOOD", "XFER", "-R$ 550,00", "$100.00", "\n17 transactions\n"} {
+		if !strings.Contains(transactions, want) {
+			t.Errorf("seeded transactions lack %q:\n%s", want, transactions)
+		}
+	}
+	if tagged := must(nil, "tx", "--tag", "market"); !strings.Contains(tagged, "\n3 transactions\n") {
+		t.Fatalf("seeded transactions with the tag #market:\n%s", tagged)
+	}
 
-	// A seed of a database that exists keeps its data and adds accounts.
+	// A seed of a database that exists keeps its data and adds accounts
+	// and transactions. CASH has one transaction, which goes with it.
 	must(nil, "ac", "add", "--name", "Temporary", "--currency", "USD", "--code", "TEMP")
 	must(nil, "ac", "d", "CASH", "--hard", "--yes")
 	total := 8
-	for _, want := range []string{"3 accounts added, 11 in total", "3 accounts added, 14 in total"} {
+	for _, want := range []string{
+		"3 accounts and 5 transactions added; 11 accounts and 21 transactions in total",
+		"3 accounts and 5 transactions added; 14 accounts and 26 transactions in total",
+	} {
 		total += 3
 		if got := must(nil, "seed"); got != "✓ Development database updated: "+database+" ("+want+")\n" {
 			t.Fatalf("seed of existing database = %q, want %q", got, want)
@@ -117,7 +135,7 @@ func TestDevBuildHonorsFinuxDB(t *testing.T) {
 	other := filepath.Join(t.TempDir(), "other.db")
 	binary := devBinary(t, database)
 	env := []string{"FINUX_DB=" + other}
-	if stdout, _, status := runBinary(t, binary, env, "init"); status != 0 || stdout != "✓ Database created: "+other+"\n" {
+	if stdout, _, status := runBinary(t, binary, env, "init"); status != 0 || !strings.HasPrefix(stdout, "✓ Database created: "+other+"\n") {
 		t.Fatalf("init with FINUX_DB = %q, status %d", stdout, status)
 	}
 	// Seed removes data, so it only works on the development database.

@@ -43,6 +43,8 @@ func run(args []string, io streams) int {
 			return runInit(args[1:], io)
 		case "doctor":
 			return runDoctor(args[1:], io)
+		case "reseed":
+			return runReseed(args[1:], io)
 		case "seed":
 			// Only a development build has the seed command.
 			if devDatabase != "" {
@@ -50,6 +52,10 @@ func run(args []string, io streams) int {
 			}
 		case "accounts", "ac":
 			return runAccounts(args[1:], io)
+		case "categories", "ct":
+			return runCategories(args[1:], io)
+		case "transactions", "tx":
+			return runTransactions(args[1:], io)
 		}
 	}
 	if len(args) > 1 || len(args) == 1 && !isHelp(args[0]) {
@@ -87,12 +93,12 @@ func welcome() string {
 	for i, line := range lines {
 		lines[i] = green.Render(line)
 	}
-	commands := "\n  init          Set up the database\n  doctor        Check the database\n"
+	commands := "\n  init              Set up the database\n  doctor            Check the database\n  reseed            Add missing base data\n"
 	if devDatabase != "" {
-		commands += "  seed          Add sample data to the development database\n"
+		commands += "  seed              Add sample data to the development database\n"
 	}
 	return strings.Join(lines, "\n") + "\n\nYour personal finance manager\n\n" +
 		green.Render("Usage:") + " finux [command]\n\n" +
-		green.Render("Commands:") + commands + "  accounts, ac  Manage accounts\n  help          Show this help\n\n" +
-		green.Render("Options:") + "\n  -h, --help    Show this help\n"
+		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  help              Show this help\n\n" +
+		green.Render("Options:") + "\n  -h, --help        Show this help\n"
 }

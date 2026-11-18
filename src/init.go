@@ -3,23 +3,28 @@ package main
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"finux/src/account"
+	"finux/src/category"
 	"finux/src/storage"
+	"finux/src/transaction"
 	"finux/src/ui"
 
 	"gorm.io/gorm"
 )
 
 // models lists the tables that 'finux init' migrates.
-var models = []any{&account.Account{}}
+var models = []any{&account.Account{}, &category.Category{}, &transaction.Transaction{}}
 
 func initHelp() string {
 	return "Set up the Finux database\n\n" +
 		green.Render("Usage:") + ` finux init
 
 Creates the database file if it does not exist, then applies the database
-migrations. It is safe to run again: it keeps your data.
+migrations. The first setup also adds the base categories. It is safe to
+run again: it keeps your data and does not add base data again. To get
+base data back after you deleted it, run 'finux reseed'.
 
 The database is the file in the FINUX_DB environment variable. Without
 FINUX_DB, it is ~/.finux/finux.db.
@@ -35,18 +40,56 @@ func runInit(args []string, io streams) int {
 		return 2
 	}
 	path, err := databasePath()
-	if err == nil {
-		var created bool
-		if created, err = storage.Init(path, models...); err == nil {
-			state := "up to date"
-			if created {
-				state = "created"
-			}
-			return write(io, ui.Success("Database "+state+": "+path)+"\n")
-		}
+	if err != nil {
+		fmt.Fprintf(io.stderr, "finux: %v\n", err)
+		return 1
 	}
-	fmt.Fprintf(io.stderr, "finux: %v\n", err)
-	return 1
+	report, err := setupDatabase(path)
+	if err != nil {
+		fmt.Fprintf(io.stderr, "finux: %v\n", err)
+		return 1
+	}
+	state := "up to date"
+	if report.created {
+		state = "created"
+	}
+	text := ui.Success("Database "+state+": "+path) + "\n"
+	if report.baseCategories > 0 {
+		text += ui.Success(fmt.Sprintf("Base categories added: %d", report.baseCategories)) + "\n"
+	}
+	return write(io, text)
+}
+
+// setupReport says what setupDatabase did.
+type setupReport struct {
+	// created is true when the database file is new.
+	created bool
+	// baseCategories is the number of base categories added.
+	baseCategories int
+}
+
+// setupDatabase creates the database if necessary, applies the
+// migrations and adds the base data of each table this run created. A
+// later run adds no base data, so records the user deleted stay deleted.
+func setupDatabase(path string) (setupReport, error) {
+	result, err := storage.Init(path, models...)
+	if err != nil {
+		return setupReport{}, err
+	}
+	report := setupReport{created: result.Created}
+	if !slices.Contains(result.NewTables, "categories") {
+		return report, nil
+	}
+	db, err := storage.Open(path)
+	if err != nil {
+		return setupReport{}, err
+	}
+	added, err := category.NewStore(db).AddMissingBase()
+	if err != nil {
+		return setupReport{}, fmt.Errorf("add base categories: %w", err)
+	}
+	report.baseCategories = len(added)
+	return report, nil
 }
 
 // openDatabase opens the database for a command. Only 'finux init'

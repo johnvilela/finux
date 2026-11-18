@@ -9,7 +9,9 @@ import (
 	"charm.land/lipgloss/v2/table"
 
 	"finux/src/account"
+	"finux/src/category"
 	"finux/src/money"
+	"finux/src/transaction"
 )
 
 const timeLayout = "2006-01-02 15:04"
@@ -165,6 +167,247 @@ func styledCard(current account.Account) string {
 	lines = append(lines,
 		styleDim.Render("Created  "+current.CreatedAt.Local().Format(timeLayout)),
 		styleDim.Render("Updated  "+current.UpdatedAt.Local().Format(timeLayout)),
+	)
+	return styleBox.BorderForeground(tint).Width(width+6).Render(strings.Join(lines, "\n")) + "\n"
+}
+
+// CategoryTable renders the list of categories. Plain output has no
+// colors and no borders, for pipes and files.
+func CategoryTable(categories []category.Category, plain bool) string {
+	if len(categories) == 0 {
+		return "No categories yet. Run 'finux reseed' or 'finux ct add'.\n"
+	}
+	headers := []string{"CODE", "NAME", "TYPE"}
+	const typeColumn = 2
+	rows := make([][]string, len(categories))
+	hexes := make([]string, len(categories))
+	for i, current := range categories {
+		color, _ := category.ColorByKey(current.Color)
+		hexes[i] = color.Hex
+		label := current.Code
+		if !plain {
+			label = paint(color.Hex, "●") + " " + label
+		}
+		rows[i] = []string{label, current.Name, current.Meaning()}
+	}
+	count := fmt.Sprintf("%d categories", len(categories))
+	if len(categories) == 1 {
+		count = "1 category"
+	}
+	if plain {
+		return plainTable(headers, rows, -1) + count + "\n"
+	}
+	rendered := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(styleDim).
+		Headers(headers...).
+		Rows(rows...).
+		StyleFunc(func(row, column int) lipgloss.Style {
+			style := lipgloss.NewStyle().Padding(0, 1)
+			switch {
+			case row == table.HeaderRow:
+				return style.Foreground(colorAccent).Bold(true)
+			case column == typeColumn:
+				return style.Foreground(lipgloss.Color(hexes[row]))
+			}
+			return style
+		}).String()
+	return rendered + "\n" + styleDim.Render(" "+count) + "\n"
+}
+
+// CategoryCard renders the details of one category. It is simple for
+// now; it will show more when transactions exist.
+func CategoryCard(current category.Category, plain bool) string {
+	id := strconv.FormatUint(uint64(current.ID), 10)
+	created := current.CreatedAt.Local().Format(timeLayout)
+	updated := current.UpdatedAt.Local().Format(timeLayout)
+	if plain {
+		lines := []string{current.Code + "  " + current.Name}
+		if current.Description != "" {
+			lines = append(lines, current.Description)
+		}
+		lines = append(lines, "")
+		for _, field := range [][2]string{
+			{"ID", id}, {"Type", current.Meaning()}, {"Color", current.Color}, {"Created", created}, {"Updated", updated},
+		} {
+			lines = append(lines, fmt.Sprintf("%-10s%s", field[0], field[1]))
+		}
+		return strings.Join(lines, "\n") + "\n"
+	}
+
+	tint := colorDim
+	if color, ok := category.ColorByKey(current.Color); ok {
+		tint = lipgloss.Color(color.Hex)
+	}
+	badge := lipgloss.NewStyle().Bold(true).Padding(0, 1).
+		Foreground(lipgloss.Color("#000000")).Background(tint).Render(current.Code)
+	header := badge + "  " + styleBold.Render(current.Name)
+	number := styleDim.Render("#" + id)
+	width := min(cardMaxWidth, max(cardMinWidth, lipgloss.Width(header)+2+lipgloss.Width(number)))
+	header += strings.Repeat(" ", max(2, width-lipgloss.Width(header)-lipgloss.Width(number))) + number
+
+	lines := []string{header}
+	if current.Description != "" {
+		lines = append(lines, styleDim.Italic(true).Width(width).Render(current.Description))
+	}
+	lines = append(lines,
+		"",
+		lipgloss.NewStyle().Foreground(tint).Render(current.Meaning()),
+		"",
+		styleDim.Render(strings.Repeat("─", width)),
+		styleDim.Render("Created  "+created),
+		styleDim.Render("Updated  "+updated),
+	)
+	return styleBox.BorderForeground(tint).Width(width+6).Render(strings.Join(lines, "\n")) + "\n"
+}
+
+// TransactionTable renders a list of transactions. Plain output has no
+// colors and no borders, for pipes and files.
+func TransactionTable(views []transaction.View, plain bool) string {
+	if len(views) == 0 {
+		return "No transactions yet. Run 'finux tx add'.\n"
+	}
+	headers := []string{"ID", "DATE", "TITLE", "CATEGORY", "ACCOUNT", "VALUE"}
+	const categoryColumn, valueColumn = 3, 5
+	rows := make([][]string, len(views))
+	for i, view := range views {
+		label := view.Category.Code
+		if color, ok := category.ColorByKey(view.Category.Color); ok && !plain {
+			label = paint(color.Hex, "●") + " " + label
+		}
+		rows[i] = []string{
+			strconv.FormatUint(uint64(view.ID), 10), transaction.FormatDate(view.Date), view.Title, label,
+			view.Account.Code, money.Format(view.Amount, view.Account.Currency),
+		}
+	}
+	count := fmt.Sprintf("%d transactions", len(views))
+	if len(views) == 1 {
+		count = "1 transaction"
+	}
+	if plain {
+		return plainTable(headers, rows, valueColumn) + count + "\n"
+	}
+	rendered := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(styleDim).
+		Headers(headers...).
+		Rows(rows...).
+		StyleFunc(func(row, column int) lipgloss.Style {
+			style := lipgloss.NewStyle().Padding(0, 1)
+			if column == valueColumn {
+				style = style.Align(lipgloss.Right)
+			}
+			switch {
+			case row == table.HeaderRow:
+				return style.Foreground(colorAccent).Bold(true)
+			case column == valueColumn:
+				return style.Inherit(typeStyle(views[row].Type))
+			case column == 0 || column == 1:
+				return style.Foreground(colorDim)
+			}
+			return style
+		}).String()
+	return rendered + "\n" + styleDim.Render(" "+count) + "\n"
+}
+
+// transferLine describes the other side of a transfer: "to WISE  Wise".
+func transferLine(view transaction.View) (direction, account string) {
+	direction = "from"
+	if view.Outgoing() {
+		direction = "to"
+	}
+	return direction, view.Other.Code + "  " + view.Other.Name
+}
+
+// TransactionCard renders the details of one transaction. Plain output
+// has no colors and no borders, for pipes and files.
+func TransactionCard(view transaction.View, plain bool) string {
+	id := strconv.FormatUint(uint64(view.ID), 10)
+	value := money.Format(view.Amount, view.Account.Currency)
+	date := transaction.FormatDate(view.Date)
+	created := view.CreatedAt.Local().Format(timeLayout)
+	updated := view.UpdatedAt.Local().Format(timeLayout)
+	if plain {
+		fields := [][2]string{
+			{"ID", id}, {"Type", view.Type}, {"Value", value},
+			{"Account", view.Account.Code + "  " + view.Account.Name},
+			{"Category", view.Category.Code + "  " + view.Category.Name},
+			{"Date", date},
+		}
+		if view.Tags != "" {
+			fields = append(fields, [2]string{"Tags", view.Tags})
+		}
+		if view.Other != nil {
+			direction, other := transferLine(view)
+			fields = append(fields, [2]string{"Transfer", fmt.Sprintf("%s %s (transaction %d)", direction, other, view.PairID)})
+		}
+		fields = append(fields, [2]string{"Created", created}, [2]string{"Updated", updated})
+		lines := []string{view.Title}
+		if view.Description != "" {
+			lines = append(lines, view.Description)
+		}
+		lines = append(lines, "")
+		for _, field := range fields {
+			lines = append(lines, fmt.Sprintf("%-10s%s", field[0], field[1]))
+		}
+		return strings.Join(lines, "\n") + "\n"
+	}
+
+	// Three levels: what it is (type and title), how much, then where
+	// and when. The id and the record dates are dim: they matter least.
+	// The card has the color of its type: green for an income, red for
+	// an expense, no color for a transfer.
+	tint := colorDim
+	switch view.Type {
+	case transaction.Expense:
+		tint = lipgloss.Color(colorExpense)
+	case transaction.Income:
+		tint = lipgloss.Color(colorIncome)
+	}
+	badge := lipgloss.NewStyle().Bold(true).Padding(0, 1).
+		Foreground(lipgloss.Color("#000000")).Background(tint).Render(strings.ToUpper(view.Type))
+	number := styleDim.Render("#" + id)
+	width := min(cardMaxWidth, max(cardMinWidth, lipgloss.Width(badge)+2+lipgloss.Width(view.Title)+2+lipgloss.Width(number)))
+	title := view.Title
+	if room := width - lipgloss.Width(badge) - 4 - lipgloss.Width(number); lipgloss.Width(title) > room {
+		title = string([]rune(title)[:room-1]) + "…"
+	}
+	header := badge + "  " + styleBold.Render(title)
+	header += strings.Repeat(" ", max(2, width-lipgloss.Width(header)-lipgloss.Width(number))) + number
+
+	amount := typeStyle(view.Type).Bold(true).Render(value)
+	currency := styleDim.Render(view.Account.Currency)
+	lines := []string{header}
+	if view.Description != "" {
+		lines = append(lines, styleDim.Italic(true).Width(width).Render(view.Description))
+	}
+	lines = append(lines, "", amount+strings.Repeat(" ", max(2, width-lipgloss.Width(amount)-lipgloss.Width(currency)))+currency, "")
+
+	row := func(label, text string) string { return styleDim.Width(10).Render(label) + text }
+	categoryColor, _ := category.ColorByKey(view.Category.Color)
+	lines = append(lines,
+		row("Account", swatch(view.Account.Color, "●")+" "+styleBold.Render(view.Account.Code)+"  "+view.Account.Name),
+	)
+	if view.Other != nil {
+		label := "From"
+		if view.Outgoing() {
+			label = "To"
+		}
+		lines = append(lines, row(label, swatch(view.Other.Color, "●")+" "+styleBold.Render(view.Other.Code)+"  "+view.Other.Name+
+			styleDim.Render("  #"+strconv.FormatUint(uint64(view.PairID), 10))))
+	}
+	lines = append(lines,
+		row("Category", paint(categoryColor.Hex, "●")+" "+styleBold.Render(view.Category.Code)+"  "+view.Category.Name),
+		row("Date", date),
+	)
+	if view.Tags != "" {
+		lines = append(lines, row("Tags", lipgloss.NewStyle().Foreground(tint).Render(view.Tags)))
+	}
+	lines = append(lines,
+		"",
+		styleDim.Render(strings.Repeat("─", width)),
+		styleDim.Render("Created  "+created),
+		styleDim.Render("Updated  "+updated),
 	)
 	return styleBox.BorderForeground(tint).Width(width+6).Render(strings.Join(lines, "\n")) + "\n"
 }

@@ -105,17 +105,7 @@ func Format(amount int64, code string) string {
 	if !ok {
 		return strconv.FormatInt(amount, 10) + " " + code
 	}
-	magnitude := uint64(amount)
-	sign := ""
-	if amount < 0 {
-		magnitude = -magnitude
-		sign = "-"
-	}
-	digits := strconv.FormatUint(magnitude, 10)
-	if len(digits) <= c.decimals {
-		digits = strings.Repeat("0", c.decimals-len(digits)+1) + digits
-	}
-	whole, fraction := digits[:len(digits)-c.decimals], digits[len(digits)-c.decimals:]
+	sign, whole, fraction := split(amount, c)
 	var grouped strings.Builder
 	for i, r := range whole {
 		if i > 0 && (len(whole)-i)%3 == 0 {
@@ -128,4 +118,30 @@ func Format(amount int64, code string) string {
 		space = " "
 	}
 	return sign + c.symbol + space + grouped.String() + c.decimal + fraction
+}
+
+// Input renders minor units as text that Parse reads, for example
+// "1234,56". It is the starting text of an amount field.
+func Input(amount int64, code string) string {
+	c, ok := find(code)
+	if !ok {
+		return strconv.FormatInt(amount, 10)
+	}
+	sign, whole, fraction := split(amount, c)
+	return sign + whole + c.decimal + fraction
+}
+
+// split returns the sign, the whole digits and the decimal digits of an
+// amount.
+func split(amount int64, c currency) (sign, whole, fraction string) {
+	magnitude := uint64(amount)
+	if amount < 0 {
+		magnitude = -magnitude
+		sign = "-"
+	}
+	digits := strconv.FormatUint(magnitude, 10)
+	if len(digits) <= c.decimals {
+		digits = strings.Repeat("0", c.decimals-len(digits)+1) + digits
+	}
+	return sign, digits[:len(digits)-c.decimals], digits[len(digits)-c.decimals:]
 }

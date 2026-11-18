@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"finux/src/account"
+	"finux/src/category"
 )
 
 func free(string) bool { return false }
@@ -195,5 +196,80 @@ func TestFormViewShowsPreview(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("view lacks %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestCategoryFormCreateFlow(t *testing.T) {
+	var model tea.Model = NewCategoryForm(CategoryFormOptions{Taken: free})
+	view := plain(form(t, model).View().Content)
+	for _, want := range []string{"New category", "Name", "Code", "Description", "Color", "red expense", "green income", "grey neutral", "esc"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view lacks %q:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"Currency", "Opening balance", "R$", "$0"} {
+		if strings.Contains(view, unwanted) {
+			t.Errorf("category form shows %q:\n%s", unwanted, view)
+		}
+	}
+	model = send(t, model, text("Pet Care")...)
+	if got := form(t, model).Value(FieldCode); got != "PCARE" {
+		t.Fatalf("suggested code = %q, want PCARE", got)
+	}
+	model = send(t, model, keyTab, keyTab)
+	model = send(t, model, append(text("vet"), keyTab)...)
+	if f := form(t, model); f.Focus() != FieldColor || f.Value(FieldColor) != "red" {
+		t.Fatalf("focus = %v, color = %q; want the color field with red", f.Focus(), f.Value(FieldColor))
+	}
+	model = send(t, model, keyDown, keyUp, keyRight)
+	if got := form(t, model).Value(FieldColor); got != "green" {
+		t.Fatalf("color after right = %q, want green (up and down do nothing)", got)
+	}
+	model = send(t, model, keyRight, keyRight, keyRight)
+	if got := form(t, model).Value(FieldColor); got != "grey" {
+		t.Fatalf("color at the right end = %q, want grey", got)
+	}
+	if view := plain(form(t, model).View().Content); !strings.Contains(view, "PCARE  Pet Care  neutral") {
+		t.Fatalf("preview lacks the category line:\n%s", view)
+	}
+	model = send(t, model, keyLeft, keyEnter)
+	f := form(t, model)
+	want := category.Category{Name: "Pet Care", Code: "PCARE", Description: "vet", Color: "green"}
+	if !f.Submitted() || f.Category() != want {
+		t.Fatalf("category = %+v, submitted %v; want %+v", f.Category(), f.Submitted(), want)
+	}
+}
+
+func TestCategoryFormValidationAndEdit(t *testing.T) {
+	taken := func(code string) bool { return code == "FOOD" }
+	var model tea.Model = NewCategoryForm(CategoryFormOptions{Taken: taken})
+	model = send(t, model, keySave)
+	if f := form(t, model); f.Submitted() || f.Focus() != FieldName || f.Error() == "" {
+		t.Fatalf("empty category saved: focus %v", f.Focus())
+	}
+	model = send(t, model, append(text("Food"), keySave)...)
+	if f := form(t, model); !f.Submitted() || f.Category().Code != "FOOD2" {
+		t.Fatalf("suggestion with taken code = %q, error %q", f.Category().Code, f.Error())
+	}
+
+	initial := category.Category{ID: 7, Name: "Food", Code: "FOOD", Description: "Groceries", Color: "grey"}
+	model = NewCategoryForm(CategoryFormOptions{Title: "Edit FOOD", Initial: initial, Edit: true, Taken: free})
+	if view := plain(form(t, model).View().Content); !strings.Contains(view, "Edit FOOD") {
+		t.Fatalf("edit title:\n%s", view)
+	}
+	model = send(t, model, append(text(" and drinks"), keySave)...)
+	got := form(t, model).Category()
+	initial.Name = "Food and drinks"
+	if got != initial {
+		t.Fatalf("edited = %+v, want %+v (code and color kept)", got, initial)
+	}
+
+	model = NewCategoryForm(CategoryFormOptions{Initial: category.Category{Name: "Gifts", Color: "green"}, Preset: []Field{FieldName, FieldColor}, Taken: free})
+	if f := form(t, model); f.Focus() != FieldCode || f.Value(FieldCode) != "GIFTS" {
+		t.Fatalf("preset form: focus %v, code %q", f.Focus(), f.Value(FieldCode))
+	}
+	model = send(t, model, keyTab, keyEnter)
+	if f := form(t, model); !f.Submitted() || f.Category() != (category.Category{Name: "Gifts", Code: "GIFTS", Color: "green"}) {
+		t.Fatalf("preset category = %+v", f.Category())
 	}
 }
