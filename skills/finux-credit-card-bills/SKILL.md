@@ -34,6 +34,15 @@ Report in the order of urgency:
 Show the transactions of a bill only when the user asks for them or asks
 about one bill.
 
+A purchase in installments has one transaction in each bill, with
+`installment` and `installments` (part 3 of 10). Its future parts are in
+future bills, which `credit_card_bills` lists with the status `open`.
+These bills are not due: do not report them as debts to pay now. Their
+totals are in `used`, so the limit already counts the whole purchase.
+When the user asks "how much do I still owe on installments", add the
+parts with a `date` after today for each purchase
+(`transaction_list` with `account`), with a script.
+
 ## Pay a bill
 
 ### 1. Choose the bill
@@ -94,6 +103,28 @@ first`. To change it:
 
 `credit_card_unpay` fails when the bill that got the rest of a partial
 payment is also paid: delete the payment of that later bill first.
+
+For a purchase in installments, the parts in paid bills are locked and
+the others are not. A change with the scope `all` fails with
+`installment K/N (transaction ID): bill MM/YYYY of CODE is paid` and
+changes nothing. Usually the right change is the scope `next` with the id
+of the first part in a bill that is not paid: the past stays as the bank
+charged it. Delete a payment only when the user wants to correct a paid
+part.
+
+## The user paid the rest of a purchase early
+
+The bank cancels the future parts and charges one amount, often with a
+discount.
+
+1. Find the parts: `transaction_list` with `search` of the title; keep the
+   ones with the same `installment_id`.
+2. Call `transaction_delete` with the id of the first part that will not
+   come and `scope: "next"`. Show the message, wait for a yes, then send
+   `confirm: true`.
+3. Record what the user paid as one expense on the card, on the date the
+   bank charged it, with a title such as `Loja X (early payoff)`.
+4. Report the new `used` and `available` of the card.
 
 ## The user says "I paid my card"
 

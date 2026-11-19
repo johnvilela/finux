@@ -79,3 +79,15 @@ func TestResume(t *testing.T) {
 	h.fail(2, "unexpected argument", "resume", "extra")
 	h.has(h.ok("resume", "--help"), "Usage: finux resume", "--month")
 }
+
+func TestResumeHidesTheBillsAfterTheCurrentOne(t *testing.T) {
+	h := newCardsHome(t)
+	h.ok("tx", "a", "--title", "Notebook", "--value", "300", "--installments", "3", "--account", "VISA", "--category", "SHOP")
+	out := h.ok("resume")
+	h.has(out, "Bills to pay\n", "VISA  12/2026  open    05/12/2026  R$ 100,00\n", "Expenses    R$ 100,00\n")
+	for _, absent := range []string{"01/2027", "02/2027"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("resume shows the bill %s:\n%s", absent, out)
+		}
+	}
+}

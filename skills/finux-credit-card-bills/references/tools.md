@@ -32,7 +32,7 @@ No arguments.
 
 ### `account_list`
 
-*Read.* List the accounts with their balances. The balance is the opening balance plus the transactions of the account.
+*Read.* List the accounts with their balances. The balance is the opening balance plus the transactions of the account that have a date up to today.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -172,25 +172,28 @@ No arguments.
 
 ### `transaction_add`
 
-*Change.* Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal.
+*Change.* Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `title` | string | yes | Title, at most 60 characters |
-| `value` | string | yes | Positive amount in the currency of the account, as a decimal string, for example "1234.56". The type gives the sign |
 | `account` | string | yes | Code or id of the account or the credit card of the transaction |
 | `category` | string | no | Code or id of the category. Necessary, but for a transfer, which has the default XFER |
 | `date` | string | no | YYYY-MM-DD or DD/MM/YYYY. Default: today |
 | `description` | string | no | Description, at most 200 characters |
+| `first_installment` | integer | no | With installments, for a purchase that is already in progress: the first part to create. date is then the date of that part. Default: 1 |
 | `goal` | string | no | Code or id of the goal the transaction counts toward. The goal must have the currency of the account |
+| `installment_value` | string | no | With installments: the amount of one part, in place of value |
+| `installments` | integer | no | For an expense or an income in installments: the number of monthly parts, from 2 to 120. The tool creates one transaction for each part |
 | `received` | string | no | For a transfer between accounts of different currencies: the amount the other account receives |
 | `tags` | string | no | Tags divided by spaces, for example "market weekly". Use transaction_suggestions to find the tags in use |
 | `to` | string | no | For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer |
 | `type` | string | no | Default: expense for a red category, income for a green one, transfer when 'to' is given. Necessary for a grey category. One of: `expense`, `income`, `transfer` |
+| `value` | string | no | Positive amount in the currency of the account, as a decimal string, for example "1234.56". The type gives the sign. With installments it is the total of all the parts. Necessary, but when installment_value is given |
 
 ### `transaction_edit`
 
-*Change.* Change a transaction. Give only the arguments to change. A change of one side of a transfer also changes the other side. A payment of a bill cannot change: delete it.
+*Change.* Change a transaction. Give only the arguments to change. A change of one side of a transfer also changes the other side. A payment of a bill cannot change: delete it. For a transaction in installments, scope tells which parts change: the result then has them in transactions.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -200,6 +203,8 @@ No arguments.
 | `date` | string | no | New date, YYYY-MM-DD or DD/MM/YYYY |
 | `description` | string | no | New description, at most 200 characters |
 | `goal` | string | no | Code or id of the new goal. An empty string takes the goal away |
+| `installment_value` | string | no | With the scope next or all: the new amount of each part, in place of value |
+| `scope` | string | no | For a transaction in installments: one changes this part only, next changes this part and the parts after it, all changes all the parts. With next or all, value is the new total of these parts and date is the new date of the first of them. Default: one. One of: `one`, `next`, `all` |
 | `tags` | string | no | New tags; they replace the tags of the transaction. An empty string removes all tags |
 | `title` | string | no | New title, at most 60 characters |
 | `type` | string | no | New type. A transfer keeps its type. One of: `expense`, `income`, `transfer` |
@@ -207,12 +212,13 @@ No arguments.
 
 ### `transaction_delete`
 
-*Delete.* Delete a transaction permanently. The delete of one side of a transfer also deletes the other side. The delete of a payment opens its bill again.
+*Delete.* Delete a transaction permanently. The delete of one side of a transfer also deletes the other side. The delete of a payment opens its bill again. For a transaction in installments, scope tells which parts to delete.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | integer | yes | Id of the transaction |
 | `confirm` | boolean | no | Set to true to delete. Without it the tool only tells what it will delete. |
+| `scope` | string | no | For a transaction in installments: one deletes this part only, next deletes this part and the parts after it, all deletes all the parts. Default: one. One of: `one`, `next`, `all` |
 
 ### `transaction_suggestions`
 
@@ -471,4 +477,109 @@ No arguments.
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `budget` | string | yes | Code or id of the budget |
+| `confirm` | boolean | no | Set to true to delete. Without it the tool only tells what it will delete. |
+
+## Schedule
+
+### `schedule_list`
+
+*Read.* List the scheduled transactions: bills to pay and incomes to receive, one time or again and again. A schedule is not a transaction: it changes no balance until schedule_pay. Each schedule has due, the dates of the occurrences that wait for a confirmation, and next. The result has due: the number of occurrences that wait in all schedules. Without include_archived, the schedules that are done or archived stay out.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `include_archived` | boolean | no | Also return the archived ones |
+
+### `schedule_show`
+
+*Read.* Show one schedule and the transactions it created, the newest first.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `schedule` | string | yes | Code or id of the schedule |
+
+### `schedule_add`
+
+*Change.* Schedule a transaction that will happen: an expense or an income, one time (no every) or again and again (every). It creates no transaction. Each occurrence waits until schedule_pay creates its transaction or schedule_skip drops it.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `title` | string | yes | Title of the transactions, at most 60 characters |
+| `value` | string | yes | Positive amount in the currency of the account, as a decimal string. The type gives the sign |
+| `account` | string | yes | Code or id of the account or the credit card of the transactions |
+| `category` | string | yes | Code or id of the category |
+| `automatic` | boolean | no | True creates each transaction on its date without a confirmation. Default: false. Set it only when the user asks for it |
+| `code` | string | no | Short code, 1 to 5 letters and digits. Default: made from the title |
+| `date` | string | no | Date of the first occurrence, YYYY-MM-DD or DD/MM/YYYY. Default: today |
+| `description` | string | no | Description, at most 200 characters |
+| `end_date` | string | no | With every: the last day an occurrence can have |
+| `every` | string | no | Time between two occurrences: day, week, month, year, or a number of them, for example "2 weeks". Without it the schedule is for one time |
+| `goal` | string | no | Code or id of the goal the transactions count toward |
+| `tags` | string | no | Tags of the transactions, divided by spaces |
+| `times` | integer | no | With every: the number of occurrences, from 1 to 1000 |
+| `type` | string | no | Default: expense for a red category, income for a green one. Necessary for a grey category. One of: `expense`, `income` |
+
+### `schedule_edit`
+
+*Change.* Change a schedule. Give only the arguments to change. The change is for the occurrences that wait; the transactions it already created stay as they are.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `schedule` | string | yes | Code or id of the schedule |
+| `account` | string | no | Code or id of the new account or credit card. Give value also when the currency is different |
+| `automatic` | boolean | no | True creates each transaction on its date without a confirmation; false stops it |
+| `category` | string | no | Code or id of the new category |
+| `code` | string | no | New code, 1 to 5 letters and digits |
+| `date` | string | no | New date of the next occurrence. The occurrences after it count from this date |
+| `description` | string | no | New description |
+| `end_date` | string | no | New last day. An empty string removes it |
+| `every` | string | no | New time between two occurrences. "none" makes the schedule for one time |
+| `goal` | string | no | Code or id of the new goal. An empty string takes the goal away |
+| `tags` | string | no | New tags. An empty string removes all tags |
+| `times` | integer | no | New number of occurrences from now on. 0 removes it |
+| `title` | string | no | New title |
+| `type` | string | no | New type. One of: `expense`, `income` |
+| `value` | string | no | New positive amount as a decimal string |
+
+### `schedule_pay`
+
+*Change.* Confirm the next occurrence of a schedule: create its transaction. Use it when the user paid the bill or got the income. The occurrences go in order, the oldest first. Give value, date or account when the real ones are different. The result has the transaction, the schedule as it is now, and budget_warnings.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `schedule` | string | yes | Code or id of the schedule |
+| `account` | string | no | Code or id of the account or credit card that paid, when it is another one |
+| `date` | string | no | Real date. Default: the date of the occurrence, or today for an occurrence that is not due yet |
+| `value` | string | no | Real amount, when it is not the amount of the schedule |
+
+### `schedule_skip`
+
+*Change.* Skip the next occurrence of a schedule: it creates no transaction and the occurrence does not wait any more. Use it when the bill did not come or the user will not pay it.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `schedule` | string | yes | Code or id of the schedule |
+
+### `schedule_archive`
+
+*Change.* Archive a schedule: it stops and leaves the lists. Its transactions stay. schedule_restore brings it back.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `schedule` | string | yes | Code or id of the schedule |
+
+### `schedule_restore`
+
+*Change.* Restore an archived schedule. The occurrences whose dates passed are due again.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `schedule` | string | yes | Code or id of the schedule |
+
+### `schedule_delete`
+
+*Delete.* Delete a schedule permanently. No transaction is deleted: the transactions it created stay and only lose the link. To keep the schedule, use schedule_archive.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `schedule` | string | yes | Code or id of the schedule |
 | `confirm` | boolean | no | Set to true to delete. Without it the tool only tells what it will delete. |

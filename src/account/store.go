@@ -81,8 +81,9 @@ func (s *Store) Update(account *Account) error {
 }
 
 // List returns accounts ordered by name. Archived accounts are included
-// only if includeArchived is true.
-func (s *Store) List(includeArchived bool) ([]Account, error) {
+// only if includeArchived is true. The balances count the transactions
+// up to the date today, as YYYY-MM-DD.
+func (s *Store) List(includeArchived bool, today string) ([]Account, error) {
 	query := s.db
 	if includeArchived {
 		query = query.Unscoped()
@@ -91,13 +92,14 @@ func (s *Store) List(includeArchived bool) ([]Account, error) {
 	if err := query.Order("name COLLATE NOCASE, id").Find(&accounts).Error; err != nil {
 		return nil, err
 	}
-	return accounts, s.movements(accounts)
+	return accounts, s.movements(accounts, today)
 }
 
 // movements fills the Movement of accounts: the sum of the amounts of
-// their transactions. The transactions table belongs to the transaction
+// their transactions up to the date today. A transaction with a later
+// date changes the balance when its day comes. The transactions table belongs to the transaction
 // package; a database from before that package does not have it.
-func (s *Store) movements(accounts []Account) error {
+func (s *Store) movements(accounts []Account, today string) error {
 	if len(accounts) == 0 || !s.db.Migrator().HasTable("transactions") {
 		return nil
 	}
@@ -105,7 +107,8 @@ func (s *Store) movements(accounts []Account) error {
 		AccountID uint
 		Total     int64
 	}
-	err := s.db.Table("transactions").Select("account_id, SUM(amount) AS total").Group("account_id").Scan(&sums).Error
+	err := s.db.Table("transactions").Select("account_id, SUM(amount) AS total").
+		Where("date <= ?", today).Group("account_id").Scan(&sums).Error
 	if err != nil {
 		return err
 	}
@@ -120,18 +123,19 @@ func (s *Store) movements(accounts []Account) error {
 }
 
 // ListArchived returns only archived accounts ordered by name.
-func (s *Store) ListArchived() ([]Account, error) {
+func (s *Store) ListArchived(today string) ([]Account, error) {
 	var accounts []Account
 	err := s.db.Unscoped().Where("deleted_at IS NOT NULL").
 		Order("name COLLATE NOCASE, id").Find(&accounts).Error
 	if err != nil {
 		return nil, err
 	}
-	return accounts, s.movements(accounts)
+	return accounts, s.movements(accounts, today)
 }
 
-// Find returns the account with the given id (all digits) or code.
-func (s *Store) Find(reference string, includeArchived bool) (Account, error) {
+// Find returns the account with the given id (all digits) or code. Its
+// balance counts the transactions up to the date today.
+func (s *Store) Find(reference string, includeArchived bool, today string) (Account, error) {
 	query := s.db
 	if includeArchived {
 		query = query.Unscoped()
@@ -149,7 +153,7 @@ func (s *Store) Find(reference string, includeArchived bool) (Account, error) {
 		return Account{}, err
 	}
 	found := []Account{account}
-	if err := s.movements(found); err != nil {
+	if err := s.movements(found, today); err != nil {
 		return Account{}, err
 	}
 	return found[0], nil

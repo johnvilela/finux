@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -29,6 +30,9 @@ const (
 	TxType TxField = iota
 	TxTitle
 	TxValue
+	// TxInstallments is the number of monthly parts. The form shows it
+	// only for a new expense or income.
+	TxInstallments
 	TxAccount
 	TxTo
 	TxReceived
@@ -42,7 +46,7 @@ const (
 	txFieldCount
 )
 
-var txLabels = [txFieldCount]string{"Type", "Title", "Value", "Account", "To account", "Received", "Category", "Goal", "Date", "Tags", "Description"}
+var txLabels = [txFieldCount]string{"Type", "Title", "Value", "Installments", "Account", "To account", "Received", "Category", "Goal", "Date", "Tags", "Description"}
 
 // TransactionFormOptions configures a transaction form.
 type TransactionFormOptions struct {
@@ -153,6 +157,10 @@ func NewTransactionForm(options TransactionFormOptions) TransactionForm {
 		f.types = transaction.Types()
 	}
 	f.kind = max(0, slices.Index(f.types, options.Initial.Type))
+	// A value from the command line comes with its installments.
+	if options.Edit || f.hidden[TxValue] {
+		f.hidden[TxInstallments] = true
+	}
 
 	date := options.Initial.Date
 	if date == "" {
@@ -165,10 +173,13 @@ func NewTransactionForm(options TransactionFormOptions) TransactionForm {
 		TxTitle: options.Initial.Title, TxValue: options.Value, TxReceived: options.Received,
 		TxDate: transaction.FormatDate(date), TxTags: options.Initial.Tags, TxDescription: options.Initial.Description,
 	}
-	limits := map[TxField]int{
-		TxTitle: transaction.MaxTitle, TxValue: 24, TxReceived: 24, TxDate: 10, TxTags: 120, TxDescription: transaction.MaxDescription,
+	if options.Initial.Installments > 1 {
+		values[TxInstallments] = strconv.Itoa(options.Initial.Installments)
 	}
-	placeholders := map[TxField]string{TxTitle: "Market", TxDate: "DD/MM/YYYY", TxTags: "#market #weekly", TxDescription: "optional"}
+	limits := map[TxField]int{
+		TxTitle: transaction.MaxTitle, TxValue: 24, TxInstallments: 3, TxReceived: 24, TxDate: 10, TxTags: 120, TxDescription: transaction.MaxDescription,
+	}
+	placeholders := map[TxField]string{TxInstallments: "1", TxTitle: "Market", TxDate: "DD/MM/YYYY", TxTags: "#market #weekly", TxDescription: "optional"}
 	for field, limit := range limits {
 		input := textinput.New()
 		input.Prompt = ""
@@ -207,6 +218,7 @@ func (f TransactionForm) fields() []TxField {
 		switch {
 		case f.hidden[field],
 			field == TxTo && f.kindName() != transaction.Transfer,
+			field == TxInstallments && f.kindName() == transaction.Transfer,
 			field == TxReceived && !f.twoCurrencies():
 		default:
 			fields = append(fields, field)
@@ -346,6 +358,20 @@ func (f TransactionForm) amount(field TxField, accountID uint) (int64, error) {
 	return money.Parse(f.Value(field), current.Currency)
 }
 
+// installments returns the number of parts the form has: 0 for one
+// transaction. The value of the form is the total of the parts.
+func (f TransactionForm) installments() (int, error) {
+	text := strings.TrimSpace(f.Value(TxInstallments))
+	if f.edit || f.kindName() == transaction.Transfer || text == "" {
+		return 0, nil
+	}
+	count, err := strconv.Atoi(text)
+	if err != nil || count < 2 || count > transaction.MaxInstallments {
+		return 0, fmt.Errorf("Use a number from 2 to %d, or nothing for one transaction", transaction.MaxInstallments)
+	}
+	return count, nil
+}
+
 // Draft returns the initial values with the values of the form applied.
 func (f TransactionForm) Draft() transaction.Draft {
 	draft := f.initial
@@ -358,6 +384,7 @@ func (f TransactionForm) Draft() transaction.Draft {
 		draft.AccountID, draft.CardID = 0, f.accountID-cardOffset
 	}
 	draft.Value, _ = f.amount(TxValue, f.accountID)
+	draft.Installments, _ = f.installments()
 	draft.ToAccountID, draft.Received = 0, 0
 	if draft.Type == transaction.Transfer && !f.edit {
 		draft.ToAccountID = f.toID
@@ -404,6 +431,14 @@ func (f TransactionForm) validate(field TxField) string {
 		}
 		if amount <= 0 {
 			return "The value must be more than zero"
+		}
+	case TxInstallments:
+		count, err := f.installments()
+		if err != nil {
+			return err.Error()
+		}
+		if total, _ := f.amount(TxValue, f.accountID); count > 0 && total > 0 && total < int64(count) {
+			return fmt.Sprintf("The value is too small for %d installments", count)
 		}
 	case TxAccount:
 		if _, ok := f.accountByID(f.accountID); !ok {
@@ -750,6 +785,9 @@ func (f TransactionForm) preview() string {
 	}
 	line := typeStyle(draft.Type).Render("●") + " " + styleBold.Render(title) + "  " +
 		typeStyle(draft.Type).Render(money.Format(amount, current.Currency)) + "  " + styleDim.Render(current.Code)
+	if draft.Installments > 1 {
+		line += styleDim.Render(fmt.Sprintf("  %d × %s", draft.Installments, money.Format(draft.Value/int64(draft.Installments), current.Currency)))
+	}
 	if to, ok := f.accountByID(draft.ToAccountID); ok {
 		line += styleDim.Render(" → " + to.Code)
 	}

@@ -88,7 +88,7 @@ func (f fixture) create(t *testing.T, draft Draft) Transaction {
 
 func (f fixture) balance(t *testing.T, code string) int64 {
 	t.Helper()
-	found, err := f.accounts.Find(code, true)
+	found, err := f.accounts.Find(code, true, fixtureToday)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestStoreCreateAndFind(t *testing.T) {
 	if got := f.balance(t, "NUBAN"); got != 0 {
 		t.Fatalf("balance of account without transactions = %d", got)
 	}
-	accounts, err := f.accounts.List(false)
+	accounts, err := f.accounts.List(false, fixtureToday)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +436,7 @@ func TestStorePurgeAccount(t *testing.T) {
 	if plain, transfers, err := f.store.AccountUsage(f.account["INTER"]); err != nil || plain != 2 || transfers != 2 {
 		t.Fatalf("AccountUsage = %d, %d, %v", plain, transfers, err)
 	}
-	inter, _ := f.accounts.Find("INTER", true)
+	inter, _ := f.accounts.Find("INTER", true, fixtureToday)
 	other, _ := f.categories.Find("OTHER")
 	if err := f.store.PurgeAccount(inter, other); err != nil {
 		t.Fatal(err)
@@ -476,7 +476,7 @@ func TestStorePurgeAccount(t *testing.T) {
 	long := f.draft("Long", Transfer, "NUBAN", "XFER", 100)
 	long.ToAccountID, long.Received, long.Description = f.account["WISE"], 20, strings.Repeat("é", MaxDescription)
 	side := f.create(t, long)
-	nubank, _ := f.accounts.Find("NUBAN", true)
+	nubank, _ := f.accounts.Find("NUBAN", true, fixtureToday)
 	if err := f.store.PurgeAccount(nubank, other); err != nil {
 		t.Fatal(err)
 	}
@@ -486,5 +486,33 @@ func TestStorePurgeAccount(t *testing.T) {
 	}
 	if got := []rune(left.Description); len(got) != MaxDescription || !strings.HasSuffix(left.Description, "…. Transfer from NUBAN (deleted account)") {
 		t.Fatalf("long description = %d characters: %q", len(got), left.Description)
+	}
+}
+
+// fixtureToday is the date of today that the balance helper uses. It is
+// after all the dates of the tests.
+const fixtureToday = "2026-12-31"
+
+func TestBalanceCountsUpToToday(t *testing.T) {
+	f := newFixture(t)
+	f.create(t, f.draft("Market", Expense, "INTER", "FOOD", 1000))
+	later := f.draft("Rent", Expense, "INTER", "HOME", 5000)
+	later.Date = "2026-11-18"
+	f.create(t, later)
+	for today, want := range map[string]int64{"2026-11-16": 100000, "2026-11-17": 99000, "2026-11-18": 94000} {
+		found, err := f.accounts.Find("INTER", false, today)
+		if err != nil || found.Balance() != want {
+			t.Errorf("Find on %s: balance = %d, %v; want %d", today, found.Balance(), err, want)
+		}
+		accounts, err := f.accounts.List(false, today)
+		if err != nil || accounts[0].Code != "INTER" || accounts[0].Balance() != want {
+			t.Errorf("List on %s: %+v, %v; want %d", today, accounts, err, want)
+		}
+	}
+	if err := f.accounts.Archive(f.account["INTER"]); err != nil {
+		t.Fatal(err)
+	}
+	if archived, err := f.accounts.ListArchived("2026-11-17"); err != nil || len(archived) != 1 || archived[0].Balance() != 99000 {
+		t.Errorf("ListArchived = %+v, %v", archived, err)
 	}
 }

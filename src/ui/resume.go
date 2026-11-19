@@ -14,6 +14,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/transaction"
 )
 
@@ -39,6 +40,50 @@ type Resume struct {
 	Bills    []ResumeBill
 	Budgets  []budget.Budget
 	Goals    []goal.Goal
+	// Scheduled holds the occurrences of the schedules that wait, up to
+	// the date ScheduledUntil, the oldest first.
+	Scheduled      []ResumeOccurrence
+	ScheduledUntil string
+}
+
+// ResumeOccurrence is one occurrence of a schedule that is not paid and
+// not skipped.
+type ResumeOccurrence struct {
+	View ScheduleView
+	// Date is the date of the occurrence, as YYYY-MM-DD.
+	Date string
+}
+
+// status returns "overdue", "today" or "upcoming".
+func (o ResumeOccurrence) status(today string) string {
+	switch {
+	case o.Date < today:
+		return "overdue"
+	case o.Date == today:
+		return "today"
+	}
+	return schedule.StatusUpcoming
+}
+
+// after returns the balance that each currency has after the scheduled
+// occurrences of its accounts, for the currencies that have them. An
+// occurrence of a credit card does not change a balance.
+func (r Resume) after() (currencies []string, sums map[string]int64) {
+	all, totals := r.totals()
+	moved := map[string]bool{}
+	for _, occurrence := range r.Scheduled {
+		if !occurrence.View.OnCard {
+			currency := occurrence.View.Account.Currency
+			totals[currency] += occurrence.View.Amount()
+			moved[currency] = true
+		}
+	}
+	for _, currency := range all {
+		if moved[currency] {
+			currencies = append(currencies, currency)
+		}
+	}
+	return currencies, totals
 }
 
 // ResumeFlow is the incomes and expenses of a month in one currency.
@@ -163,6 +208,22 @@ func ResumeView(resume Resume, plain bool) string {
 			out += "Total " + currency + "  " + money.Format(sums[currency], currency) + "\n"
 		}
 	}
+	if len(resume.Scheduled) > 0 {
+		rows := make([][]string, len(resume.Scheduled))
+		for i, occurrence := range resume.Scheduled {
+			view := occurrence.View
+			rows[i] = []string{
+				transaction.FormatDate(occurrence.Date), view.Code, view.Title, occurrence.status(resume.Today),
+				view.Account.Code, money.Format(view.Amount(), view.Account.Currency),
+			}
+		}
+		out += "\nScheduled until " + transaction.FormatDate(resume.ScheduledUntil) + "\n" +
+			plainTable([]string{"DATE", "CODE", "TITLE", "STATUS", "ACCOUNT", "VALUE"}, rows, 5)
+		currencies, sums := resume.after()
+		for _, currency := range currencies {
+			out += "After " + currency + "  " + money.Format(sums[currency], currency) + "\n"
+		}
+	}
 	if len(resume.Bills) > 0 {
 		rows := make([][]string, len(resume.Bills))
 		for i, pending := range resume.Bills {
@@ -278,6 +339,23 @@ func styledResume(resume Resume) string {
 		currencies, sums := resume.totals()
 		for _, currency := range currencies {
 			out += indent + spread(styleDim.Render("  Total "+currency), bold.Render(money.Format(sums[currency], currency))) + "\n"
+		}
+	}
+	if len(resume.Scheduled) > 0 {
+		section("SCHEDULED UNTIL " + transaction.FormatDate(resume.ScheduledUntil))
+		for _, occurrence := range resume.Scheduled {
+			view, status := occurrence.View, occurrence.status(resume.Today)
+			tint := colorNeutral
+			if status != schedule.StatusUpcoming {
+				tint = colorWarning
+			}
+			left := styleDim.Render(transaction.FormatDate(occurrence.Date)) + "  " + pad(view.Code, codeWidth) + "  " + pad(view.Title, 16) + "  " +
+				paint(tint, pad(status, statusWidth)) + "  " + styleDim.Render(view.Account.Code)
+			out += indent + spread(left, typeStyle(view.Type).Render(money.Format(view.Amount(), view.Account.Currency))) + "\n"
+		}
+		currencies, sums := resume.after()
+		for _, currency := range currencies {
+			out += indent + spread(styleDim.Render("  Balance after, "+currency), bold.Render(money.Format(sums[currency], currency))) + "\n"
 		}
 	}
 	if len(resume.Bills) > 0 {

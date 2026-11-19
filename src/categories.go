@@ -9,6 +9,7 @@ import (
 	"finux/src/budget"
 	"finux/src/category"
 	"finux/src/code"
+	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -91,6 +92,7 @@ func runCategories(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "categories", err)
 	}
+	announceAutomatic(db, io)
 	command.db, command.store = db, category.NewStore(db)
 	return exitStatus(io, "categories", handler(rest))
 }
@@ -353,6 +355,23 @@ func (c *categoriesCommand) remove(current category.Category, used int64, other 
 	})
 }
 
+// schedulesAllow refuses the delete of a category that a schedule has,
+// active or archived: its next transactions need the category.
+func (c *categoriesCommand) schedulesAllow(current category.Category) error {
+	if !transactionsReady(c.db) {
+		return nil
+	}
+	codes, err := schedule.NewStore(c.db).CodesByCategory(current.ID)
+	if err != nil || len(codes) == 0 {
+		return err
+	}
+	noun := "schedules"
+	if len(codes) == 1 {
+		noun = "schedule"
+	}
+	return fmt.Errorf("category %s is in the %s %s: change their category or delete them first", current.Code, noun, strings.Join(codes, ", "))
+}
+
 // budgetsAllow refuses the delete of a category that is the only
 // category of a budget, active or archived. Without it, the budget
 // would count all categories.
@@ -393,6 +412,9 @@ func (c *categoriesCommand) delete(args []string) error {
 		return err
 	}
 	if err := c.budgetsAllow(current); err != nil {
+		return err
+	}
+	if err := c.schedulesAllow(current); err != nil {
 		return err
 	}
 	moved := ""

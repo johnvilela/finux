@@ -18,6 +18,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/transaction"
 )
 
@@ -195,6 +196,8 @@ func TestMCPTools(t *testing.T) {
 		"credit_card_unpay", "credit_card_archive", "credit_card_restore", "credit_card_delete",
 		"goal_list", "goal_show", "goal_add", "goal_edit", "goal_archive", "goal_restore", "goal_delete",
 		"budget_list", "budget_show", "budget_add", "budget_edit", "budget_archive", "budget_restore", "budget_delete",
+		"schedule_list", "schedule_show", "schedule_add", "schedule_edit", "schedule_pay", "schedule_skip",
+		"schedule_archive", "schedule_restore", "schedule_delete",
 	}
 	if got := toolNames(t, responses[1]); !slices.Equal(got, want) {
 		t.Errorf("tools = %v\nwant    %v", got, want)
@@ -209,7 +212,7 @@ func TestMCPTools(t *testing.T) {
 	want = []string{
 		"database_doctor", "account_list", "account_show", "category_list", "category_show",
 		"transaction_list", "transaction_show", "transaction_suggestions", "credit_card_list", "credit_card_show", "credit_card_bills",
-		"goal_list", "goal_show", "budget_list", "budget_show",
+		"goal_list", "goal_show", "budget_list", "budget_show", "schedule_list", "schedule_show",
 	}
 	if got := toolNames(t, readOnly[0]); !slices.Equal(got, want) {
 		t.Errorf("read-only tools = %v\nwant              %v", got, want)
@@ -225,8 +228,10 @@ func TestMCPEnums(t *testing.T) {
 		"credit_card_add.color": account.ColorKeys(), "credit_card_edit.color": account.ColorKeys(),
 		"category_add.color": category.ColorKeys(), "category_edit.color": category.ColorKeys(),
 		"transaction_add.type": transaction.Types(), "transaction_edit.type": transaction.Types(),
-		"transaction_list.type": append(transaction.Types(), transaction.Payment),
-		"goal_add.type":         goal.Types(), "goal_edit.type": goal.Types(),
+		"transaction_list.type":  append(transaction.Types(), transaction.Payment),
+		"transaction_edit.scope": {"one", "next", "all"}, "transaction_delete.scope": {"one", "next", "all"},
+		"schedule_add.type": schedule.Types(), "schedule_edit.type": schedule.Types(),
+		"goal_add.type": goal.Types(), "goal_edit.type": goal.Types(),
 	}
 	checked := 0
 	for _, tool := range mcpTools(false) {
@@ -245,8 +250,8 @@ func TestMCPEnums(t *testing.T) {
 			checked++
 		}
 	}
-	if checked != 15 {
-		t.Errorf("checked %d enums, want 15", checked)
+	if checked != 19 {
+		t.Errorf("checked %d enums, want 19", checked)
 	}
 }
 
@@ -906,4 +911,142 @@ func TestMCPBudgets(t *testing.T) {
 	h.want(deleted, "FOOD", "budget")
 	h.fail("budget not found", "budget_show", map[string]any{"budget": "FOOD"})
 	h.want(h.ok("transaction_list", nil), "5", "total")
+}
+
+func TestMCPInstallments(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "5000"})
+	h.ok("credit_card_add", map[string]any{"name": "Visa Gold", "currency": "BRL", "limit": "5000", "closing_day": 25, "due_day": 5, "code": "VISA"})
+
+	created := h.ok("transaction_add", map[string]any{"title": "Notebook", "value": "1000", "installments": 3, "account": "VISA", "category": "SHOP"})
+	h.want(created, "1", "transaction", "id")
+	h.want(created, "1", "transaction", "installment")
+	h.want(created, "3", "transaction", "installments")
+	h.want(created, "1", "transaction", "installment_id")
+	h.want(created, "-33334", "transaction", "amount", "minor")
+	h.want(created, "3", "transactions", 2, "installment")
+	h.want(created, "-33333", "transactions", 2, "amount", "minor")
+	h.want(created, "2027-01-17", "transactions", 2, "date")
+	h.want(created, "2027-02", "transactions", 2, "bill")
+	if list := created["transactions"].([]any); len(list) != 3 {
+		t.Fatalf("created %d transactions, want 3", len(list))
+	}
+	// A transaction without installments has no installment fields.
+	normal := h.ok("transaction_add", map[string]any{"title": "Market", "value": "30", "account": "NU", "category": "FOOD"})
+	if fields := normal["transaction"].(map[string]any); fields["installment"] != nil || fields["installment_id"] != nil || normal["transactions"] != nil {
+		t.Fatalf("normal transaction = %v", normal)
+	}
+	// The balance of an account counts the transactions up to today.
+	h.ok("transaction_add", map[string]any{"title": "Rent", "value": "100", "account": "NU", "category": "HOME", "date": "2026-11-18"})
+	h.want(h.ok("account_show", map[string]any{"account": "NU"}), "497000", "account", "balance", "minor")
+
+	progress := h.ok("transaction_add", map[string]any{"title": "Phone", "installment_value": "50", "installments": 6, "first_installment": 5, "account": "NU", "category": "SHOP"})
+	h.want(progress, "5", "transaction", "installment")
+	h.want(progress, "-5000", "transactions", 1, "amount", "minor")
+	h.fail("not the two", "transaction_add", map[string]any{"title": "A", "value": "10", "installment_value": "5", "installments": 2, "account": "NU", "category": "SHOP"})
+	h.fail("value or installment_value", "transaction_add", map[string]any{"title": "A", "account": "NU", "category": "SHOP"})
+	h.fail("from 2 to 120", "transaction_add", map[string]any{"title": "A", "value": "10", "installments": 1, "account": "NU", "category": "SHOP"})
+	h.fail("only for installments", "transaction_add", map[string]any{"title": "A", "value": "10", "first_installment": 2, "account": "NU", "category": "SHOP"})
+
+	edited := h.ok("transaction_edit", map[string]any{"id": 2, "scope": "next", "title": "Laptop", "installment_value": "400"})
+	h.want(edited, "2", "transaction", "id")
+	h.want(edited, "Laptop", "transactions", 1, "title")
+	h.want(edited, "-40000", "transactions", 1, "amount", "minor")
+	h.want(h.ok("transaction_show", map[string]any{"id": 1}), "Notebook", "transaction", "title")
+	one := h.ok("transaction_edit", map[string]any{"id": 3, "value": "500"})
+	h.want(one, "-50000", "transaction", "amount", "minor")
+	if one["transactions"] != nil {
+		t.Fatalf("edit of one part lists transactions: %v", one)
+	}
+	h.fail("not an installment", "transaction_edit", map[string]any{"id": 4, "scope": "all", "title": "X"})
+	h.fail("installment_value needs the scope next or all", "transaction_edit", map[string]any{"id": 2, "installment_value": "1"})
+	h.fail("give at least one", "transaction_edit", map[string]any{"id": 2, "scope": "all"})
+
+	preview := h.ok("transaction_delete", map[string]any{"id": 2, "scope": "next"})
+	h.want(preview, "true", "confirm_required")
+	if message := at(t, preview, "message"); !strings.Contains(message, "installments 2 to 3 of Laptop (2 transactions)") {
+		t.Fatalf("preview = %q", message)
+	}
+	deleted := h.ok("transaction_delete", map[string]any{"id": 2, "scope": "next", "confirm": true})
+	h.want(deleted, "[2 3]", "deleted")
+	h.fail("not an installment", "transaction_delete", map[string]any{"id": 4, "scope": "all", "confirm": true})
+	h.want(h.ok("transaction_delete", map[string]any{"id": 6, "scope": "all", "confirm": true}), "[6 7]", "deleted")
+	h.want(h.ok("transaction_list", nil), "3", "total")
+}
+
+func TestMCPSchedules(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "5000"})
+	h.ok("credit_card_add", map[string]any{"name": "Visa Gold", "currency": "BRL", "limit": "5000", "closing_day": 25, "due_day": 5, "code": "VISA"})
+	h.want(h.ok("schedule_list", nil), "[]", "schedules")
+
+	created := h.ok("schedule_add", map[string]any{"title": "Rent", "value": "1500", "account": "NU", "category": "HOME", "every": "month", "date": "2026-10-05", "code": "rent", "tags": "fixed"})
+	h.want(created, "RENT", "schedule", "code")
+	h.want(created, "expense", "schedule", "type")
+	h.want(created, "150000", "schedule", "value", "minor")
+	h.want(created, "NU", "schedule", "account")
+	h.want(created, "HOME", "schedule", "category")
+	h.want(created, "every month", "schedule", "repeats")
+	h.want(created, "false", "schedule", "automatic")
+	h.want(created, "due", "schedule", "status")
+	h.want(created, "[2026-10-05 2026-11-05]", "schedule", "due")
+	h.want(created, "2026-12-05", "schedule", "next")
+	h.want(created, "[#fixed]", "schedule", "tags")
+	once := h.ok("schedule_add", map[string]any{"title": "Dentist", "value": "300", "account": "VISA", "category": "HEALT", "date": "10/12/2026"})
+	h.want(once, "DENTI", "schedule", "code")
+	h.want(once, "VISA", "schedule", "credit_card")
+	h.want(once, "one time", "schedule", "repeats")
+	h.want(once, "upcoming", "schedule", "status")
+	h.want(once, "1", "schedule", "times_left")
+	h.fail("category", "schedule_add", map[string]any{"title": "A", "value": "1", "account": "NU", "category": "NONE"})
+	h.fail("only for a schedule that repeats", "schedule_add", map[string]any{"title": "A", "value": "1", "account": "NU", "category": "HOME", "times": 3})
+
+	list := h.ok("schedule_list", nil)
+	h.want(list, "2", "due")
+	h.want(list, "DENTI", "schedules", 0, "code")
+	// A schedule is not a transaction.
+	h.want(h.ok("transaction_list", nil), "0", "total")
+
+	paid := h.ok("schedule_pay", map[string]any{"schedule": "RENT"})
+	h.want(paid, "2026-10-05", "transaction", "date")
+	h.want(paid, "-150000", "transaction", "amount", "minor")
+	h.want(paid, "RENT", "transaction", "schedule")
+	h.want(paid, "[2026-11-05]", "schedule", "due")
+	real := h.ok("schedule_pay", map[string]any{"schedule": "RENT", "value": "1550.50", "date": "2026-11-06"})
+	h.want(real, "-155050", "transaction", "amount", "minor")
+	h.want(real, "2026-11-06", "transaction", "date")
+	h.want(real, "upcoming", "schedule", "status")
+	skipped := h.ok("schedule_skip", map[string]any{"schedule": "RENT"})
+	h.want(skipped, "2026-12-05", "skipped")
+	h.want(skipped, "2027-01-05", "schedule", "next")
+	shown := h.ok("schedule_show", map[string]any{"schedule": "RENT"})
+	h.want(shown, "2", "transactions", 0, "id")
+	if list := shown["transactions"].([]any); len(list) != 2 {
+		t.Fatalf("schedule_show has %d transactions, want 2", len(list))
+	}
+
+	edited := h.ok("schedule_edit", map[string]any{"schedule": "RENT", "title": "Home", "value": "1600", "date": "2027-01-10", "times": 2, "automatic": true})
+	h.want(edited, "Home", "schedule", "title")
+	h.want(edited, "2027-01-10", "schedule", "next")
+	h.want(edited, "2", "schedule", "times_left")
+	h.want(edited, "true", "schedule", "automatic")
+	h.fail("give at least one", "schedule_edit", map[string]any{"schedule": "RENT"})
+	h.fail("schedule not found: NONE", "schedule_show", map[string]any{"schedule": "NONE"})
+
+	// A server that can write creates the transactions of an automatic
+	// schedule that is due.
+	h.ok("schedule_add", map[string]any{"title": "Internet", "value": "100", "account": "NU", "category": "BILLS", "every": "month", "date": "2026-11-10", "automatic": true, "code": "NET"})
+	transactions := h.ok("transaction_list", map[string]any{"search": "Internet"})
+	h.want(transactions, "1", "total")
+	h.want(transactions, "NET", "transactions", 0, "schedule")
+
+	h.want(h.ok("schedule_archive", map[string]any{"schedule": "NET"}), "true", "schedule", "archived")
+	h.fail("it is archived", "schedule_pay", map[string]any{"schedule": "NET"})
+	h.want(h.ok("schedule_list", map[string]any{"include_archived": true}), "3", "schedules", 2, "id")
+	h.want(h.ok("schedule_restore", map[string]any{"schedule": "NET"}), "false", "schedule", "archived")
+	h.want(h.ok("schedule_delete", map[string]any{"schedule": "NET"}), "true", "confirm_required")
+	h.want(h.ok("schedule_delete", map[string]any{"schedule": "NET", "confirm": true}), "true", "deleted")
+	if fields := h.ok("transaction_show", map[string]any{"id": 3})["transaction"].(map[string]any); fields["schedule"] != nil {
+		t.Fatalf("transaction keeps a deleted schedule: %v", fields)
+	}
 }

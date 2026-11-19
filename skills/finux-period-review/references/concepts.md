@@ -40,8 +40,9 @@ their own set.
 ## Accounts
 
 An account holds money: a bank account, a wallet, an investment. Its
-balance is its opening balance plus the amounts of its transactions. The
-balance can be negative.
+balance is its opening balance plus the amounts of its transactions that
+have a date up to today. A transaction with a future date changes the
+balance when its day comes. The balance can be negative.
 
 An archived account leaves the lists and takes no new transactions, but it
 keeps its transactions; it can be restored. A permanent delete also deletes
@@ -89,6 +90,62 @@ an account or a credit card, never the two.
   `#market`. Send them divided by spaces, with or without `#`. In an edit,
   the tags you send replace the tags of the transaction.
 
+## Installments
+
+An expense or an income can be in installments: N monthly parts. Finux
+keeps one transaction for each part. Transfers and payments have no
+installments.
+
+- Create all the parts with one call of `transaction_add`: give
+  `installments` (2 to 120) and `value`, the total of all the parts. Finux
+  divides the total; the cents that remain go to the first part. When you
+  know the amount of one part and not the total, give `installment_value`
+  in place of `value`. Do not give the two.
+- `date` is the date of the first part. Each part after it is one month
+  later, on the same day (a short month uses its last day).
+- For a purchase that is already in progress, give `first_installment`:
+  with `installments: 10` and `first_installment: 4`, Finux creates the
+  parts 4 to 10, and `date` is the date of part 4. `value` is still the
+  total of the 10 parts.
+- Each part has `installment` (its number), `installments` (the number of
+  parts) and `installment_id` (the same in all the parts of one purchase).
+  To read all the parts, filter `transaction_list` by the title and keep
+  the transactions with that `installment_id`.
+- On a credit card, each part goes to the bill after the one before: the
+  first part to the bill of its date, the second to the next bill. All the
+  parts count in `used` from the first day, so the limit goes down by the
+  total.
+- On an account, a part changes the balance on its date.
+- Each part counts by itself in the totals and in the budgets, in the
+  month of its date. So a purchase of 1200 in 10 parts is an expense of 120
+  in each of 10 months, not 1200 in the first month.
+- A goal counts all the parts of a linked transaction from the first day.
+
+### Change and delete the parts
+
+`transaction_edit` and `transaction_delete` have the argument `scope`:
+
+| Scope | Parts |
+| --- | --- |
+| `one` (default) | Only the transaction with the id |
+| `next` | That part and the parts with a higher number |
+| `all` | All the parts |
+
+- With `next` or `all`, a title, a description, a type, a category, tags,
+  a goal and an account go to each part of the scope.
+- With `next` or `all`, `value` is the new total of the parts of the
+  scope, divided again, and `installment_value` is the new amount of each
+  one. `date` is the new date of the first part of the scope; the others
+  follow by month.
+- The number of parts does not change. When you delete a part, the others
+  keep their numbers: `3/10` stays `3/10`.
+- A part in a paid bill is locked. With `next` or `all`, one locked part
+  stops the change of all the parts, and nothing changes. Use `next` from
+  the first part in a bill that is not paid, or delete the payment first.
+- The user paid the rest of a purchase early: delete the parts that will
+  not come with the scope `next`, then record what the user paid as one
+  new expense.
+
 ## Credit cards and bills
 
 A credit card has a limit, a closing day and a due day (days of the month,
@@ -102,14 +159,17 @@ transactions go to bills.
 - Finux puts each transaction in a bill by its date. A transaction on or
   before the closing day goes to the bill that closes in that month; a
   later one goes to the next bill. Finux creates a bill when the first
-  transaction needs it.
+  transaction needs it. The parts of a purchase in installments are the
+  exception: each one goes to the bill after the one before. See
+  [Installments](#installments).
 - The name of a bill is the month of its due date, as `YYYY-MM`. Example
   for a card that closes on day 25 and is due on day 5: a purchase on
   2026-11-10 goes to the bill `2026-12` (closes 2026-11-25, due
   2026-12-05); a purchase on 2026-11-26 goes to the bill `2027-01`.
 - New closing and due days apply only to the bills that do not exist yet.
-- `used` is the total of the bills that are not paid. `available` is the
-  limit less `used`.
+- `used` is the total of the bills that are not paid, also the future
+  bills that hold the parts of a purchase in installments. `available` is
+  the limit less `used`.
 
 A bill has one status:
 
@@ -234,6 +294,49 @@ history and can be restored. `budget_delete` deletes the budget only: no
 transaction changes. A deleted category leaves the budgets that have it;
 Finux refuses to delete a category that is the only category of a budget.
 
+## Scheduled transactions
+
+A schedule is a transaction that will happen: a bill to pay or an income
+to receive. It is for one time (a dentist next month) or it repeats (rent
+each month, `every`: `month`, `2 weeks`, `15 days`, `year`). A schedule is
+an expense or an income, in an account or on a credit card. It has no
+transfers.
+
+- A schedule is **not** a transaction. It changes no balance, no bill and
+  no total. `transaction_list` does not return it.
+- Each date of a schedule is an occurrence. An occurrence waits until
+  `schedule_pay` creates its transaction, or `schedule_skip` drops it.
+  The occurrences go in order: the oldest one first.
+- An occurrence with a date up to today is due. It stays due until the
+  user pays or skips it, so one schedule can have many due occurrences.
+  `due` in a schedule lists their dates and `next` is the first date
+  after today.
+- `schedule_pay` uses the title, the category, the tags and the goal of
+  the schedule. Its value, its date and its account are the ones of the
+  schedule unless you give the real ones. Without `date`, a due occurrence
+  gets its own date and an occurrence that is not due yet gets the date
+  of today. The transaction has `schedule` with the code of the schedule.
+- The status of a schedule is `due`, `upcoming` or `done` (no occurrence
+  is left). A schedule ends after `times` occurrences or after
+  `end_date`; without them it repeats until it is archived.
+- `automatic` is false unless the user asked for it. An automatic schedule
+  creates the transaction of each due occurrence by itself, with the date
+  of the occurrence, the next time Finux runs. Never set it without a
+  clear request of the user: money must not move in Finux without a
+  confirmation.
+- A change with `schedule_edit` is for the occurrences that wait. A new
+  `date` is the date of the next occurrence, and the ones after it count
+  from that date.
+- A budget counts a schedule only after `schedule_pay`. `budget_show`
+  returns `scheduled`: what the schedules of the categories of the budget
+  still take from the current period.
+- The delete of a transaction that a schedule created does not bring the
+  occurrence back.
+
+When the user says that a bill of a schedule is paid, use `schedule_pay`,
+not `transaction_add`: a second transaction would count the bill two times
+and the occurrence would stay due.
+
 ## Deletes need confirmation
 
 `account_delete`, `category_delete`, `transaction_delete`, `goal_delete`,
@@ -264,7 +367,15 @@ its place:
 - a payment: `account`, and the `credit_card` and `bill` it paid;
 - a transfer: `account`, `pair_id` and `other_account`.
 
-A transaction linked to a goal also has `goal` (code).
+A transaction linked to a goal also has `goal` (code). A part of a
+transaction in installments also has `installment`, `installments` and
+`installment_id`. A transaction that a schedule created also has
+`schedule` (code).
+
+`transaction_add` and `transaction_edit` return `transaction`, and
+`budget_warnings` when a budget is near or over its limit. For a
+transaction in installments they also return `transactions`: all the parts
+that the call created or changed.
 
 **Credit card:** `id`, `code`, `name`, `description`, `color`, `currency`,
 `archived`, `limit`, `used`, `available`, `closing_day`, `due_day`.
@@ -286,6 +397,14 @@ zero when it removes.
 budget), `start_date`, `end_date` (when the budget has one), `rollover`,
 `status`, and `current`: the period of today, or the last period of a
 budget that ended. A budget that did not start has no `current`.
+
+**Schedule:** `id`, `code`, `title`, `description`, `type`, `value`,
+`currency`, `account` or `credit_card`, `category`, `tags`, `goal` (when
+it has one), `repeats` (in words: `every month` or `one time`),
+`end_date` (when it has one), `times_left` (not in a schedule without an
+end), `automatic`, `archived`, `status`, `due` (list of dates) and `next`
+(when an occurrence comes after today). `schedule_list` also returns
+`due`: the number of occurrences that wait in all the schedules.
 
 **Period of a budget:** `from`, `to`, `carried`, `available`, `spent`,
 `remaining`, `over` (what it spent above `available`), `percent` (can be

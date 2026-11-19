@@ -11,6 +11,7 @@ import (
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -125,10 +126,7 @@ func runBudgets(args []string, io streams) int {
 			return write(io, budgetsHelp())
 		}
 	}
-	db, err := openDatabase()
-	if err == nil && !transactionsReady(db) {
-		err = errOutdated
-	}
+	db, err := openLedger(io)
 	if err != nil {
 		return exitStatus(io, "budgets", err)
 	}
@@ -218,6 +216,11 @@ func (c *budgetsCommand) gather(current budget.Budget, date string, history int)
 	for index := usage.Index - 1; index >= 0 && len(details.History) < history; index-- {
 		details.History = append(details.History, current.Usages[index])
 	}
+	if details.Today >= usage.From && details.Today <= usage.To && !current.Archived() {
+		if details.Scheduled, err = scheduledFor(c.db, current, usage, income); err != nil {
+			return details, err
+		}
+	}
 	views, err := transaction.NewStore(c.db).List(transaction.Filter{})
 	if err != nil {
 		return details, err
@@ -229,6 +232,33 @@ func (c *budgetsCommand) gather(current budget.Budget, date string, history int)
 		}
 	}
 	return details, nil
+}
+
+// scheduledFor returns what the schedules still take from a period of a
+// budget: the occurrences in the period that are not paid and not
+// skipped. An expense adds and an income gives back; the result is never
+// below zero. income tells which categories are income categories.
+func scheduledFor(db *gorm.DB, current budget.Budget, period budget.Usage, income map[uint]bool) (int64, error) {
+	schedules, err := schedule.NewStore(db).List(false)
+	if err != nil {
+		return 0, err
+	}
+	views, err := scheduleViews(db, schedules)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, view := range views {
+		if !current.Counts(view.Type, view.CategoryID, income[view.CategoryID], view.Account.Currency) {
+			continue
+		}
+		for _, date := range view.Pending(period.To) {
+			if date >= period.From {
+				total -= view.Amount()
+			}
+		}
+	}
+	return max(total, 0), nil
 }
 
 func (c *budgetsCommand) details(current budget.Budget, date string, history int) (string, error) {

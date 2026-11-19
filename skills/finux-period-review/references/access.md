@@ -56,9 +56,9 @@ Rules for the CLI:
 | `category_delete` | `finux ct delete <code> --yes` |
 | `transaction_list` | `finux tx list [--category <code>] [--tag <tags>] [--search <text>] [--date <date>] [--account <code>] [--type <type>] [--goal <code>]` |
 | `transaction_show` | `finux tx show <id>` |
-| `transaction_add` | `finux tx add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--description <text>] [--tags <tags>] [--date <date>] [--to <code>] [--received <amount>] [--goal <code>]` |
-| `transaction_edit` | `finux tx edit <id> [--title] [--description] [--value] [--type] [--category] [--tags] [--account] [--date] [--goal <code\|none>]` |
-| `transaction_delete` | `finux tx delete <id> --yes` |
+| `transaction_add` | `finux tx add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--description <text>] [--tags <tags>] [--date <date>] [--to <code>] [--received <amount>] [--goal <code>] [--installments <number>] [--installment-value <amount>] [--from <number>]` |
+| `transaction_edit` | `finux tx edit <id> [--title] [--description] [--value] [--type] [--category] [--tags] [--account] [--date] [--goal <code\|none>] [--installment-value <amount>] [--all\|--next]` |
+| `transaction_delete` | `finux tx delete <id> [--all\|--next] --yes` |
 | `transaction_suggestions` | No command. Read the titles and the tags in the output of `finux tx list` |
 | `credit_card_list` | `finux cc list [--all]` |
 | `credit_card_show` | `finux cc show <code>` |
@@ -84,6 +84,15 @@ Rules for the CLI:
 | `budget_archive` | `finux bg delete <code> --yes` |
 | `budget_restore` | `finux bg restore <code>` |
 | `budget_delete` | `finux bg delete <code> --hard --yes` |
+| `schedule_list` | `finux sc list [--all]` |
+| `schedule_show` | `finux sc show <code>` |
+| `schedule_add` | `finux sc add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--date <date>] [--every <period>] [--until <date>] [--times <number>] [--auto] [--tags <tags>] [--goal <code>] [--code <code>] [--description <text>]` |
+| `schedule_edit` | `finux sc edit <code> [--title] [--code] [--description] [--value] [--account] [--category] [--type] [--date] [--every <period\|none>] [--until <date\|none>] [--times <number\|none>] [--auto[=false]] [--tags] [--goal <code\|none>]` |
+| `schedule_pay` | `finux sc pay <code> [--value <amount>] [--date <date>] [--account <code>]` |
+| `schedule_skip` | `finux sc skip <code>` |
+| `schedule_archive` | `finux sc delete <code> --yes` |
+| `schedule_restore` | `finux sc restore <code>` |
+| `schedule_delete` | `finux sc delete <code> --hard --yes` |
 
 Differences from the MCP tools:
 

@@ -41,6 +41,13 @@ plainly. This skill reads data; it changes nothing.
 - Transfers and payments are not spending. Count expenses and incomes
   only.
 - A purchase on a credit card is spending on the date of the purchase.
+- A purchase in installments is one transaction for each monthly part
+  (`installment` and `installments` in the result). Each part is spending
+  in the month of its date, not the total in the first month.
+- Parts with a date after today are in the data. Leave them out of the
+  spending of the past months: read each month with its `date`. They are
+  money already committed: see the alert below.
+- The balance of an account counts the transactions up to today.
 - Compare complete months with complete months. Treat the current month
   as partial and say how many days it has.
 
@@ -51,6 +58,8 @@ plainly. This skill reads data; it changes nothing.
 - `account_list`, `credit_card_list`, and `credit_card_show` for each
   card.
 - `goal_list`, and `goal_show` for each active or overdue goal.
+- `schedule_list` for the scheduled transactions: what is due and what
+  comes.
 - `budget_list`, and `budget_show` for each budget that is `near` or
   `over`.
 - `transaction_list` with `date` for each of the last six complete months
@@ -73,27 +82,47 @@ Check each of these and report the ones that are true, in this order:
    the user that the bank charges interest that Finux does not
    calculate.
 4. **Limit in use:** `used` divided by `limit` for each card. Warn above
-   70%, and above 90% say that the next purchases can be refused.
+   70%, and above 90% say that the next purchases can be refused. `used`
+   counts all the parts of the purchases in installments, also the ones
+   in future bills: say how much of `used` is parts to come.
 5. **Negative accounts:** each account with a balance below zero.
-6. **Money that does not cover the month:** when the open bills plus the
+6. **Installments to come:** read `transaction_list` with `date` of each
+   of the next three months. The transactions with `installment` are
+   parts of purchases already made. Report the total of each month, the
+   number of purchases, and the month the last part ends. Warn when the
+   parts of a month are more than 30% of the average income of a month:
+   that share of the income is spent before the month starts. A
+   recurring title with `installment` ends by itself: do not list it as
+   a subscription.
+7. **Scheduled transactions that wait:** a schedule with dates in `due`
+   before today is a bill the user did not confirm. Report each one: the
+   title, the value and the oldest date. Ask if it is paid
+   (`schedule_pay` records it) before you call it a late bill: the user
+   can have paid and not told Finux.
+8. **Scheduled expenses the balance does not cover:** for each account,
+   add the values of the expense schedules with a date in `due` or a
+   `next` in the following 30 days, and take away the scheduled incomes
+   before them. Warn when the balance of the account is lower, with the
+   two numbers and the date the money ends.
+9. **Money that does not cover the month:** when the open bills plus the
    closed bills are more than the sum of the account balances in the
    same currency, say so with the two numbers.
 
-7. **Overdue goals** (`status` `overdue`): the progress, what remains
+10. **Overdue goals** (`status` `overdue`): the progress, what remains
    and the final date that passed.
-8. **Goals behind their date:** for an active goal with a final date,
+11. **Goals behind their date:** for an active goal with a final date,
    divide what remains by the months until that date. Compare that with
    what the goal got in each of the last three months (the sum of
    `effect` by month). Warn when the goal needs more each month than it
    got. Give the two numbers.
 
-9. **Budgets over the limit** (`status` `over`): what the period spent,
+12. **Budgets over the limit** (`status` `over`): what the period spent,
    what it had (`available`), by how much it is over and the day the
    period ends. Name the largest transactions of `budget_show`.
-10. **Budgets near the limit** (`status` `near`): what remains and the
+13. **Budgets near the limit** (`status` `near`): what remains and the
     days until the period ends. Warn when the period is less than half
     done.
-11. **Budgets that are over again and again:** a budget whose `history`
+14. **Budgets that are over again and again:** a budget whose `history`
     has three or more periods `over` has a limit that does not match the
     spending. Say so, with the average of `spent`, and ask the user
     which one must change.
@@ -108,6 +137,10 @@ For each currency:
   a category whose last complete month is more than 25% above its average
   of the months before, and at least a relevant amount: ignore a jump
   from 10 to 20.
+- **Recurring charges without a schedule:** a recurring charge (see the
+  next point) that no schedule has is a bill the user must remember by
+  hand. Offer to schedule it; create it with `schedule_add` only after a
+  yes, and never with `automatic` unless the user asks.
 - **Recurring charges:** group expenses by title, ignoring letter case.
   A title that appears in three or more months, about one time a month,
   with about the same value, is recurring: a subscription, a bill or a

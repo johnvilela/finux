@@ -12,6 +12,7 @@ import (
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -127,10 +128,7 @@ func runCreditCards(args []string, io streams) int {
 			return write(io, creditCardsHelp())
 		}
 	}
-	db, err := openDatabase()
-	if err == nil && !transactionsReady(db) {
-		err = errOutdated
-	}
+	db, err := openLedger(io)
 	if err != nil {
 		return exitStatus(io, "credit-card", err)
 	}
@@ -549,13 +547,13 @@ func (c *creditCardsCommand) pay(args []string) error {
 	accounts := account.NewStore(c.db)
 	var payer account.Account
 	if given["from"] {
-		if payer, err = accounts.Find(from, false); errors.Is(err, account.ErrNotFound) {
+		if payer, err = accounts.Find(from, false, today()); errors.Is(err, account.ErrNotFound) {
 			return fmt.Errorf("account not found: %s", from)
 		} else if err != nil {
 			return err
 		}
 	} else {
-		active, err := accounts.List(false)
+		active, err := accounts.List(false, today())
 		if err != nil {
 			return err
 		}
@@ -716,6 +714,9 @@ func (c *creditCardsCommand) purge(current card.Card, hasPayments bool) error {
 			}
 		}
 		if err := transaction.NewStore(tx).PurgeCard(current, other); err != nil {
+			return err
+		}
+		if err := schedule.NewStore(tx).DeleteByCard(current.ID); err != nil {
 			return err
 		}
 		return card.NewStore(tx).Delete(current.ID)

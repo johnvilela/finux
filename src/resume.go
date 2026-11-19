@@ -11,6 +11,7 @@ import (
 	"finux/src/budget"
 	"finux/src/card"
 	"finux/src/goal"
+	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -32,8 +33,13 @@ bill do not count: a purchase with a card counts on the day of the purchase.
 'Per day' is the expenses divided by the days of the month up to today.
 
 The resume also shows the accounts with their balances, the credit card
-bills to pay, the budgets with a period today and the goals. These are always
+bills to pay (up to the bill that is open now), the budgets with a period today and the goals. These are always
 as they are today, also with --month.
+
+'Scheduled' lists the occurrences of your schedules that are due and the
+ones that come until the end of this month. 'After' is the total of the
+balances of a currency after all of them. An occurrence on a credit card
+is not in a balance. See 'finux sc --help'.
 `
 }
 
@@ -55,10 +61,7 @@ func runResume(args []string, io streams) int {
 			return exitStatus(io, "resume", usageError(fmt.Sprintf("invalid month %q: use MM/YYYY or YYYY/MM", month)))
 		}
 	}
-	db, err := openDatabase()
-	if err == nil && !transactionsReady(db) {
-		err = errOutdated
-	}
+	db, err := openLedger(io)
 	if err == nil {
 		err = gatherResume(db, &resume)
 	}
@@ -124,6 +127,30 @@ func monthFlows(views []transaction.View) []ui.ResumeFlow {
 	return result
 }
 
+// gatherScheduled reads the occurrences of the schedules that wait, up
+// to the last day of the month of today.
+func gatherScheduled(db *gorm.DB, resume *ui.Resume) error {
+	first, _ := time.Parse("2006-01-02", resume.Today[:len("2006-01")]+"-01")
+	resume.ScheduledUntil = first.AddDate(0, 1, -1).Format("2006-01-02")
+	schedules, err := schedule.NewStore(db).List(false)
+	if err != nil {
+		return err
+	}
+	views, err := scheduleViews(db, schedules)
+	if err != nil {
+		return err
+	}
+	for _, view := range views {
+		for _, date := range view.Pending(resume.ScheduledUntil) {
+			resume.Scheduled = append(resume.Scheduled, ui.ResumeOccurrence{View: view, Date: date})
+		}
+	}
+	slices.SortStableFunc(resume.Scheduled, func(a, b ui.ResumeOccurrence) int {
+		return cmp.Or(cmp.Compare(a.Date, b.Date), cmp.Compare(a.View.Code, b.View.Code))
+	})
+	return nil
+}
+
 // gatherResume reads what the resume shows. The resume has its month
 // and the date of today.
 func gatherResume(db *gorm.DB, resume *ui.Resume) error {
@@ -133,7 +160,10 @@ func gatherResume(db *gorm.DB, resume *ui.Resume) error {
 		return err
 	}
 	resume.Flows = monthFlows(views)
-	if resume.Accounts, err = account.NewStore(db).List(false); err != nil {
+	if resume.Accounts, err = account.NewStore(db).List(false, resume.Today); err != nil {
+		return err
+	}
+	if err := gatherScheduled(db, resume); err != nil {
 		return err
 	}
 	cards := card.NewStore(db)
@@ -146,8 +176,14 @@ func gatherResume(db *gorm.DB, resume *ui.Resume) error {
 		if err != nil {
 			return err
 		}
+		// A bill that closes after the current one is not to pay yet: a
+		// transaction in installments has a bill for each part.
+		current, err := cards.Current(owner, resume.Today)
+		if err != nil {
+			return err
+		}
 		for _, bill := range bills {
-			if !bill.IsPaid() && bill.Total() > 0 {
+			if !bill.IsPaid() && bill.Total() > 0 && bill.ClosesOn <= current.ClosesOn {
 				resume.Bills = append(resume.Bills, ui.ResumeBill{Card: owner, Bill: bill})
 			}
 		}

@@ -170,14 +170,25 @@ func (b Budget) Recurring() bool { return b.Every > 0 }
 func (b Budget) Archived() bool { return b.DeletedAt.Valid }
 
 // Recurrence returns the period in words, for example "every 2 weeks".
-func (b Budget) Recurrence() string {
+func (b Budget) Recurrence() string { return Describe(b.Every, b.Unit) }
+
+// Describe returns a period in words: "every month", "every 2 weeks",
+// or "one time" for no period.
+func Describe(every int, unit string) string {
 	switch {
-	case !b.Recurring():
+	case every <= 0:
 		return "one time"
-	case b.Every == 1:
-		return "every " + b.Unit
+	case every == 1:
+		return "every " + unit
 	}
-	return fmt.Sprintf("every %d %ss", b.Every, b.Unit)
+	return fmt.Sprintf("every %d %ss", every, unit)
+}
+
+// Step returns the date that is index periods after the YYYY-MM-DD date
+// start. It always counts from start, so the day of the month does not
+// move after a short month.
+func Step(start string, every int, unit string, index int) string {
+	return Budget{StartDate: start, Every: every, Unit: unit}.start(index).Format(isoDate)
 }
 
 var (

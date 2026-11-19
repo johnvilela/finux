@@ -16,6 +16,7 @@ import (
 	"finux/src/goal"
 	"finux/src/mcp"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/storage"
 	"finux/src/transaction"
 
@@ -157,6 +158,14 @@ type transactionJSON struct {
 	OtherAccount string `json:"other_account,omitempty"`
 	// Goal is the code of the goal the transaction counts toward.
 	Goal string `json:"goal,omitempty"`
+	// Installment is the number of the part of a transaction in
+	// installments, Installments is the number of parts and InstallmentID
+	// is the same in all the parts.
+	Installment   int  `json:"installment,omitempty"`
+	Installments  int  `json:"installments,omitempty"`
+	InstallmentID uint `json:"installment_id,omitempty"`
+	// Schedule is the code of the schedule that created the transaction.
+	Schedule string `json:"schedule,omitempty"`
 }
 
 type goalJSON struct {
@@ -243,6 +252,7 @@ func transactionResult(view transaction.View) transactionJSON {
 		ID: view.ID, Title: view.Title, Description: view.Description, Type: view.Type,
 		Amount: cash(view.Amount, view.Account.Currency), Currency: view.Account.Currency, Date: view.Date,
 		Tags: append([]string{}, view.TagList()...), Category: view.Category.Code, PairID: view.PairID,
+		Installment: view.Part, Installments: view.Parts, InstallmentID: view.InstallmentID,
 	}
 	if view.CardID == 0 {
 		result.Account = view.Account.Code
@@ -255,6 +265,9 @@ func transactionResult(view transaction.View) transactionJSON {
 	}
 	if view.Goal != nil {
 		result.Goal = view.Goal.Code
+	}
+	if view.Schedule != nil {
+		result.Schedule = view.Schedule.Code
 	}
 	return result
 }
@@ -305,6 +318,10 @@ func agentError(err error) error {
 	return errors.New(strings.ReplaceAll(text, "--", ""))
 }
 
+// mcpAutomatic makes each tool call create the transactions of the
+// automatic schedules that are due. A read-only server leaves it off.
+var mcpAutomatic bool
+
 // tool makes a tool that needs the database.
 func tool[A any](name, description string, call func(*gorm.DB, A) (any, error)) mcp.Tool {
 	return mcp.New(name, description, func(arguments A) (any, error) {
@@ -313,6 +330,9 @@ func tool[A any](name, description string, call func(*gorm.DB, A) (any, error)) 
 			return nil, err
 		}
 		defer closeDatabase(db)
+		if mcpAutomatic {
+			runAutomatic(db)
+		}
 		result, err := call(db, arguments)
 		return result, agentError(err)
 	})
@@ -365,7 +385,7 @@ func number(value *int) int {
 // tools that change nothing.
 func mcpTools(readOnly bool) []mcp.Tool {
 	var tools []mcp.Tool
-	for _, group := range [][]mcp.Tool{databaseTools(), accountTools(), categoryTools(), transactionTools(), creditCardTools(), goalTools(), budgetTools()} {
+	for _, group := range [][]mcp.Tool{databaseTools(), accountTools(), categoryTools(), transactionTools(), creditCardTools(), goalTools(), budgetTools(), scheduleTools()} {
 		for _, current := range group {
 			if current.ReadOnly || !readOnly {
 				tools = append(tools, current)
@@ -451,7 +471,7 @@ func newAccountsCommand(db *gorm.DB) *accountsCommand {
 
 // find finds an account, also when it is archived.
 func (c *accountsCommand) find(ref string) (account.Account, error) {
-	found, err := c.store.Find(ref, true)
+	found, err := c.store.Find(ref, true, today())
 	if errors.Is(err, account.ErrNotFound) {
 		return found, fmt.Errorf("account not found: %s", ref)
 	}
@@ -460,7 +480,7 @@ func (c *accountsCommand) find(ref string) (account.Account, error) {
 
 // reload returns the account as the database has it now.
 func (c *accountsCommand) reload(id uint) (any, error) {
-	found, err := c.store.Find(strconv.FormatUint(uint64(id), 10), true)
+	found, err := c.store.Find(strconv.FormatUint(uint64(id), 10), true, today())
 	if err != nil {
 		return nil, err
 	}
@@ -488,9 +508,9 @@ func accountTools() []mcp.Tool {
 		Confirm bool   `json:"confirm,omitempty" mcp:"Set to true to delete. Without it the tool only tells what it will delete."`
 	}
 	return []mcp.Tool{
-		reads(tool("account_list", "List the accounts with their balances. The balance is the opening balance plus the transactions of the account.",
+		reads(tool("account_list", "List the accounts with their balances. The balance is the opening balance plus the transactions of the account that have a date up to today.",
 			func(db *gorm.DB, a listArguments) (any, error) {
-				accounts, err := account.NewStore(db).List(a.IncludeArchived)
+				accounts, err := account.NewStore(db).List(a.IncludeArchived, today())
 				if err != nil {
 					return nil, err
 				}
@@ -767,6 +787,7 @@ func newTransactionsCommand(db *gorm.DB) *transactionsCommand {
 	return &transactionsCommand{
 		streams: quiet, store: transaction.NewStore(db), accounts: account.NewStore(db),
 		categories: category.NewStore(db), cards: card.NewStore(db), goals: goal.NewStore(db), budgets: budget.NewStore(db),
+		schedules: schedule.NewStore(db),
 	}
 }
 
@@ -786,6 +807,30 @@ func (c *transactionsCommand) savedResult(id uint) (any, error) {
 		result["budget_warnings"] = warnings
 	}
 	return result, nil
+}
+
+// savedParts is savedResult for the parts of a transaction in
+// installments. "transaction" is the part with the id and
+// "transactions" holds all the parts given.
+func (c *transactionsCommand) savedParts(id uint, parts []transaction.Transaction) (any, error) {
+	result, err := c.savedResult(id)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]transaction.View, len(parts))
+	for i, part := range parts {
+		if views[i], err = c.store.Find(part.ID); err != nil {
+			return nil, err
+		}
+	}
+	result.(map[string]any)["transactions"] = transactionResults(views)
+	return result, nil
+}
+
+// scopeFlags reads the scope argument of a tool as the options --all
+// and --next.
+func scopeFlags(scope *string) (all, next bool) {
+	return text(scope) == "all", text(scope) == "next"
 }
 
 // one returns the transaction with the id as a result.
@@ -845,33 +890,39 @@ func transactionTools() []mcp.Tool {
 		ID uint `json:"id" mcp:"Id of the transaction"`
 	}
 	type addArguments struct {
-		Title       string  `json:"title" mcp:"Title, at most 60 characters"`
-		Value       string  `json:"value" mcp:"Positive amount in the currency of the account, as a decimal string, for example \"1234.56\". The type gives the sign"`
-		Account     string  `json:"account" mcp:"Code or id of the account or the credit card of the transaction"`
-		Category    *string `json:"category,omitempty" mcp:"Code or id of the category. Necessary, but for a transfer, which has the default XFER"`
-		Type        *string `json:"type,omitempty" mcp:"Default: expense for a red category, income for a green one, transfer when 'to' is given. Necessary for a grey category" enum:"expense,income,transfer"`
-		Description *string `json:"description,omitempty" mcp:"Description, at most 200 characters"`
-		Tags        *string `json:"tags,omitempty" mcp:"Tags divided by spaces, for example \"market weekly\". Use transaction_suggestions to find the tags in use"`
-		Date        *string `json:"date,omitempty" mcp:"YYYY-MM-DD or DD/MM/YYYY. Default: today"`
-		To          *string `json:"to,omitempty" mcp:"For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer"`
-		Received    *string `json:"received,omitempty" mcp:"For a transfer between accounts of different currencies: the amount the other account receives"`
-		Goal        *string `json:"goal,omitempty" mcp:"Code or id of the goal the transaction counts toward. The goal must have the currency of the account"`
+		Title            string  `json:"title" mcp:"Title, at most 60 characters"`
+		Value            *string `json:"value,omitempty" mcp:"Positive amount in the currency of the account, as a decimal string, for example \"1234.56\". The type gives the sign. With installments it is the total of all the parts. Necessary, but when installment_value is given"`
+		Account          string  `json:"account" mcp:"Code or id of the account or the credit card of the transaction"`
+		Category         *string `json:"category,omitempty" mcp:"Code or id of the category. Necessary, but for a transfer, which has the default XFER"`
+		Type             *string `json:"type,omitempty" mcp:"Default: expense for a red category, income for a green one, transfer when 'to' is given. Necessary for a grey category" enum:"expense,income,transfer"`
+		Description      *string `json:"description,omitempty" mcp:"Description, at most 200 characters"`
+		Tags             *string `json:"tags,omitempty" mcp:"Tags divided by spaces, for example \"market weekly\". Use transaction_suggestions to find the tags in use"`
+		Date             *string `json:"date,omitempty" mcp:"YYYY-MM-DD or DD/MM/YYYY. Default: today"`
+		To               *string `json:"to,omitempty" mcp:"For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer"`
+		Received         *string `json:"received,omitempty" mcp:"For a transfer between accounts of different currencies: the amount the other account receives"`
+		Goal             *string `json:"goal,omitempty" mcp:"Code or id of the goal the transaction counts toward. The goal must have the currency of the account"`
+		Installments     *int    `json:"installments,omitempty" mcp:"For an expense or an income in installments: the number of monthly parts, from 2 to 120. The tool creates one transaction for each part"`
+		InstallmentValue *string `json:"installment_value,omitempty" mcp:"With installments: the amount of one part, in place of value"`
+		FirstInstallment *int    `json:"first_installment,omitempty" mcp:"With installments, for a purchase that is already in progress: the first part to create. date is then the date of that part. Default: 1"`
 	}
 	type editArguments struct {
-		ID          uint    `json:"id" mcp:"Id of the transaction"`
-		Title       *string `json:"title,omitempty" mcp:"New title, at most 60 characters"`
-		Description *string `json:"description,omitempty" mcp:"New description, at most 200 characters"`
-		Value       *string `json:"value,omitempty" mcp:"New positive amount as a decimal string"`
-		Type        *string `json:"type,omitempty" mcp:"New type. A transfer keeps its type" enum:"expense,income,transfer"`
-		Category    *string `json:"category,omitempty" mcp:"Code or id of the new category"`
-		Tags        *string `json:"tags,omitempty" mcp:"New tags; they replace the tags of the transaction. An empty string removes all tags"`
-		Account     *string `json:"account,omitempty" mcp:"Code or id of the new account or credit card. Give value also when the currency is different"`
-		Date        *string `json:"date,omitempty" mcp:"New date, YYYY-MM-DD or DD/MM/YYYY"`
-		Goal        *string `json:"goal,omitempty" mcp:"Code or id of the new goal. An empty string takes the goal away"`
+		ID               uint    `json:"id" mcp:"Id of the transaction"`
+		Title            *string `json:"title,omitempty" mcp:"New title, at most 60 characters"`
+		Description      *string `json:"description,omitempty" mcp:"New description, at most 200 characters"`
+		Value            *string `json:"value,omitempty" mcp:"New positive amount as a decimal string"`
+		Type             *string `json:"type,omitempty" mcp:"New type. A transfer keeps its type" enum:"expense,income,transfer"`
+		Category         *string `json:"category,omitempty" mcp:"Code or id of the new category"`
+		Tags             *string `json:"tags,omitempty" mcp:"New tags; they replace the tags of the transaction. An empty string removes all tags"`
+		Account          *string `json:"account,omitempty" mcp:"Code or id of the new account or credit card. Give value also when the currency is different"`
+		Date             *string `json:"date,omitempty" mcp:"New date, YYYY-MM-DD or DD/MM/YYYY"`
+		Goal             *string `json:"goal,omitempty" mcp:"Code or id of the new goal. An empty string takes the goal away"`
+		Scope            *string `json:"scope,omitempty" mcp:"For a transaction in installments: one changes this part only, next changes this part and the parts after it, all changes all the parts. With next or all, value is the new total of these parts and date is the new date of the first of them. Default: one" enum:"one,next,all"`
+		InstallmentValue *string `json:"installment_value,omitempty" mcp:"With the scope next or all: the new amount of each part, in place of value"`
 	}
 	type deleteArguments struct {
-		ID      uint `json:"id" mcp:"Id of the transaction"`
-		Confirm bool `json:"confirm,omitempty" mcp:"Set to true to delete. Without it the tool only tells what it will delete."`
+		ID      uint    `json:"id" mcp:"Id of the transaction"`
+		Confirm bool    `json:"confirm,omitempty" mcp:"Set to true to delete. Without it the tool only tells what it will delete."`
+		Scope   *string `json:"scope,omitempty" mcp:"For a transaction in installments: one deletes this part only, next deletes this part and the parts after it, all deletes all the parts. Default: one" enum:"one,next,all"`
 	}
 	return []mcp.Tool{
 		reads(tool("transaction_list", "List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset.",
@@ -900,19 +951,23 @@ func transactionTools() []mcp.Tool {
 			func(db *gorm.DB, a showArguments) (any, error) {
 				return newTransactionsCommand(db).one(a.ID)
 			})),
-		tool("transaction_add", "Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal.",
+		tool("transaction_add", "Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.",
 			func(db *gorm.DB, a addArguments) (any, error) {
 				c := newTransactionsCommand(db)
 				values := transactionFlags{
-					title: a.Title, value: a.Value, account: a.Account, category: text(a.Category), kind: text(a.Type),
+					title: a.Title, value: text(a.Value), account: a.Account, category: text(a.Category), kind: text(a.Type),
 					description: text(a.Description), tags: text(a.Tags), date: text(a.Date), to: text(a.To), received: text(a.Received),
-					goal: text(a.Goal),
+					goal: text(a.Goal), installmentValue: text(a.InstallmentValue), installments: number(a.Installments), from: number(a.FirstInstallment),
 				}
 				sent := given(map[string]bool{
-					"title": true, "value": true, "account": true, "category": a.Category != nil, "type": a.Type != nil,
+					"title": true, "value": a.Value != nil, "account": true, "category": a.Category != nil, "type": a.Type != nil,
 					"description": a.Description != nil, "tags": a.Tags != nil, "date": a.Date != nil, "to": a.To != nil, "received": a.Received != nil,
-					"goal": a.Goal != nil,
+					"goal": a.Goal != nil, "installments": a.Installments != nil, "installment-value": a.InstallmentValue != nil,
+					"from": a.FirstInstallment != nil,
 				})
+				if a.Value == nil && a.InstallmentValue == nil {
+					return nil, errors.New("give value or installment_value")
+				}
 				draft, complete, err := c.newDraft(values, sent)
 				if err != nil {
 					return nil, err
@@ -924,22 +979,36 @@ func transactionTools() []mcp.Tool {
 				if err != nil {
 					return nil, err
 				}
-				return c.savedResult(created.ID)
+				if created.InstallmentID == 0 {
+					return c.savedResult(created.ID)
+				}
+				parts, err := c.store.Parts(created.ID, transaction.All)
+				if err != nil {
+					return nil, err
+				}
+				return c.savedParts(created.ID, parts)
 			}),
-		tool("transaction_edit", "Change a transaction. Give only the arguments to change. A change of one side of a transfer also changes the other side. A payment of a bill cannot change: delete it.",
+		tool("transaction_edit", "Change a transaction. Give only the arguments to change. A change of one side of a transfer also changes the other side. A payment of a bill cannot change: delete it. For a transaction in installments, scope tells which parts change: the result then has them in transactions.",
 			func(db *gorm.DB, a editArguments) (any, error) {
 				c := newTransactionsCommand(db)
 				values := transactionFlags{
 					title: text(a.Title), description: text(a.Description), value: text(a.Value), kind: text(a.Type),
 					category: text(a.Category), tags: text(a.Tags), account: text(a.Account), date: text(a.Date), goal: text(a.Goal),
+					installmentValue: text(a.InstallmentValue),
 				}
+				values.all, values.next = scopeFlags(a.Scope)
 				sent := given(map[string]bool{
 					"title": a.Title != nil, "description": a.Description != nil, "value": a.Value != nil, "type": a.Type != nil,
 					"category": a.Category != nil, "tags": a.Tags != nil, "account": a.Account != nil, "date": a.Date != nil,
-					"goal": a.Goal != nil,
+					"goal": a.Goal != nil, "installment-value": a.InstallmentValue != nil,
 				})
-				if len(sent) == 0 {
-					return nil, errors.New("give at least one of title, description, value, type, category, tags, account, date, goal")
+				switch {
+				case len(sent) == 0:
+					return nil, errors.New("give at least one of title, description, value, installment_value, type, category, tags, account, date, goal")
+				case a.Value != nil && a.InstallmentValue != nil:
+					return nil, errors.New("give value or installment_value, not the two")
+				case a.InstallmentValue != nil && !values.all && !values.next:
+					return nil, errors.New("installment_value needs the scope next or all")
 				}
 				var changes transaction.Draft
 				if err := values.check("edit", sent, &changes); err != nil {
@@ -952,6 +1021,17 @@ func transactionTools() []mcp.Tool {
 				if current.Type == transaction.Payment {
 					return nil, errors.New("a payment cannot change: delete it to open the bill again")
 				}
+				scope, err := scopeOf("edit", values.all, values.next, current.Transaction)
+				if err != nil {
+					return nil, err
+				}
+				if scope != transaction.One {
+					parts, _, err := c.changeParts(current, scope, changes, values, sent)
+					if err != nil {
+						return nil, err
+					}
+					return c.savedParts(current.ID, parts)
+				}
 				draft, err := c.change(current, transaction.DraftOf(current.Transaction), changes, values, sent)
 				if err != nil {
 					return nil, err
@@ -962,22 +1042,31 @@ func transactionTools() []mcp.Tool {
 				}
 				return c.savedResult(updated.ID)
 			}),
-		deletes(tool("transaction_delete", "Delete a transaction permanently. The delete of one side of a transfer also deletes the other side. The delete of a payment opens its bill again.",
+		deletes(tool("transaction_delete", "Delete a transaction permanently. The delete of one side of a transfer also deletes the other side. The delete of a payment opens its bill again. For a transaction in installments, scope tells which parts to delete.",
 			func(db *gorm.DB, a deleteArguments) (any, error) {
 				c := newTransactionsCommand(db)
 				current, err := c.resolve("delete", strconv.FormatUint(uint64(a.ID), 10), "")
 				if err != nil {
 					return nil, err
 				}
+				all, next := scopeFlags(a.Scope)
+				scope, err := scopeOf("delete", all, next, current.Transaction)
+				if err != nil {
+					return nil, err
+				}
+				parts, err := c.store.Parts(current.ID, scope)
+				if err != nil {
+					return nil, err
+				}
 				if !a.Confirm {
-					question := fmt.Sprintf("Delete transaction %d (%s) permanently?", current.ID, current.Title)
-					if current.PairID != 0 {
-						question = fmt.Sprintf("Delete the transfer %s (transactions %d and %d) permanently?", current.Title, current.ID, current.PairID)
+					return confirmation(deleteQuestion(current.Transaction, scope, parts)), nil
+				}
+				if scope != transaction.One {
+					deleted, err := c.store.DeleteParts(current.ID, scope)
+					if err != nil {
+						return nil, err
 					}
-					if current.Type == transaction.Payment {
-						question = fmt.Sprintf("Delete the payment %d (%s)? The bill opens again.", current.ID, current.Title)
-					}
-					return confirmation(question), nil
+					return map[string]any{"deleted": deleted}, nil
 				}
 				if err := c.store.Delete(current.ID); err != nil {
 					return nil, err
@@ -1643,6 +1732,9 @@ func budgetTools() []mcp.Tool {
 					past = append(past, usageResult(usage, found.Currency))
 				}
 				result["transactions"], result["history"] = transactions, past
+				if details.Scheduled > 0 {
+					result["scheduled"] = cash(details.Scheduled, found.Currency)
+				}
 				return result, nil
 			})),
 		tool("budget_add", "Create a budget: a limit of money for some categories in a period. Every expense and income of those categories counts on it without a link: an expense adds to the spent amount and an income gives money back. Transfers and payments of credit card bills do not count. Give every for a recurring budget, or end_date for a one-time budget.",

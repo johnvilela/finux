@@ -259,7 +259,8 @@ func TestTransactionFormWithCards(t *testing.T) {
 	options.Initial.Title = "Market"
 	var model tea.Model = NewTransactionForm(options)
 	model = step(t, model, TxValue, keyEnter)
-	model = step(t, model, TxAccount, append(text("100"), keyEnter)...)
+	model = step(t, model, TxInstallments, append(text("100"), keyEnter)...)
+	model = step(t, model, TxAccount, keyEnter)
 	// The cards come after the accounts: 3 accounts, then VISA and AMEX.
 	model = send(t, model, keyRight, keyRight, keyRight)
 	f := txForm(t, model)
@@ -279,7 +280,7 @@ func TestTransactionFormWithCards(t *testing.T) {
 
 	// A transfer cannot use a card: the form goes back to an account,
 	// and no card is in the two account lists.
-	model = send(t, model, keyShiftTab, keyShiftTab)
+	model = send(t, model, keyShiftTab, keyShiftTab, keyShiftTab)
 	model = step(t, model, TxType)
 	model = send(t, model, keyRight, keyRight)
 	f = txForm(t, model)

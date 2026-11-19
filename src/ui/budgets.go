@@ -135,6 +135,9 @@ type BudgetDetails struct {
 	History []budget.Usage
 	// Today is the current date as YYYY-MM-DD.
 	Today string
+	// Scheduled is what the schedules of the categories of the budget
+	// still take from the current period. It is 0 for another period.
+	Scheduled int64
 }
 
 // status returns the status of the budget, or the level of the period to
@@ -237,6 +240,9 @@ func BudgetDetailsView(details BudgetDetails, plain bool) string {
 		row([2]string{"Available", format(usage.Available())}),
 		row([2]string{"Spent", fmt.Sprintf("%s (%d%%)", format(usage.Spent), usage.Percent())}),
 	)
+	if details.Scheduled > 0 {
+		lines = append(lines, row([2]string{"Scheduled", format(details.Scheduled)}))
+	}
 	if usage.Over() > 0 {
 		lines = append(lines, row([2]string{"Over", format(usage.Over())}))
 	} else {
@@ -316,6 +322,9 @@ func styledBudgetDetails(details BudgetDetails) string {
 	}
 	if current.Rollover {
 		left += "  ·  " + signedMoney(usage.Carried, current.Currency) + " carried"
+	}
+	if details.Scheduled > 0 {
+		left += "  ·  " + format(details.Scheduled) + " scheduled"
 	}
 	lines = append(lines,
 		"",

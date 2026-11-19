@@ -9,6 +9,7 @@ import (
 	"finux/src/code"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -105,10 +106,7 @@ func runGoals(args []string, io streams) int {
 			return write(io, goalsHelp())
 		}
 	}
-	db, err := openDatabase()
-	if err == nil && !transactionsReady(db) {
-		err = errOutdated
-	}
+	db, err := openLedger(io)
 	if err != nil {
 		return exitStatus(io, "goals", err)
 	}
@@ -451,6 +449,9 @@ func (c *goalsCommand) delete(args []string) error {
 func (c *goalsCommand) purge(current goal.Goal) error {
 	return c.db.Transaction(func(tx *gorm.DB) error {
 		if err := transaction.NewStore(tx).ClearGoal(current.ID); err != nil {
+			return err
+		}
+		if err := schedule.NewStore(tx).ClearGoal(current.ID); err != nil {
 			return err
 		}
 		return goal.NewStore(tx).Delete(current.ID)

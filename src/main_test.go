@@ -31,6 +31,7 @@ Commands:
   credit-card, cc   Manage credit cards
   goals, gl         Manage goals
   budgets, bg       Manage budgets
+  scheduled, sc     Manage scheduled transactions
   resume, rs        Show your financial resume
   mcp               Run the MCP server for AI agents
   skills            Install the skills for AI agents

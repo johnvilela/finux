@@ -109,7 +109,7 @@ func TestSetupDatabaseUpgradesOldDatabase(t *testing.T) {
 	if err != nil || report.created || report.baseCategories != 14 {
 		t.Fatalf("setup of old database = %+v, %v; want 14 base categories", report, err)
 	}
-	if _, err := account.NewStore(db).Find("WISE", false); err != nil {
+	if _, err := account.NewStore(db).Find("WISE", false, today()); err != nil {
 		t.Fatalf("setup removed an account: %v", err)
 	}
 }

@@ -61,7 +61,7 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	if got := must(nil); !strings.Contains(got, "\n  seed              Add sample data to the development database\n") {
 		t.Fatalf("dev help lacks the seed command:\n%s", got)
 	}
-	created := "✓ Development database created: " + database + " (8 accounts, 2 credit cards, 3 goals, 3 budgets, 24 transactions)\n"
+	created := "✓ Development database created: " + database + " (8 accounts, 2 credit cards, 3 goals, 3 budgets, 4 schedules, 30 transactions)\n"
 	if got := must(nil, "seed"); got != created {
 		t.Fatalf("first seed = %q, want %q", got, created)
 	}
@@ -83,9 +83,16 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	// The sample transactions have all types, tags and a transfer between
 	// two currencies.
 	transactions := must(nil, "tx")
-	for _, want := range []string{"Salary", "Weekly market", "Card payment", "Travel money", "FOOD", "XFER", "-R$ 550,00", "$100.00", "Payment VISA", "\n24 transactions\n"} {
+	for _, want := range []string{"Salary", "Weekly market", "Card payment", "Travel money", "FOOD", "XFER", "-R$ 550,00", "$100.00", "Payment VISA", "Laptop 1/6", "Laptop 6/6", "\n30 transactions\n"} {
 		if !strings.Contains(transactions, want) {
 			t.Errorf("seeded transactions lack %q:\n%s", want, transactions)
+		}
+	}
+	// The sample schedules: one that is due, two that come and one for one time.
+	schedules := must(nil, "sc")
+	for _, want := range []string{"RENT", "every month", "due", "NET", "upcoming", "DENT", "one time", "VISA", "SAL", "R$ 2.400,00", "4 schedules\n"} {
+		if !strings.Contains(schedules, want) {
+			t.Errorf("schedules lack %q:\n%s", want, schedules)
 		}
 	}
 	// The sample goals have one of each type and of each status.
@@ -133,8 +140,8 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	must(nil, "ac", "d", "CASH", "--hard", "--yes")
 	total := 8
 	for _, want := range []string{
-		"3 accounts and 5 transactions added; 11 accounts and 28 transactions in total",
-		"3 accounts and 5 transactions added; 14 accounts and 33 transactions in total",
+		"3 accounts and 5 transactions added; 11 accounts and 34 transactions in total",
+		"3 accounts and 5 transactions added; 14 accounts and 39 transactions in total",
 	} {
 		total += 3
 		if got := must(nil, "seed"); got != "✓ Development database updated: "+database+" ("+want+")\n" {

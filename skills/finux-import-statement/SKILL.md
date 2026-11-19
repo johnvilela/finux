@@ -79,8 +79,64 @@ a difference you cannot remove.
   and `to`), not two transactions. When the other account also gets a
   statement, the same transfer is in the two files: create it one time.
 - Interest, fees and taxes of the bank are real expenses: keep them.
-- An installment line (`3/10`, `PARC 03/10`): keep the installment of
-  this statement only, and put the installment number in the description.
+- An installment line (`3/10`, `PARC 03/10`, `Parcela 3 de 10`) is one
+  part of a purchase in installments. It is a transaction, but not a
+  normal one: see the next step.
+
+### 3b. Installment lines
+
+Finux keeps a purchase in installments as one transaction for each
+monthly part, and it creates the future parts too. So a statement must
+create a purchase one time only.
+
+For each installment line, read the part number K, the number of parts N,
+and the amount of the part. Remove the marker from the title
+(`LOJA X PARC 03/10` becomes `Loja X`).
+
+1. Look for the purchase in Finux: `transaction_list` with the `account`
+   and `search` of the title. A transaction with `installment: K`,
+   `installments: N`, the same amount and, on a credit card, the `bill`
+   of this statement is this line. It is already in Finux: drop the line.
+   Do not compare the dates: the statement often prints the date of the
+   original purchase on each part, and Finux gives each part its own
+   month.
+2. When Finux does not have it, create the purchase from this part on:
+   `installments: N`, `first_installment: K`, `installment_value` with the
+   amount of the line, and a `date` that puts part K in the bill of this
+   statement. Use the date of the line when it is in the period of the
+   statement; when it is older (the date of the original purchase), use
+   the first day of the period of the statement.
+3. Finux then has the parts K to N. The parts before K stay out: their
+   bills are in the past.
+
+In the draft, show these lines as their own group, with "creates parts K
+to N" for each one, so the user sees that future months get transactions
+too. When the amount of a later part differs by some cents from the
+statement (the bank put the cents in another part), correct that part
+with `transaction_edit` and the scope `one`.
+
+### 3c. Rows that pay a schedule
+
+Call `schedule_list`. A schedule is a bill or an income that the user
+planned; it has no transaction until it is paid. For each row of the
+statement that matches a schedule (the same place, a similar title, and
+a date near a date in `due` or `next`; the value can differ for a bill
+that changes):
+
+- Do not create it with `transaction_add`. In step 7 call `schedule_pay`
+  with the code, and the `value` and the `date` of the row. The
+  transaction then has the title, the category and the tags of the
+  schedule, and the occurrence does not stay due.
+- One row pays one occurrence. `schedule_pay` takes the oldest occurrence
+  first: pay the rows in the order of their dates.
+- When a row can match two schedules, or a schedule has no row in a month
+  where it was due, put it in the doubts for the user. Do not skip an
+  occurrence without a yes.
+- Show these rows in the draft as their own group: "pays RENT (due
+  05/11)".
+
+After the import, list the schedules that are still `due` and have no row:
+the user can have paid from another account, or not paid.
 
 ### 4. Remove the duplicates
 
@@ -121,6 +177,9 @@ Wait for the user to approve or to correct. Create nothing before that.
 Call `transaction_add` for each approved row, the oldest date first. Stop
 at the first error, report how many rows are done, and ask how to
 continue.
+
+For an installment line, the result has all the parts in `transactions`.
+Count only the part of this statement when you reconcile.
 
 For a credit card, a paid bill refuses new transactions
 (`bill MM/YYYY of CODE is paid`). Tell the user: the payment must be

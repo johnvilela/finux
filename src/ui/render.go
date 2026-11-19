@@ -262,6 +262,15 @@ func CategoryCard(current category.Category, plain bool) string {
 	return styleBox.BorderForeground(tint).Width(width+6).Render(strings.Join(lines, "\n")) + "\n"
 }
 
+// titled returns the title of a transaction with its part, such as
+// "Notebook 3/10", for a transaction in installments.
+func titled(view transaction.View) string {
+	if part := view.Installment(); part != "" {
+		return view.Title + " " + part
+	}
+	return view.Title
+}
+
 // TransactionTable renders a list of transactions. Plain output has no
 // colors and no borders, for pipes and files.
 func TransactionTable(views []transaction.View, plain bool) string {
@@ -277,7 +286,7 @@ func TransactionTable(views []transaction.View, plain bool) string {
 			label = paint(color.Hex, "●") + " " + label
 		}
 		rows[i] = []string{
-			strconv.FormatUint(uint64(view.ID), 10), transaction.FormatDate(view.Date), view.Title, label,
+			strconv.FormatUint(uint64(view.ID), 10), transaction.FormatDate(view.Date), titled(view), label,
 			view.Account.Code, money.Format(view.Amount, view.Account.Currency),
 		}
 	}
@@ -338,12 +347,16 @@ func TransactionCard(view transaction.View, plain bool) string {
 	if view.Bill != nil {
 		period = card.FormatPeriod(view.Bill.Period)
 	}
+	part := view.Installment()
 	if plain {
 		fields := [][2]string{
 			{"ID", id}, {"Type", view.Type}, {"Value", value},
 			{place, view.Account.Code + "  " + view.Account.Name},
 			{"Category", view.Category.Code + "  " + view.Category.Name},
 			{"Date", date},
+		}
+		if part != "" {
+			fields = append(fields, [2]string{"Part", part})
 		}
 		if purchase {
 			fields = append(fields, [2]string{"Bill", period})
@@ -353,6 +366,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 		}
 		if view.Goal != nil {
 			fields = append(fields, [2]string{"Goal", view.Goal.Code + "  " + view.Goal.Title})
+		}
+		if view.Schedule != nil {
+			fields = append(fields, [2]string{"Schedule", view.Schedule.Code + "  " + view.Schedule.Title})
 		}
 		switch {
 		case view.Type == transaction.Payment && view.Other != nil:
@@ -426,11 +442,17 @@ func TransactionCard(view transaction.View, plain bool) string {
 		row("Category", paint(categoryColor.Hex, "●")+" "+styleBold.Render(view.Category.Code)+"  "+view.Category.Name),
 		row("Date", date),
 	)
+	if part != "" {
+		lines = append(lines, row("Part", part))
+	}
 	if view.Tags != "" {
 		lines = append(lines, row("Tags", lipgloss.NewStyle().Foreground(tint).Render(view.Tags)))
 	}
 	if view.Goal != nil {
 		lines = append(lines, row("Goal", paint(colorIncome, "◎")+" "+styleBold.Render(view.Goal.Code)+"  "+view.Goal.Title))
+	}
+	if view.Schedule != nil {
+		lines = append(lines, row("Schedule", styleBold.Render(view.Schedule.Code)+"  "+view.Schedule.Title))
 	}
 	lines = append(lines,
 		"",

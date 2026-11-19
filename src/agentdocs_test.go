@@ -141,7 +141,7 @@ func TestAgentSkillReferencesAreCopies(t *testing.T) {
 
 var (
 	frontmatter = regexp.MustCompile(`(?s)\A---\nname: ([^\n]+)\ndescription: ([^\n]+)\n---\n\n# `)
-	toolMention = regexp.MustCompile("`((?:database|account|category|transaction|credit_card|goal|budget)_[a-z_]+)`")
+	toolMention = regexp.MustCompile("`((?:database|account|category|transaction|credit_card|goal|budget|schedule)_[a-z_]+)`")
 	linkTarget  = regexp.MustCompile(`\]\(([^)#]+\.md)(?:#[^)]*)?\)`)
 )
 

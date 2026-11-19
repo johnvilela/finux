@@ -28,6 +28,17 @@ data; it changes nothing.
   them in the spending.
 - A purchase on a credit card is an expense on the date of the purchase,
   not on the date the bill is paid.
+- A purchase in installments is one transaction for each monthly part,
+  with `installment` and `installments`. Each part is an expense in the
+  month of its date: the period has only its own parts, not the total of
+  the purchase. In the list of the largest expenses, show a part as
+  `Notebook (3/10)`.
+- A period in the future has data: the parts of the purchases in
+  installments. Report it as "already committed", not as spending.
+- The balance of an account counts the transactions up to today.
+- A scheduled transaction is not a transaction and is not in the totals.
+  It counts in a period only after the user paid it (`schedule` in the
+  transaction).
 - Give each number one time and say what it is. Do not invent a number
   that the data does not give.
 
@@ -52,6 +63,7 @@ the transactions inside the range.
 - `credit_card_list`, and `credit_card_show` for each card, for the open
   bill and the bills that wait for a payment.
 - `goal_list` for the goals and their progress.
+- `schedule_list` for the scheduled transactions that wait.
 - `budget_list` for the budgets, and `budget_show` with a `date` of the
   period for each budget that had a period in it.
 
@@ -91,8 +103,14 @@ remained. Then use this order and leave out an empty part:
    review, with `spent`, `available`, `percent` and `level`. A budget
    period can start or end on other days than the review: give its
    dates. Put the budgets that are `over` first.
-9. **To look at:** at most three facts that need attention, for example a
-   late bill, a category that doubled, or many transactions in `OTHER`.
+9. **Scheduled:** for a period that has today or is in the future, the
+   schedules with a date in `due` (they wait for a confirmation) and the
+   ones whose `next` is in the period, with the total of each currency.
+   Call it "to pay" or "to receive", not spending. Leave it out for a
+   period in the past.
+10. **To look at:** at most three facts that need attention, for example
+    a late bill, a category that doubled, a scheduled transaction that
+    waits, or many transactions in `OTHER`.
 
 Show amounts with `formatted`. Keep the report short enough to read on
 one screen; give more detail when the user asks. Give facts, not

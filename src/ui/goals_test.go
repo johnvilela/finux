@@ -222,7 +222,8 @@ func TestTransactionFormGoal(t *testing.T) {
 	// type, title, value, account (INTER, in BRL), category, goal
 	model = step(t, model, TxTitle, keyTab)
 	model = step(t, model, TxValue, append(text("Bonus"), keyTab)...)
-	model = step(t, model, TxAccount, append(text("100"), keyTab)...)
+	model = step(t, model, TxInstallments, append(text("100"), keyTab)...)
+	model = step(t, model, TxAccount, keyTab)
 	model = step(t, model, TxCategory, keyTab)
 	model = step(t, model, TxGoal, keyTab)
 	// The goals in BRL, then no goal again. NOTE is in USD.

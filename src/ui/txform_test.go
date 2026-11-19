@@ -76,7 +76,8 @@ func TestTransactionFormExpenseFlow(t *testing.T) {
 		t.Fatalf("accepted suggestion = %q", got)
 	}
 	model = step(t, model, TxValue, keyTab)
-	model = step(t, model, TxAccount, append(text("50,5"), keyTab)...)
+	model = step(t, model, TxInstallments, append(text("50,5"), keyTab)...)
+	model = step(t, model, TxAccount, keyTab)
 	model = step(t, model, TxCategory, keyRight, keyTab)
 	if got := txForm(t, model).Value(TxAccount); got != "NUBAN" {
 		t.Fatalf("account = %q", got)
@@ -253,7 +254,7 @@ func TestTransactionFormValidation(t *testing.T) {
 			t.Errorf("value %q: error %q, want %q", input, got, want)
 		}
 	}
-	model = step(t, model, TxDate, append(text("10"), keyEnter, keyEnter, keyEnter)...)
+	model = step(t, model, TxDate, append(text("10"), keyEnter, keyEnter, keyEnter, keyEnter)...)
 	for range 10 {
 		model = send(t, model, keyBack)
 	}

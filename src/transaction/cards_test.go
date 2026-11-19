@@ -331,7 +331,7 @@ func TestPurgeAccountKeepsBillsPaid(t *testing.T) {
 	if plain, _, err := f.store.AccountUsage(f.account["INTER"]); err != nil || plain != 1 {
 		t.Fatalf("AccountUsage plain = %d, %v", plain, err)
 	}
-	inter, err := f.accounts.Find("INTER", true)
+	inter, err := f.accounts.Find("INTER", true, fixtureToday)
 	if err != nil {
 		t.Fatal(err)
 	}

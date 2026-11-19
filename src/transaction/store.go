@@ -12,6 +12,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/schedule"
 
 	"gorm.io/gorm"
 )
@@ -97,6 +98,19 @@ func (s *Store) billFor(owner card.Card, date string) (card.Bill, error) {
 	return bill, nil
 }
 
+// billOf returns the bill of a card for a period. It creates the bill
+// if necessary. A paid bill is an error.
+func (s *Store) billOf(owner card.Card, period string) (card.Bill, error) {
+	bill, err := card.NewStore(s.db).BillOf(owner, period)
+	if err != nil {
+		return bill, err
+	}
+	if bill.IsPaid() {
+		return bill, locked(owner, bill)
+	}
+	return bill, nil
+}
+
 // linkable checks that a transaction in the given currency can have the
 // goal. A goal takes transactions of its currency only. An archived
 // goal takes no new transaction; kept is true for a transaction that
@@ -160,7 +174,9 @@ func signed(kind string, value int64) int64 {
 }
 
 // Create validates and inserts a transaction. For a transfer it inserts
-// the two sides and returns the side that leaves the account.
+// the two sides and returns the side that leaves the account. For a
+// transaction in installments it inserts the parts and returns the
+// first one it created.
 func (s *Store) Create(draft Draft) (Transaction, error) {
 	if err := draft.clean(); err != nil {
 		return Transaction{}, err
@@ -168,10 +184,13 @@ func (s *Store) Create(draft Draft) (Transaction, error) {
 	if err := place(draft); err != nil {
 		return Transaction{}, err
 	}
+	if draft.Installments > 1 {
+		return s.createParts(draft)
+	}
 	created := Transaction{
 		Title: draft.Title, Description: draft.Description, Type: draft.Type, Amount: signed(draft.Type, draft.Value),
 		AccountID: draft.AccountID, CardID: draft.CardID, CategoryID: draft.CategoryID, Date: draft.Date, Tags: draft.Tags,
-		GoalID: draft.GoalID,
+		GoalID: draft.GoalID, ScheduleID: draft.ScheduleID,
 	}
 	if draft.CardID != 0 {
 		owner, err := s.card(draft.CardID, false)
@@ -259,8 +278,15 @@ var shared = []string{"Title", "Description", "CategoryID", "Date", "Tags", "Goa
 
 // Update changes the transaction id to the values of the draft. A
 // transfer keeps its type and its accounts; the change also goes to its
-// other side, except a new value between two currencies.
+// other side, except a new value between two currencies. A transaction
+// of a credit card keeps its bill when its date and its card stay.
 func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
+	return s.update(id, draft, "")
+}
+
+// update is Update for a transaction that goes to the bill of the given
+// period. An empty period gives the bill of the date.
+func (s *Store) update(id uint, draft Draft, period string) (Transaction, error) {
 	current, err := s.take(id)
 	if err != nil {
 		return Transaction{}, err
@@ -296,11 +322,22 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 		if err != nil {
 			return Transaction{}, err
 		}
-		bill, err := s.billFor(owner, draft.Date)
-		if err != nil {
-			return Transaction{}, err
+		// The days of a card can change after a bill exists, and a part of
+		// a transaction in installments is not always in the bill of its
+		// date. So only a new date or a new card gives another bill.
+		billID, currency = current.BillID, owner.Currency
+		if period != "" || draft.CardID != current.CardID || draft.Date != current.Date || billID == 0 {
+			var bill card.Bill
+			if period != "" {
+				bill, err = s.billOf(owner, period)
+			} else {
+				bill, err = s.billFor(owner, draft.Date)
+			}
+			if err != nil {
+				return Transaction{}, err
+			}
+			billID = bill.ID
 		}
-		billID, currency = bill.ID, owner.Currency
 	} else {
 		holder, err := s.account(draft.AccountID, draft.AccountID == current.AccountID)
 		if err != nil {
@@ -436,6 +473,18 @@ func (s *Store) views(transactions []Transaction) ([]View, error) {
 	for _, current := range goals {
 		goalByID[current.ID] = current
 	}
+	// The table of the schedules is newer than the others: read it only
+	// for a transaction that a schedule created.
+	scheduleByID := map[uint]schedule.Schedule{}
+	if slices.ContainsFunc(transactions, func(current Transaction) bool { return current.ScheduleID != 0 }) {
+		var schedules []schedule.Schedule
+		if err := s.db.Unscoped().Find(&schedules).Error; err != nil {
+			return nil, err
+		}
+		for _, current := range schedules {
+			scheduleByID[current.ID] = current
+		}
+	}
 	// The other side of a transfer can be outside the given transactions.
 	var pairIDs []uint
 	for _, current := range transactions {
@@ -461,6 +510,9 @@ func (s *Store) views(transactions []Transaction) ([]View, error) {
 		}
 		if target, ok := goalByID[current.GoalID]; ok && current.GoalID != 0 {
 			views[i].Goal = &target
+		}
+		if source, ok := scheduleByID[current.ScheduleID]; ok {
+			views[i].Schedule = &source
 		}
 		bill, ok := billByID[current.BillID]
 		if !ok || current.BillID == 0 {
@@ -616,6 +668,21 @@ func (s *Store) ByGoal(goalID uint) ([]View, error) {
 		return nil, err
 	}
 	return s.views(transactions)
+}
+
+// BySchedule returns the transactions that a schedule created, the
+// newest first.
+func (s *Store) BySchedule(scheduleID uint) ([]View, error) {
+	var transactions []Transaction
+	if err := s.db.Where("schedule_id = ?", scheduleID).Order("date DESC, id DESC").Find(&transactions).Error; err != nil {
+		return nil, err
+	}
+	return s.views(transactions)
+}
+
+// ClearSchedule removes the link to a schedule from its transactions.
+func (s *Store) ClearSchedule(scheduleID uint) error {
+	return s.db.Model(&Transaction{}).Where("schedule_id = ?", scheduleID).Update("schedule_id", 0).Error
 }
 
 // ClearGoal removes the link to a goal from its transactions. The

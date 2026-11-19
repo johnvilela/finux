@@ -393,8 +393,14 @@ func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth
 	if current {
 		marker, titleStyle = styleAccent.Render("▌")+"   ", styleTitle
 	}
-	title := cut(view.Title, textWidth)
-	text := titleStyle.Render(title)
+	// The part of a transaction in installments stays when the title is cut.
+	part := view.Installment()
+	if part != "" {
+		part = " " + part
+	}
+	title := cut(view.Title, textWidth-lipgloss.Width(part))
+	text := titleStyle.Render(title) + styleDim.Render(part)
+	title += part
 	// The tags use the room the title leaves.
 	if room := textWidth - lipgloss.Width(title) - 2; view.Tags != "" && room > 3 {
 		text += "  " + styleDim.Render(cut(view.Tags, room))

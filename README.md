@@ -56,6 +56,7 @@ Commands:
   credit-card, cc   Manage credit cards
   goals, gl         Manage goals
   budgets, bg       Manage budgets
+  scheduled, sc     Manage scheduled transactions
   resume, rs        Show your financial resume
   mcp               Run the MCP server for AI agents
   skills            Install the skills for AI agents
@@ -87,9 +88,9 @@ make dev
 build, `make dev` applies the migrations to it and adds sample data:
 
 - If the database does not exist, it is created with the base categories, a
-  base set of 8 accounts, 2 credit cards, 3 goals, 3 budgets and 24
-  transactions. The credit card `VISA` has an open bill, a late bill and a
-  paid bill.
+  base set of 8 accounts, 2 credit cards, 3 goals, 3 budgets, 4 schedules
+  and 30 transactions. The credit card `VISA` has an open bill, a late bill and a
+  paid bill. The credit card `AMEX` has a purchase in 6 installments.
 - If the database exists, it keeps its data and gets 3 more random accounts and
   5 more random transactions.
 
@@ -185,7 +186,8 @@ currency and an opening balance.
 - **Currency**: `USD`, `EUR`, `BRL` or `BTC`. It does not change after creation.
 - **Opening balance**: set on creation only. Use `1234.56` or `1234,56`; negative
   values are permitted. The balance of an account is its opening balance plus
-  its transactions.
+  its transactions that have a date up to today. A transaction with a future
+  date changes the balance when its day comes.
 - **Color**: one of 16 colors: red, orange, amber, yellow, lime, green, emerald,
   teal, cyan, sky, blue, indigo, violet, purple, pink, slate.
 
@@ -312,6 +314,43 @@ form. The form suggests the titles and the tags that other transactions have:
 type `wee` and the title shows `Weekly market`; type `#mar` and the tags show
 `#market`. Press Tab to accept the suggestion, the up and down arrows to see
 other suggestions, or continue to type a different value.
+
+### Installments
+
+An expense or an income can be in installments: monthly parts of one purchase.
+Finux creates one transaction for each part.
+
+```sh
+./bin/finux tx add --title Notebook --value 1200 --installments 10 --account VISA --category SHOP
+./bin/finux tx add --title Sofa --installment-value 150 --installments 6 --account INTER --category HOME
+./bin/finux tx add --title Phone --installment-value 99,90 --installments 12 --from 4 --account VISA --category SHOP
+./bin/finux tx edit 14 --value 125               # one part
+./bin/finux tx edit 14 --all --category EDU      # all the parts
+./bin/finux tx delete 14 --next --yes            # part 14 and the parts after it
+```
+
+- `--value` is the total. The parts are equal, and the cents that remain go to
+  the first part. `--installment-value` gives the value of one part instead.
+- `--date` is the date of the first part. Each part after it is one month
+  later, on the same day; a short month uses its last day.
+- `--from 4` is for a purchase that is already in progress: Finux creates the
+  parts 4 to the last one, and `--date` is the date of part 4.
+- On a credit card, each part goes to the bill after the one before. All the
+  parts use the limit of the card from the first day.
+- On an account, a part changes the balance on its date.
+- Each part counts in the budgets and in `finux resume` in the month of its
+  date.
+- The lists show the part after the title: `Notebook 3/10`.
+
+`edit` and `delete` change one part. `--all` changes all the parts and `--next`
+changes the part and the parts after it. With `--all` or `--next`, `--value`
+is the new total of those parts, `--installment-value` is the new value of each
+one, and `--date` is the new date of the first of them. The number of parts
+does not change, and the parts that stay keep their numbers. A part in a paid
+bill stops a change with `--all` or `--next`: use `--next` from a part in a
+bill that is not paid.
+
+An installment is from 2 to 120 parts. A transfer has no installments.
 
 ### Transfers
 
@@ -594,6 +633,65 @@ When you delete a category, it leaves the budgets that have it. Finux
 refuses to delete a category that is the only category of a budget: change
 or delete the budget first.
 
+
+## Scheduled transactions
+
+A schedule is a transaction that will happen: a bill to pay or an income to
+receive, one time or again and again. It is not a transaction: it does not
+change a balance, a bill or a budget until you confirm it.
+
+```sh
+./bin/finux scheduled             # list schedules; aliases: schedule, sc
+./bin/finux sc add --title Rent --value 1500 --account INTER --category HOME \
+  --every month --date 05/12/2026 --code RENT
+./bin/finux sc add --title Dentist --value 300 --account VISA --category HEALT \
+  --date 10/12/2026                # one time
+./bin/finux sc add --title Course --value 200 --account INTER --category EDU \
+  --every "2 weeks" --times 6
+./bin/finux sc RENT               # what is due, the next date, its transactions
+./bin/finux sc pay RENT           # confirm the next occurrence: creates the transaction
+./bin/finux sc pay ELEC --value 187,40 --date 12/12/2026   # the real value and date
+./bin/finux sc skip RENT          # drop the next occurrence
+./bin/finux sc edit RENT --value 1600
+./bin/finux sc delete RENT        # archive; --hard deletes permanently
+./bin/finux sc restore RENT
+```
+
+A schedule has a title, a code, a value, a type (expense or income), an
+account or a credit card, a category, and optional tags, description and
+goal. `add` needs `--title`, `--value`, `--account` and `--category`.
+
+- **Dates**: `--date` is the first occurrence (default: today). `--every`
+  makes the schedule repeat: `day`, `week`, `month`, `year`, or a number of
+  them such as `"2 weeks"`. Without `--every` the schedule is for one time.
+  The occurrences count from the first date: a monthly schedule from day 31
+  uses the last day of a shorter month.
+- **End**: `--until <date>` or `--times <number>`. Without them a schedule
+  repeats until you archive it.
+- **Confirmation**: each occurrence waits until you run `sc pay`, which
+  creates its transaction, or `sc skip`. An occurrence is due on its date and
+  stays due until then, so a schedule can have many due occurrences; `pay`
+  and `skip` take the oldest one first. `pay` can also confirm an occurrence
+  before its date.
+- **Real values**: `sc pay` uses the value, the date of the occurrence and the
+  account of the schedule. `--value`, `--date` and `--account` give the real
+  ones, for a bill that changes each month.
+- **Automatic**: with `--auto`, Finux creates the transaction of each due
+  occurrence the next time you run a `finux` command, with the date of the
+  occurrence, and tells you. This is off by default: without `--auto` nothing
+  becomes a transaction by itself. `sc edit CODE --auto=false` stops it.
+
+`finux tx` tells you when occurrences are due. `finux resume` lists what is
+due and what comes until the end of the month, and the balance after them.
+A budget shows `Scheduled`: what the schedules of its categories still take
+from the current period.
+
+A change with `sc edit` is for the occurrences that wait: the transactions
+that the schedule created stay as they are. A new `--date` is the date of the
+next occurrence. An archived schedule stops. A delete of a schedule never
+deletes a transaction, and a delete of a transaction does not bring its
+occurrence back. A category that a schedule has cannot be deleted. A
+permanent delete of an account or a credit card also deletes its schedules.
 
 ## Resume
 

@@ -16,6 +16,7 @@ import (
 	"finux/src/code"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/storage"
 	"finux/src/transaction"
 	"finux/src/ui"
@@ -73,6 +74,9 @@ type seedEntry struct {
 	received                       int64
 	// goal is the code of the goal the transaction counts toward.
 	goal string
+	// installments is the number of monthly parts of a purchase; value
+	// is then the total.
+	installments int
 }
 
 // seedTransactions is the base data of a new development database. It
@@ -133,7 +137,9 @@ var seedCards = []card.Card{
 
 // seedPurchases are the transactions of the credit cards. With the
 // days of VISA, they are in three bills: one that is open, one that is
-// late and one that seedBaseCards pays in part.
+// late and one that seedBaseCards pays in part. The purchase in
+// installments is on AMEX, in USD, so it does not change the budgets and
+// the bills of VISA.
 var seedPurchases = []seedEntry{
 	{title: "Streaming", account: "VISA", category: "FUN", tags: "#fixed", value: 5590, daysAgo: 2},
 	{title: "Restaurant", account: "VISA", category: "FOOD", tags: "#weekend", value: 17990, daysAgo: 6},
@@ -141,6 +147,7 @@ var seedPurchases = []seedEntry{
 	{title: "Running shoes", account: "VISA", category: "SHOP", value: 45990, daysAgo: 36},
 	{title: "Flight tickets", account: "VISA", category: "TRANS", tags: "#travel", value: 50000, daysAgo: 66},
 	{title: "Hotel", account: "AMEX", category: "FUN", tags: "#travel", value: 18000, daysAgo: 2},
+	{title: "Laptop", account: "AMEX", category: "SHOP", tags: "#work", value: 120000, daysAgo: 2, installments: 6},
 }
 
 // The payment of the oldest bill of VISA: a part of its total, from the
@@ -242,11 +249,14 @@ func seed(path string, fresh bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if err := seedBaseSchedules(db); err != nil {
+			return "", err
+		}
 		if err := seedBaseBudgets(db); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Development database created: %s (%d accounts, %d credit cards, %d goals, %d budgets, %d transactions)",
-			path, len(seedAccounts), len(seedCards), len(seedGoals), len(seedBudgets), added+purchases), nil
+		return fmt.Sprintf("Development database created: %s (%d accounts, %d credit cards, %d goals, %d budgets, %d schedules, %d transactions)",
+			path, len(seedAccounts), len(seedCards), len(seedGoals), len(seedBudgets), len(seedSchedules), added+purchases), nil
 	}
 	if err := seedMore(store, seedBatch); err != nil {
 		return "", err
@@ -255,7 +265,7 @@ func seed(path string, fresh bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	all, err := store.List(true)
+	all, err := store.List(true, today())
 	if err != nil {
 		return "", err
 	}
@@ -265,6 +275,46 @@ func seed(path string, fresh bool) (string, error) {
 	}
 	return fmt.Sprintf("Development database updated: %s (%d accounts and %d transactions added; %d accounts and %d transactions in total)",
 		path, seedBatch, added, len(all), len(movements)), nil
+}
+
+// seedSchedules are the sample scheduled transactions: a bill that is
+// due, a bill and an income that come, and a visit for one time on a
+// credit card. startIn is the number of days from today to the first
+// occurrence; it is negative for a date in the past.
+var seedSchedules = []struct {
+	schedule          schedule.Schedule
+	account, category string
+	startIn           int
+}{
+	{schedule: schedule.Schedule{Title: "Rent", Code: "RENT", Type: schedule.Expense, Value: 150000, Every: 1, Unit: budget.Month, Tags: "#fixed"}, account: "INTER", category: "HOME", startIn: -3},
+	{schedule: schedule.Schedule{Title: "Internet", Code: "NET", Type: schedule.Expense, Value: 9990, Every: 1, Unit: budget.Month, Tags: "#fixed"}, account: "INTER", category: "BILLS", startIn: 4},
+	{schedule: schedule.Schedule{Title: "Salary", Code: "SAL", Type: schedule.Income, Value: 240000, Every: 1, Unit: budget.Month}, account: "INTER", category: "SAL", startIn: 10},
+	{schedule: schedule.Schedule{Title: "Dentist", Code: "DENT", Type: schedule.Expense, Value: 30000}, account: "VISA", category: "HEALT", startIn: 20},
+}
+
+// seedBaseSchedules adds the sample schedules. They create no transaction.
+func seedBaseSchedules(db *gorm.DB) error {
+	store, accounts, cards, categories := schedule.NewStore(db), account.NewStore(db), card.NewStore(db), category.NewStore(db)
+	for _, entry := range seedSchedules {
+		created := entry.schedule
+		created.StartDate = daysAgo(-entry.startIn)
+		group, err := categories.Find(entry.category)
+		if err != nil {
+			return fmt.Errorf("category %s: %w", entry.category, err)
+		}
+		created.CategoryID = group.ID
+		if holder, err := accounts.Find(entry.account, false, today()); err == nil {
+			created.AccountID = holder.ID
+		} else if owner, err := cards.Find(entry.account, false); err == nil {
+			created.CardID = owner.ID
+		} else {
+			return fmt.Errorf("account %s: %w", entry.account, err)
+		}
+		if err := store.Create(&created); err != nil {
+			return fmt.Errorf("create schedule %s: %w", created.Code, err)
+		}
+	}
+	return nil
 }
 
 // seedBaseBudgets adds the sample budgets. They count the sample
@@ -325,17 +375,17 @@ func seedBaseCards(db *gorm.DB) (int, error) {
 		}
 		created, err := store.Create(transaction.Draft{
 			Title: entry.title, Type: transaction.Expense, Value: entry.value, CardID: owners[entry.account].ID,
-			CategoryID: group.ID, Date: daysAgo(entry.daysAgo), Tags: entry.tags,
+			CategoryID: group.ID, Date: daysAgo(entry.daysAgo), Tags: entry.tags, Installments: entry.installments,
 		})
 		if err != nil {
 			return added, fmt.Errorf("create transaction %s: %w", entry.title, err)
 		}
-		added++
+		added += max(entry.installments, 1)
 		if entry.daysAgo > seedPaymentDaysAgo {
 			oldest = created
 		}
 	}
-	payer, err := account.NewStore(db).Find("INTER", false)
+	payer, err := account.NewStore(db).Find("INTER", false, today())
 	if err != nil {
 		return added, fmt.Errorf("account INTER: %w", err)
 	}
@@ -368,7 +418,7 @@ func seedBaseTransactions(db *gorm.DB) (int, error) {
 	goals := goal.NewStore(db)
 	added := 0
 	for _, entry := range seedTransactions {
-		from, err := accounts.Find(entry.account, false)
+		from, err := accounts.Find(entry.account, false, today())
 		if err != nil {
 			return added, fmt.Errorf("account %s: %w", entry.account, err)
 		}
@@ -390,7 +440,7 @@ func seedBaseTransactions(db *gorm.DB) (int, error) {
 		added++
 		switch {
 		case entry.to != "":
-			to, err := accounts.Find(entry.to, false)
+			to, err := accounts.Find(entry.to, false, today())
 			if err != nil {
 				return added, fmt.Errorf("account %s: %w", entry.to, err)
 			}
@@ -411,7 +461,7 @@ func seedBaseTransactions(db *gorm.DB) (int, error) {
 // incomes. It uses the accounts and the categories the database has, so
 // it adds fewer when they are missing. It returns the number it added.
 func seedMoreTransactions(db *gorm.DB, count int) (int, error) {
-	accounts, err := account.NewStore(db).List(false)
+	accounts, err := account.NewStore(db).List(false, today())
 	if err != nil {
 		return 0, err
 	}
@@ -487,7 +537,7 @@ func seedBase(store *account.Store) error {
 // seedMore adds count accounts with random values. It prefers names the
 // database does not have yet.
 func seedMore(store *account.Store, count int) error {
-	existing, err := store.List(true)
+	existing, err := store.List(true, today())
 	if err != nil {
 		return err
 	}

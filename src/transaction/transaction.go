@@ -15,6 +15,7 @@ import (
 	"finux/src/card"
 	"finux/src/category"
 	"finux/src/goal"
+	"finux/src/schedule"
 )
 
 // The types of a transaction.
@@ -33,6 +34,9 @@ const (
 	MaxDescription = 200
 	// MaxTag is the size limit of a tag, without the # sign.
 	MaxTag = 30
+	// MaxInstallments is the largest number of parts of a transaction
+	// in installments.
+	MaxInstallments = 120
 
 	isoDate     = "2006-01-02"
 	displayDate = "02/01/2006"
@@ -97,9 +101,18 @@ type Transaction struct {
 	// "#market #weekly".
 	Tags string
 	// PairID is the other transaction of a transfer, or 0.
-	PairID    uint
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	PairID uint
+	// InstallmentID joins the parts of a transaction in installments: it
+	// is the ID of the first part that was created. Part is the number
+	// of this part, from 1, and Parts is the number of parts. The three
+	// are 0 for a transaction without installments.
+	InstallmentID uint `gorm:"index"`
+	Part          int
+	Parts         int
+	// ScheduleID is the schedule that created the transaction, or 0.
+	ScheduleID uint `gorm:"index"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Value returns the amount without its sign.
@@ -112,6 +125,15 @@ func (t Transaction) Value() int64 {
 
 // Outgoing reports whether the money leaves the account.
 func (t Transaction) Outgoing() bool { return t.Amount < 0 }
+
+// Installment returns the part of a transaction in installments, such
+// as "3/10". It is empty for a transaction without installments.
+func (t Transaction) Installment() string {
+	if t.InstallmentID == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d", t.Part, t.Parts)
+}
 
 // TagList returns the tags as a list.
 func (t Transaction) TagList() []string { return strings.Fields(t.Tags) }
@@ -134,6 +156,8 @@ type View struct {
 	Bill *card.Bill
 	// Goal is the goal of the transaction, or nil.
 	Goal *goal.Goal
+	// Schedule is the schedule that created the transaction, or nil.
+	Schedule *schedule.Schedule
 }
 
 // Draft holds the values of a transaction to create or to change.
@@ -155,6 +179,15 @@ type Draft struct {
 	// Received is the amount the other account receives, for a transfer
 	// between currencies. 0 means the same as Value.
 	Received int64
+	// Installments is the number of monthly parts of a new transaction.
+	// 0 or 1 means one transaction. Value is then the total of all the
+	// parts.
+	Installments int
+	// From is the first part to create, for a purchase that is already
+	// in progress. 0 means 1.
+	From int
+	// ScheduleID is the schedule that creates the transaction, or 0.
+	ScheduleID uint
 }
 
 // DraftOf returns the draft that describes a transaction as it is.
@@ -213,7 +246,54 @@ func (d *Draft) clean() error {
 		return err
 	}
 	d.Date, d.Tags = date, tags
+	return d.cleanInstallments()
+}
+
+// cleanInstallments checks the installments of a draft. After it,
+// Installments is 0 or a number from 2, and From is a number from 1.
+func (d *Draft) cleanInstallments() error {
+	switch {
+	case d.Installments == 0 || d.Installments == 1:
+		if d.From > 1 {
+			return errors.New("first installment is only for a transaction in installments")
+		}
+		d.Installments, d.From = 0, 0
+		return nil
+	case d.Installments < 0 || d.Installments > MaxInstallments:
+		return fmt.Errorf("installments must be from 2 to %d", MaxInstallments)
+	case d.Type == Transfer:
+		return errors.New("a transfer cannot have installments")
+	case d.From < 0 || d.From > d.Installments:
+		return fmt.Errorf("first installment must be from 1 to %d", d.Installments)
+	case d.Value < int64(d.Installments):
+		return fmt.Errorf("value is too small for %d installments", d.Installments)
+	}
+	d.From = max(d.From, 1)
 	return nil
+}
+
+// split divides a total into n parts. The parts are equal; what remains
+// goes to the first part.
+func split(total int64, n int) []int64 {
+	parts := make([]int64, n)
+	for i := range parts {
+		parts[i] = total / int64(n)
+	}
+	parts[0] += total % int64(n)
+	return parts
+}
+
+// monthsLater returns the day of a YYYY-MM-DD date, months later. A
+// month too short for the day gives its last day: 31 January and one
+// month is 28 or 29 February.
+func monthsLater(date string, months int) string {
+	anchor, err := time.Parse(isoDate, date)
+	if err != nil {
+		return date
+	}
+	first := time.Date(anchor.Year(), anchor.Month()+time.Month(months), 1, 0, 0, 0, 0, time.UTC)
+	last := first.AddDate(0, 1, -1).Day()
+	return first.AddDate(0, 0, min(anchor.Day(), last)-1).Format(isoDate)
 }
 
 // ParseDate reads a date as DD/MM/YYYY, YYYY/MM/DD or YYYY-MM-DD and

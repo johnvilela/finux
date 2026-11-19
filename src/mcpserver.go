@@ -73,8 +73,11 @@ const mcpInstructions = `Finux is a personal finance manager. These tools read a
 - Send a date as YYYY-MM-DD or DD/MM/YYYY. Results give dates as YYYY-MM-DD and bills as YYYY-MM.
 - A transaction is in an account or in a credit card, not in the two. The argument account accepts the code of a credit card.
 - An expense has a negative amount and an income a positive one. A transfer is two transactions, one in each account. Transfers and payments are not in the totals.
+- The balance of an account counts its transactions with a date up to today. A transaction with a future date changes the balance on its day.
+- An expense or an income can be in installments: transaction_add with installments creates one transaction for each monthly part, and value is the total of the parts. On a credit card each part goes to the bill after the one before. Each part counts in the totals and in the budgets in the month of its date. transaction_edit and transaction_delete change one part; give scope (next or all) to change more parts.
 - A goal gets its progress from the transactions linked to it with the argument goal. A transaction has at most one goal, in the currency of the goal. A payment of a credit card bill cannot have a goal.
 - A budget has no link to its transactions: each expense and income of its categories counts by itself, in the currency of the budget, in the period of its date. transaction_add and transaction_edit return budget_warnings when a budget is near or over its limit: tell the user.
+- A schedule is a transaction that will happen, one time or again and again. It is not a transaction and it changes no balance. Each of its occurrences waits until schedule_pay creates its transaction or schedule_skip drops it. When the user paid a scheduled bill, call schedule_pay, not transaction_add. Do not set automatic unless the user asks for it.
 - A tool that deletes data needs confirm: true. Without it, the tool returns confirm_required and a message, and changes nothing. Ask the user before you confirm.
 - If a tool reports that the database is not found or is out of date, call database_init.`
 
@@ -92,6 +95,9 @@ func runMCP(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "mcp", err)
 	}
+	// A server that can write also creates the transactions of the
+	// automatic schedules.
+	mcpAutomatic = !readOnly
 	server := &mcp.Server{Name: "finux", Version: mcpVersion, Instructions: mcpInstructions, Tools: mcpTools(readOnly)}
 	switch {
 	case len(positional) == 0 && given["url"]:

@@ -43,13 +43,13 @@ func TestStoreCreateAndFind(t *testing.T) {
 		t.Fatalf("timestamps not set: %+v", account)
 	}
 	for _, ref := range []string{"INTER", "inter", "1"} {
-		got, err := store.Find(ref, false)
+		got, err := store.Find(ref, false, "2026-11-17")
 		if err != nil || got.ID != account.ID || got.OpeningBalance != -250 || got.Balance() != -250 {
 			t.Fatalf("Find(%q) = %+v, %v", ref, got, err)
 		}
 	}
 	for _, ref := range []string{"NOPE", "99", ""} {
-		if _, err := store.Find(ref, false); !errors.Is(err, ErrNotFound) {
+		if _, err := store.Find(ref, false, "2026-11-17"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("Find(%q) error = %v, want ErrNotFound", ref, err)
 		}
 	}
@@ -79,7 +79,7 @@ func TestStoreListOrdersByName(t *testing.T) {
 	create(t, store, "nubank", "NUBAN")
 	create(t, store, "Banco Inter", "INTER")
 	create(t, store, "Wise", "WISE")
-	accounts, err := store.List(false)
+	accounts, err := store.List(false, "2026-11-17")
 	if err != nil || len(accounts) != 3 {
 		t.Fatalf("List = %v, %v", accounts, err)
 	}
@@ -97,14 +97,14 @@ func TestStoreUpdate(t *testing.T) {
 	if err := store.Update(&account); err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.Find("INTPJ", false)
+	got, err := store.Find("INTPJ", false, "2026-11-17")
 	if err != nil || got.Name != "Inter PJ" || got.Description != "business" || got.Color != "green" {
 		t.Fatalf("after update = %+v, %v", got, err)
 	}
 	if got.Currency != "BRL" || got.OpeningBalance != 1000 {
 		t.Fatalf("currency or opening balance changed: %+v", got)
 	}
-	if _, err := store.Find("INTER", false); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Find("INTER", false, "2026-11-17"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("old code still found: %v", err)
 	}
 	other.Code = "INTPJ"
@@ -124,20 +124,20 @@ func TestStoreArchiveRestoreDelete(t *testing.T) {
 	if err := store.Archive(account.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Find("INTER", false); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Find("INTER", false, "2026-11-17"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("archived account found: %v", err)
 	}
-	archived, err := store.Find("INTER", true)
+	archived, err := store.Find("INTER", true, "2026-11-17")
 	if err != nil || !archived.Archived() {
 		t.Fatalf("Find with archived = %+v, %v", archived, err)
 	}
-	if active, _ := store.List(false); len(active) != 1 || active[0].Code != "NUBAN" {
+	if active, _ := store.List(false, "2026-11-17"); len(active) != 1 || active[0].Code != "NUBAN" {
 		t.Fatalf("active list = %+v", active)
 	}
-	if all, _ := store.List(true); len(all) != 2 {
+	if all, _ := store.List(true, "2026-11-17"); len(all) != 2 {
 		t.Fatalf("full list has %d accounts, want 2", len(all))
 	}
-	if only, _ := store.ListArchived(); len(only) != 1 || only[0].Code != "INTER" {
+	if only, _ := store.ListArchived("2026-11-17"); len(only) != 1 || only[0].Code != "INTER" {
 		t.Fatalf("archived list = %+v", only)
 	}
 	reuse := Account{Name: "New", Code: "INTER", Color: "red", Currency: "USD"}
@@ -147,7 +147,7 @@ func TestStoreArchiveRestoreDelete(t *testing.T) {
 	if err := store.Restore(account.ID); err != nil {
 		t.Fatal(err)
 	}
-	if restored, err := store.Find("INTER", false); err != nil || restored.Archived() {
+	if restored, err := store.Find("INTER", false, "2026-11-17"); err != nil || restored.Archived() {
 		t.Fatalf("after restore = %+v, %v", restored, err)
 	}
 	if err := store.Archive(account.ID); err != nil {
@@ -156,7 +156,7 @@ func TestStoreArchiveRestoreDelete(t *testing.T) {
 	if err := store.Delete(account.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Find("INTER", true); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Find("INTER", true, "2026-11-17"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("hard-deleted account found: %v", err)
 	}
 	if err := store.Create(&reuse); err != nil {

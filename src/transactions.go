@@ -14,6 +14,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -45,7 +46,8 @@ func transactionsHelp() string {
 ` + green.Render("Options for add and edit:") + `
   --title <text>        Title, at most ` + strconv.Itoa(transaction.MaxTitle) + ` characters
   --description <text>  Description, at most ` + strconv.Itoa(transaction.MaxDescription) + ` characters
-  --value <amount>      Amount in the currency of the account, for example 1234.56
+  --value <amount>      Amount in the currency of the account, for example 1234.56.
+                        With installments: the total of the parts
   --type <type>         ` + strings.Join(transaction.Types(), ", ") + `
                         (default: expense for a red category, income for a green one)
   --category <code>     Category; red is for expenses, green for incomes, grey for all
@@ -54,6 +56,16 @@ func transactionsHelp() string {
   --date <date>         DD/MM/YYYY or YYYY/MM/DD (default: today)
   --goal <code>         Goal the transaction counts toward; 'none' takes it away.
                         See 'finux goals --help'
+
+` + green.Render("Options for add, for an expense or an income in installments:") + `
+  --installments <number>       Number of monthly parts, from 2 to ` + strconv.Itoa(transaction.MaxInstallments) + `
+  --installment-value <amount>  Value of one part, in place of --value
+  --from <number>               First part to create, for a purchase that is
+                                already in progress (default: 1)
+
+` + green.Render("Options for edit and delete, for a transaction in installments:") + `
+  --all                 Change or delete all the parts
+  --next                Change or delete this part and the parts after it
 
 ` + green.Render("Options for add, for a transfer between accounts:") + `
   --to <code>           Account that receives the money
@@ -75,6 +87,23 @@ A transfer is two transactions, one in each account. A change or a delete of
 one of them also changes or deletes the other. A transfer keeps its type and
 its accounts. In a shell, write a tag without # or in quotes.
 
+A transaction in installments is one transaction for each monthly part. The
+value is the total: the parts are equal and the cents that remain go to the
+first part. --date is the date of the first part that add creates; each part
+after it is one month later. On a credit card each part goes to the bill
+after the one before, and all the parts use the limit from the first day. On
+an account a part changes the balance on its date. The list shows the part
+after the title, such as 3/10.
+
+Without --all or --next, edit and delete change one part only, and the other
+parts keep their numbers. With --all or --next, a title, a description, a
+type, a category, tags, a goal and an account go to each part; --value is
+the new total of these parts and --installment-value is the new value of
+each one; --date is the date of the first of these parts, and the others
+follow by month. A part in a paid bill stops the change of all the parts:
+use --next from a part in a bill that is not paid. The number of parts does
+not change.
+
 A transaction of a credit card goes to a bill of the card. A credit card has
 no transfers. The payment of a bill is a transaction of the type payment: it
 comes from 'finux cc pay' and it cannot change. See 'finux cc --help'.
@@ -90,6 +119,7 @@ type transactionsCommand struct {
 	cards      *card.Store
 	goals      *goal.Store
 	budgets    *budget.Store
+	schedules  *schedule.Store
 }
 
 // errOutdated means the database lacks tables or columns of this Finux.
@@ -103,6 +133,8 @@ func transactionsReady(db *gorm.DB) bool {
 	return migrator.HasTable(&transaction.Transaction{}) && migrator.HasTable(&card.Card{}) && migrator.HasTable(&card.Bill{}) &&
 		migrator.HasColumn(&transaction.Transaction{}, "card_id") && migrator.HasColumn(&transaction.Transaction{}, "bill_id") &&
 		migrator.HasTable(&goal.Goal{}) && migrator.HasColumn(&transaction.Transaction{}, "goal_id") &&
+		migrator.HasColumn(&transaction.Transaction{}, "installment_id") &&
+		migrator.HasTable(&schedule.Schedule{}) && migrator.HasColumn(&transaction.Transaction{}, "schedule_id") &&
 		migrator.HasTable(&budget.Budget{}) && migrator.HasTable(&budget.Link{})
 }
 
@@ -131,15 +163,13 @@ func runTransactions(args []string, io streams) int {
 			return write(io, transactionsHelp())
 		}
 	}
-	db, err := openDatabase()
-	if err == nil && !transactionsReady(db) {
-		err = errOutdated
-	}
+	db, err := openLedger(io)
 	if err != nil {
 		return exitStatus(io, "transactions", err)
 	}
 	command.store, command.accounts, command.categories = transaction.NewStore(db), account.NewStore(db), category.NewStore(db)
 	command.cards, command.goals, command.budgets = card.NewStore(db), goal.NewStore(db), budget.NewStore(db)
+	command.schedules = schedule.NewStore(db)
 	return exitStatus(io, "transactions", handler(rest))
 }
 
@@ -195,7 +225,7 @@ func (c *transactionsCommand) resolve(command, ref, title string) (transaction.V
 // code or id. An account wins when the two have the same id. A credit
 // card comes back as an account with the ID 0, and its own id.
 func (c *transactionsCommand) findPlace(ref string, archived bool) (account.Account, uint, error) {
-	found, err := c.accounts.Find(ref, archived)
+	found, err := c.accounts.Find(ref, archived, today())
 	if !errors.Is(err, account.ErrNotFound) {
 		return found, 0, err
 	}
@@ -210,7 +240,7 @@ func (c *transactionsCommand) findPlace(ref string, archived bool) (account.Acco
 // findAccount finds an account by code or id. Archived accounts are
 // found only when archived is true.
 func (c *transactionsCommand) findAccount(ref string, archived bool) (account.Account, error) {
-	found, err := c.accounts.Find(ref, archived)
+	found, err := c.accounts.Find(ref, archived, today())
 	if errors.Is(err, account.ErrNotFound) {
 		return found, fmt.Errorf("account not found: %s", ref)
 	}
@@ -265,7 +295,11 @@ func (c *transactionsCommand) list(args []string) error {
 		return c.print("No transactions match the filter.\n")
 	}
 	if len(views) == 0 || !c.interactive {
-		return c.print(ui.TransactionTable(views, c.plain))
+		notice, err := dueNotice(c.schedules)
+		if err != nil {
+			return err
+		}
+		return c.print(ui.TransactionTable(views, c.plain) + notice)
 	}
 	title := "Transactions"
 	if len(given) > 0 {
@@ -348,9 +382,19 @@ func (c *transactionsCommand) show(args []string) error {
 // transactionFlags holds the text of the options of add and edit.
 type transactionFlags struct {
 	title, description, value, kind, category, tags, account, date, to, received, goal string
+	// installmentValue is the value of one part of a transaction in
+	// installments. installments is the number of parts and from is the
+	// first part to create.
+	installmentValue   string
+	installments, from int
+	// all and next give the scope of an edit: all the parts, or the part
+	// and the parts after it. parts is the number of parts of the scope.
+	all, next bool
+	parts     int
 }
 
-func (v *transactionFlags) define(flags *flag.FlagSet, transfer bool) {
+// define adds the options of add, when create is true, or of edit.
+func (v *transactionFlags) define(flags *flag.FlagSet, create bool) {
 	flags.StringVar(&v.title, "title", "", "")
 	flags.StringVar(&v.description, "description", "", "")
 	flags.StringVar(&v.value, "value", "", "")
@@ -360,10 +404,47 @@ func (v *transactionFlags) define(flags *flag.FlagSet, transfer bool) {
 	flags.StringVar(&v.account, "account", "", "")
 	flags.StringVar(&v.date, "date", "", "")
 	flags.StringVar(&v.goal, "goal", "", "")
-	if transfer {
+	flags.StringVar(&v.installmentValue, "installment-value", "", "")
+	if create {
 		flags.StringVar(&v.to, "to", "", "")
 		flags.StringVar(&v.received, "received", "", "")
+		flags.IntVar(&v.installments, "installments", 0, "")
+		flags.IntVar(&v.from, "from", 0, "")
+		return
 	}
+	flags.BoolVar(&v.all, "all", false, "")
+	flags.BoolVar(&v.next, "next", false, "")
+}
+
+// scopeOf reads the options --all and --next for a transaction. They
+// need a transaction in installments.
+func scopeOf(command string, all, next bool, current transaction.Transaction) (transaction.Scope, error) {
+	switch {
+	case all && next:
+		return transaction.One, usageError(command + ": give --all or --next, not the two")
+	case !all && !next:
+		return transaction.One, nil
+	case current.InstallmentID == 0:
+		return transaction.One, usageError(fmt.Sprintf("%s: transaction %d is not an installment: --all and --next do not apply", command, current.ID))
+	case all:
+		return transaction.All, nil
+	}
+	return transaction.Next, nil
+}
+
+// changedOf tells which values the options of an edit change.
+func changedOf(given map[string]bool) transaction.Changed {
+	return transaction.Changed{
+		Title: given["title"], Description: given["description"], Type: given["type"], Category: given["category"],
+		Tags: given["tags"], Goal: given["goal"], Place: given["account"], Date: given["date"],
+		Value: given["value"] || given["installment-value"],
+	}
+}
+
+// span names the parts of a scope in a message: "Installments 4 to 10
+// of Notebook updated (7 transactions)".
+func span(parts []transaction.Transaction, title, action string) string {
+	return fmt.Sprintf("Installments %d to %d of %s %s (%s)", parts[0].Part, parts[len(parts)-1].Part, title, action, plural(int64(len(parts)), "transaction"))
 }
 
 // check cleans and validates the options that need no database. It
@@ -438,15 +519,50 @@ func (c *transactionsCommand) add(args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.saved(created, "created")
+	message := label(created, "created")
+	if created.InstallmentID != 0 {
+		if message, err = c.createdParts(created); err != nil {
+			return err
+		}
+	}
+	return c.saved(created.ID, message)
 }
 
-// saved prints the feedback of a transaction that was created or
-// changed, then one line for each budget that it leaves near or over
-// its limit.
-func (c *transactionsCommand) saved(current transaction.Transaction, action string) error {
-	out := ui.Success(label(current, action)) + "\n"
-	view, err := c.store.Find(current.ID)
+// createdParts names the parts that an add created: their ids, their
+// number and their values.
+func (c *transactionsCommand) createdParts(first transaction.Transaction) (string, error) {
+	parts, err := c.store.Parts(first.ID, transaction.All)
+	if err != nil {
+		return "", err
+	}
+	view, err := c.store.Find(first.ID)
+	if err != nil {
+		return "", err
+	}
+	return createdMessage(parts, view.Account.Currency), nil
+}
+
+// createdMessage is the feedback of an add of a transaction in
+// installments. parts holds the parts it created.
+func createdMessage(parts []transaction.Transaction, currency string) string {
+	first, last := parts[0], parts[len(parts)-1]
+	value := func(part transaction.Transaction) string { return money.Format(part.Value(), currency) }
+	message := fmt.Sprintf("Transactions %d to %d created: ", first.ID, last.ID)
+	switch {
+	case first.Part > 1:
+		return message + fmt.Sprintf("installments %d to %d of %d, %s each", first.Part, last.Part, first.Parts, value(first))
+	case first.Value() != last.Value():
+		return message + fmt.Sprintf("%d installments, the first of %s and the others of %s", len(parts), value(first), value(last))
+	}
+	return message + fmt.Sprintf("%d installments of %s", len(parts), value(first))
+}
+
+// saved prints the feedback of transactions that were created or
+// changed, then one line for each budget that the transaction id
+// leaves near or over its limit.
+func (c *transactionsCommand) saved(id uint, message string) error {
+	out := ui.Success(message) + "\n"
+	view, err := c.store.Find(id)
 	if err != nil {
 		return err
 	}
@@ -515,10 +631,32 @@ func (c *transactionsCommand) newDraft(values transactionFlags, given map[string
 			}
 		}
 	}
+	switch {
+	case given["value"] && given["installment-value"]:
+		return draft, false, usageError("add: give --value or --installment-value, not the two")
+	case given["installment-value"] && !given["installments"]:
+		return draft, false, usageError("add: --installment-value is only for installments: give --installments")
+	case given["from"] && !given["installments"]:
+		return draft, false, usageError("add: --from is only for installments: give --installments")
+	case given["installments"] && (values.installments < 2 || values.installments > transaction.MaxInstallments):
+		return draft, false, usageError(fmt.Sprintf("add: --installments must be a number from 2 to %d", transaction.MaxInstallments))
+	case given["from"] && (values.from < 1 || values.from > values.installments):
+		return draft, false, usageError(fmt.Sprintf("add: --from must be a number from 1 to %d", values.installments))
+	case given["installments"] && draft.Type == transaction.Transfer:
+		return draft, false, usageError("add: a transfer cannot have installments")
+	}
+	draft.Installments, draft.From = values.installments, values.from
 	if given["value"] && given["account"] {
 		if draft.Value, err = amount("add", values.value, from.Currency); err != nil {
 			return draft, false, err
 		}
+	}
+	// The value of a draft is the total of its parts.
+	if given["installment-value"] && given["account"] {
+		if draft.Value, err = amount("add", values.installmentValue, from.Currency); err != nil {
+			return draft, false, err
+		}
+		draft.Value *= int64(values.installments)
 	}
 	if given["goal"] {
 		target, err := c.findGoal(values.goal)
@@ -532,13 +670,13 @@ func (c *transactionsCommand) newDraft(values transactionFlags, given map[string
 			return draft, false, err
 		}
 	}
-	complete = given["title"] && given["value"] && given["account"] && draft.CategoryID != 0 && draft.Type != "" &&
+	complete = given["title"] && (given["value"] || given["installment-value"]) && given["account"] && draft.CategoryID != 0 && draft.Type != "" &&
 		(draft.Type != transaction.Transfer || given["to"])
 	return draft, complete, nil
 }
 
 func (c *transactionsCommand) form(title string, draft transaction.Draft, values transactionFlags, given map[string]bool) (transaction.Draft, error) {
-	accounts, err := c.accounts.List(false)
+	accounts, err := c.accounts.List(false, today())
 	if err != nil {
 		return draft, err
 	}
@@ -565,6 +703,7 @@ func (c *transactionsCommand) form(title string, draft transaction.Draft, values
 	for name, field := range map[string]ui.TxField{
 		"title": ui.TxTitle, "description": ui.TxDescription, "value": ui.TxValue, "category": ui.TxCategory,
 		"tags": ui.TxTags, "account": ui.TxAccount, "date": ui.TxDate, "to": ui.TxTo, "received": ui.TxReceived, "goal": ui.TxGoal,
+		"installments": ui.TxInstallments, "installment-value": ui.TxValue,
 	} {
 		if given[name] {
 			preset = append(preset, field)
@@ -574,6 +713,17 @@ func (c *transactionsCommand) form(title string, draft transaction.Draft, values
 	// or a category that is for one type only.
 	if draft.Type != "" && (given["type"] || given["to"] || given["category"]) {
 		preset = append(preset, ui.TxType)
+	}
+	// The form shows the total, also when the user gave the value of one part.
+	if given["installment-value"] {
+		if !given["account"] {
+			return draft, usageError("add: --installment-value needs --account")
+		}
+		from, _, err := c.findPlace(values.account, false)
+		if err != nil {
+			return draft, err
+		}
+		values.value = money.Input(draft.Value, from.Currency)
 	}
 	form, err := program(ui.NewTransactionForm(ui.TransactionFormOptions{
 		Title: title, Initial: draft, Value: values.value, Received: values.received,
@@ -607,8 +757,18 @@ func (c *transactionsCommand) edit(args []string) error {
 	if err := values.check("edit", given, &changes); err != nil {
 		return err
 	}
-	if len(given) == 0 && !c.interactive {
+	scoped := given["all"] || given["next"]
+	delete(given, "all")
+	delete(given, "next")
+	switch {
+	case len(given) == 0 && scoped:
+		return usageError("edit: give the options to change with --all or --next")
+	case len(given) == 0 && !c.interactive:
 		return usageError("edit: give --title, --description, --value, --type, --category, --tags, --account, --date or --goal when input is not a terminal")
+	case given["value"] && given["installment-value"]:
+		return usageError("edit: give --value or --installment-value, not the two")
+	case given["installment-value"] && !scoped:
+		return usageError("edit: --installment-value needs --all or --next")
 	}
 	current, err := c.resolve("edit", reference(positional), "Edit transaction")
 	if err != nil {
@@ -617,20 +777,47 @@ func (c *transactionsCommand) edit(args []string) error {
 	if current.Type == transaction.Payment {
 		return errors.New("a payment cannot change: delete it to open the bill again")
 	}
+	scope, err := scopeOf("edit", values.all, values.next, current.Transaction)
+	if err != nil {
+		return err
+	}
 	draft := transaction.DraftOf(current.Transaction)
 	if len(given) == 0 {
 		if draft, err = c.editForm(current, draft); err != nil {
 			return err
 		}
 	}
-	if draft, err = c.change(current, draft, changes, values, given); err != nil {
-		return err
+	if scope == transaction.One {
+		if draft, err = c.change(current, draft, changes, values, given); err != nil {
+			return err
+		}
+		updated, err := c.store.Update(current.ID, draft)
+		if err != nil {
+			return err
+		}
+		return c.saved(updated.ID, label(updated, "updated"))
 	}
-	updated, err := c.store.Update(current.ID, draft)
+	updated, title, err := c.changeParts(current, scope, changes, values, given)
 	if err != nil {
 		return err
 	}
-	return c.saved(updated, "updated")
+	return c.saved(current.ID, span(updated, title, "updated"))
+}
+
+// changeParts applies the options that were given to the parts of a
+// scope. It returns the parts and the title they now have.
+func (c *transactionsCommand) changeParts(current transaction.View, scope transaction.Scope, changes transaction.Draft, values transactionFlags, given map[string]bool) ([]transaction.Transaction, string, error) {
+	parts, err := c.store.Parts(current.ID, scope)
+	if err != nil {
+		return nil, "", err
+	}
+	values.parts = len(parts)
+	draft, err := c.change(current, transaction.DraftOf(current.Transaction), changes, values, given)
+	if err != nil {
+		return nil, "", err
+	}
+	updated, err := c.store.UpdateParts(current.ID, scope, draft, changedOf(given))
+	return updated, draft.Title, err
 }
 
 // editForm opens the form with the values of a transaction.
@@ -676,7 +863,7 @@ func (c *transactionsCommand) change(current transaction.View, draft, changes tr
 		if found.Archived() && (found.ID != current.AccountID || cardID != current.CardID) {
 			return draft, fmt.Errorf("account not found: %s (it is archived; restore it first)", found.Code)
 		}
-		if found.Currency != currency && !given["value"] {
+		if found.Currency != currency && !given["value"] && !given["installment-value"] {
 			return draft, usageError(fmt.Sprintf("edit: give --value: the account %s is in %s, not in %s", found.Code, found.Currency, currency))
 		}
 		draft.AccountID, draft.CardID, currency = found.ID, cardID, found.Currency
@@ -686,11 +873,26 @@ func (c *transactionsCommand) change(current transaction.View, draft, changes tr
 			return draft, err
 		}
 	}
+	// The value of a draft for a scope is the total of its parts.
+	if given["installment-value"] {
+		if draft.Value, err = amount("edit", values.installmentValue, currency); err != nil {
+			return draft, err
+		}
+		draft.Value *= int64(values.parts)
+	}
 	return draft, nil
 }
 
+// editTitle is the heading of the form that changes a transaction.
+func editTitle(current transaction.Transaction) string {
+	if part := current.Installment(); part != "" {
+		return fmt.Sprintf("Edit transaction %d (installment %s)", current.ID, part)
+	}
+	return fmt.Sprintf("Edit transaction %d", current.ID)
+}
+
 func (c *transactionsCommand) editForm(current transaction.View, draft transaction.Draft) (transaction.Draft, error) {
-	accounts, err := c.accounts.List(false)
+	accounts, err := c.accounts.List(false, today())
 	if err != nil {
 		return draft, err
 	}
@@ -722,7 +924,7 @@ func (c *transactionsCommand) editForm(current transaction.View, draft transacti
 		goals = append(goals, *current.Goal)
 	}
 	form, err := program(ui.NewTransactionForm(ui.TransactionFormOptions{
-		Title: fmt.Sprintf("Edit transaction %d", current.ID), Initial: draft, Edit: true, Goals: goals,
+		Title: editTitle(current.Transaction), Initial: draft, Edit: true, Goals: goals,
 		Value:    money.Input(current.Value(), current.Account.Currency),
 		Accounts: accounts, Cards: cards, Categories: categories, Titles: titles, Tags: tags,
 	}))
@@ -735,9 +937,32 @@ func (c *transactionsCommand) editForm(current transaction.View, draft transacti
 	return form.Draft(), nil
 }
 
+// deleteQuestion asks for the confirmation of a delete. parts holds the
+// parts of the scope.
+func deleteQuestion(current transaction.Transaction, scope transaction.Scope, parts []transaction.Transaction) string {
+	count := plural(int64(len(parts)), "transaction")
+	switch {
+	case scope == transaction.All:
+		return fmt.Sprintf("Delete all the installments of %s (%s) permanently?", current.Title, count)
+	case scope == transaction.Next:
+		return fmt.Sprintf("Delete the installments %d to %d of %s (%s) permanently?", parts[0].Part, parts[len(parts)-1].Part, current.Title, count)
+	case current.InstallmentID != 0:
+		return fmt.Sprintf("Delete transaction %d (%s, installment %s) permanently? The other installments stay.", current.ID, current.Title, current.Installment())
+	case current.PairID != 0:
+		return fmt.Sprintf("Delete the transfer %s (transactions %d and %d) permanently?", current.Title, current.ID, current.PairID)
+	case current.Type == transaction.Payment:
+		return fmt.Sprintf("Delete the payment %d (%s)? The bill opens again.", current.ID, current.Title)
+	}
+	return fmt.Sprintf("Delete transaction %d (%s) permanently?", current.ID, current.Title)
+}
+
 func (c *transactionsCommand) delete(args []string) error {
-	var yes bool
-	positional, _, err := parse("delete", args, func(f *flag.FlagSet) { f.BoolVar(&yes, "yes", false, "") }, 1)
+	var yes, all, next bool
+	positional, _, err := parse("delete", args, func(f *flag.FlagSet) {
+		f.BoolVar(&yes, "yes", false, "")
+		f.BoolVar(&all, "all", false, "")
+		f.BoolVar(&next, "next", false, "")
+	}, 1)
 	if err != nil {
 		return err
 	}
@@ -748,14 +973,16 @@ func (c *transactionsCommand) delete(args []string) error {
 	if err != nil {
 		return err
 	}
+	scope, err := scopeOf("delete", all, next, current.Transaction)
+	if err != nil {
+		return err
+	}
+	parts, err := c.store.Parts(current.ID, scope)
+	if err != nil {
+		return err
+	}
 	if !yes {
-		question := fmt.Sprintf("Delete transaction %d (%s) permanently?", current.ID, current.Title)
-		if current.PairID != 0 {
-			question = fmt.Sprintf("Delete the transfer %s (transactions %d and %d) permanently?", current.Title, current.ID, current.PairID)
-		}
-		if current.Type == transaction.Payment {
-			question = fmt.Sprintf("Delete the payment %d (%s)? The bill opens again.", current.ID, current.Title)
-		}
+		question := deleteQuestion(current.Transaction, scope, parts)
 		confirm, err := program(ui.NewConfirm(question, "Delete permanently", true))
 		if err != nil {
 			return err
@@ -764,8 +991,14 @@ func (c *transactionsCommand) delete(args []string) error {
 			return cancelled
 		}
 	}
-	if err := c.store.Delete(current.ID); err != nil {
+	if scope == transaction.One {
+		if err := c.store.Delete(current.ID); err != nil {
+			return err
+		}
+		return c.print(ui.Success(label(current.Transaction, "deleted")) + "\n")
+	}
+	if _, err := c.store.DeleteParts(current.ID, scope); err != nil {
 		return err
 	}
-	return c.print(ui.Success(label(current.Transaction, "deleted")) + "\n")
+	return c.print(ui.Success(span(parts, current.Title, "deleted")) + "\n")
 }

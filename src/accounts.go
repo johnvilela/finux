@@ -10,6 +10,7 @@ import (
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/money"
+	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -97,6 +98,7 @@ func runAccounts(args []string, io streams) int {
 	if err != nil {
 		return command.fail(err)
 	}
+	announceAutomatic(db, io)
 	command.db, command.store = db, account.NewStore(db)
 	return command.fail(handler(rest))
 }
@@ -122,7 +124,7 @@ const (
 // opens a selector with the accounts of the scope.
 func (c *accountsCommand) resolve(command, ref, title string, in scope) (account.Account, error) {
 	if ref != "" {
-		found, err := c.store.Find(ref, true)
+		found, err := c.store.Find(ref, true, today())
 		if errors.Is(err, account.ErrNotFound) {
 			return found, fmt.Errorf("account not found: %s", ref)
 		}
@@ -136,11 +138,11 @@ func (c *accountsCommand) resolve(command, ref, title string, in scope) (account
 	empty := notice("No accounts yet. Run 'finux ac add'.")
 	switch in {
 	case scopeActive:
-		accounts, err = c.store.List(false)
+		accounts, err = c.store.List(false, today())
 	case scopeAll:
-		accounts, err = c.store.List(true)
+		accounts, err = c.store.List(true, today())
 	case scopeArchived:
-		accounts, err = c.store.ListArchived()
+		accounts, err = c.store.ListArchived(today())
 		empty = "No archived accounts."
 	}
 	if err != nil {
@@ -168,7 +170,7 @@ func (c *accountsCommand) list(args []string) error {
 	if _, _, err := parse("list", args, func(f *flag.FlagSet) { f.BoolVar(&all, "all", false, "") }, 0); err != nil {
 		return err
 	}
-	accounts, err := c.store.List(all)
+	accounts, err := c.store.List(all, today())
 	if err != nil {
 		return err
 	}
@@ -289,7 +291,7 @@ func (c *accountsCommand) add(args []string) error {
 // unusedColor returns the first palette color that no active account
 // uses, or the first color if all are in use.
 func (c *accountsCommand) unusedColor() (string, error) {
-	accounts, err := c.store.List(false)
+	accounts, err := c.store.List(false, today())
 	if err != nil {
 		return "", err
 	}
@@ -432,6 +434,9 @@ func (c *accountsCommand) purge(current account.Account, hasTransfers bool) erro
 				}
 			}
 			if err := transaction.NewStore(tx).PurgeAccount(current, other); err != nil {
+				return err
+			}
+			if err := schedule.NewStore(tx).DeleteByAccount(current.ID); err != nil {
 				return err
 			}
 		}
