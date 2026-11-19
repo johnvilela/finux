@@ -61,7 +61,7 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	if got := must(nil); !strings.Contains(got, "\n  seed              Add sample data to the development database\n") {
 		t.Fatalf("dev help lacks the seed command:\n%s", got)
 	}
-	created := "✓ Development database created: " + database + " (8 accounts, 2 credit cards, 24 transactions)\n"
+	created := "✓ Development database created: " + database + " (8 accounts, 2 credit cards, 3 goals, 3 budgets, 24 transactions)\n"
 	if got := must(nil, "seed"); got != created {
 		t.Fatalf("first seed = %q, want %q", got, created)
 	}
@@ -86,6 +86,21 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	for _, want := range []string{"Salary", "Weekly market", "Card payment", "Travel money", "FOOD", "XFER", "-R$ 550,00", "$100.00", "Payment VISA", "\n24 transactions\n"} {
 		if !strings.Contains(transactions, want) {
 			t.Errorf("seeded transactions lack %q:\n%s", want, transactions)
+		}
+	}
+	// The sample goals have one of each type and of each status.
+	goals := must(nil, "gl")
+	for _, want := range []string{"TRIP", "save", "active", "24%", "CAR", "payoff", "overdue", "50%", "BIKE", "purchase", "reached", "100%", "3 goals\n"} {
+		if !strings.Contains(goals, want) {
+			t.Errorf("seeded goals lack %q:\n%s", want, goals)
+		}
+	}
+	// The sample budgets are near the limit, over it after a rollover,
+	// and not started.
+	budgets := must(nil, "bg")
+	for _, want := range []string{"FOOD", "every month", "near", "R$ 839,25", "83%", "FUN", "every 2 weeks", "over", "R$ 55,90", "155%", "R$ 36,00", "VACA", "one time", "upcoming", "3 budgets\n"} {
+		if !strings.Contains(budgets, want) {
+			t.Errorf("seeded budgets lack %q:\n%s", want, budgets)
 		}
 	}
 	// The sample credit cards have an open bill, a late bill with the

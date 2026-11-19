@@ -4,13 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
 	"finux/src/account"
+	"finux/src/budget"
 	"finux/src/card"
 	"finux/src/category"
 	"finux/src/code"
+	"finux/src/goal"
 	"finux/src/mcp"
 	"finux/src/money"
 	"finux/src/storage"
@@ -152,6 +155,87 @@ type transactionJSON struct {
 	// PairID and OtherAccount are the other side of a transfer.
 	PairID       uint   `json:"pair_id,omitempty"`
 	OtherAccount string `json:"other_account,omitempty"`
+	// Goal is the code of the goal the transaction counts toward.
+	Goal string `json:"goal,omitempty"`
+}
+
+type goalJSON struct {
+	ID          uint     `json:"id"`
+	Code        string   `json:"code"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Type        string   `json:"type"`
+	Currency    string   `json:"currency"`
+	Archived    bool     `json:"archived"`
+	Target      cashJSON `json:"target"`
+	Progress    cashJSON `json:"progress"`
+	Remaining   cashJSON `json:"remaining"`
+	Percent     int      `json:"percent"`
+	// DueDate is only in a goal with a final date.
+	DueDate string `json:"due_date,omitempty"`
+	Status  string `json:"status"`
+	// Transactions is the number of linked transactions.
+	Transactions int64 `json:"transactions"`
+}
+
+func goalResult(g goal.Goal) goalJSON {
+	return goalJSON{
+		ID: g.ID, Code: g.Code, Title: g.Title, Description: g.Description, Type: g.Type, Currency: g.Currency,
+		Archived: g.Archived(), Target: cash(g.Target, g.Currency), Progress: cash(g.Progress(), g.Currency),
+		Remaining: cash(g.Remaining(), g.Currency), Percent: g.Percent(), DueDate: g.DueDate, Status: g.Status(today()),
+		Transactions: g.Links,
+	}
+}
+
+// usageJSON is one period of a budget: what it had and what it spent.
+type usageJSON struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	// Carried is what the periods before left, below zero when they spent
+	// too much. It is zero for a budget without rollover.
+	Carried   cashJSON `json:"carried"`
+	Available cashJSON `json:"available"`
+	Spent     cashJSON `json:"spent"`
+	Remaining cashJSON `json:"remaining"`
+	Over      cashJSON `json:"over"`
+	Percent   int      `json:"percent"`
+	// Level is ok, near or over.
+	Level string `json:"level"`
+}
+
+func usageResult(usage budget.Usage, currency string) usageJSON {
+	return usageJSON{
+		From: usage.From, To: usage.To, Carried: cash(usage.Carried, currency), Available: cash(usage.Available(), currency),
+		Spent: cash(usage.Spent, currency), Remaining: cash(usage.Remaining(), currency), Over: cash(usage.Over(), currency),
+		Percent: usage.Percent(), Level: usage.Level(),
+	}
+}
+
+type budgetJSON struct {
+	ID          uint     `json:"id"`
+	Code        string   `json:"code"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Currency    string   `json:"currency"`
+	Archived    bool     `json:"archived"`
+	Limit       cashJSON `json:"limit"`
+	// Categories are the codes of the categories that count. An empty
+	// list means all categories but the income ones.
+	Categories []string `json:"categories"`
+	// Period is the length of a period in words: "every 2 weeks" or "one
+	// time". Every and Unit are only in a recurring budget.
+	Period    string `json:"period"`
+	Every     int    `json:"every,omitempty"`
+	Unit      string `json:"unit,omitempty"`
+	StartDate string `json:"start_date"`
+	// EndDate is only in a budget with an end date.
+	EndDate  string `json:"end_date,omitempty"`
+	Rollover bool   `json:"rollover"`
+	// Status is the level of the current period, or upcoming or ended.
+	Status string `json:"status"`
+	// Current is the current period, or the last one of a budget that
+	// ended. A budget that did not start has none.
+	Current *usageJSON `json:"current,omitempty"`
 }
 
 func transactionResult(view transaction.View) transactionJSON {
@@ -168,6 +252,9 @@ func transactionResult(view transaction.View) transactionJSON {
 	}
 	if view.Other != nil && view.PairID != 0 {
 		result.OtherAccount = view.Other.Code
+	}
+	if view.Goal != nil {
+		result.Goal = view.Goal.Code
 	}
 	return result
 }
@@ -278,7 +365,7 @@ func number(value *int) int {
 // tools that change nothing.
 func mcpTools(readOnly bool) []mcp.Tool {
 	var tools []mcp.Tool
-	for _, group := range [][]mcp.Tool{databaseTools(), accountTools(), categoryTools(), transactionTools(), creditCardTools()} {
+	for _, group := range [][]mcp.Tool{databaseTools(), accountTools(), categoryTools(), transactionTools(), creditCardTools(), goalTools(), budgetTools()} {
 		for _, current := range group {
 			if current.ReadOnly || !readOnly {
 				tools = append(tools, current)
@@ -679,8 +766,26 @@ func categoryTools() []mcp.Tool {
 func newTransactionsCommand(db *gorm.DB) *transactionsCommand {
 	return &transactionsCommand{
 		streams: quiet, store: transaction.NewStore(db), accounts: account.NewStore(db),
-		categories: category.NewStore(db), cards: card.NewStore(db),
+		categories: category.NewStore(db), cards: card.NewStore(db), goals: goal.NewStore(db), budgets: budget.NewStore(db),
 	}
+}
+
+// savedResult returns a transaction that was created or changed as a result,
+// with the budgets that it leaves near or over their limit.
+func (c *transactionsCommand) savedResult(id uint) (any, error) {
+	found, err := c.resolve("show", strconv.FormatUint(uint64(id), 10), "")
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]any{"transaction": transactionResult(found)}
+	warnings, err := budgetWarnings(c.budgets, found)
+	if err != nil {
+		return nil, err
+	}
+	if len(warnings) > 0 {
+		result["budget_warnings"] = warnings
+	}
+	return result, nil
 }
 
 // one returns the transaction with the id as a result.
@@ -732,6 +837,7 @@ func transactionTools() []mcp.Tool {
 		Date     *string `json:"date,omitempty" mcp:"A year (2026), a month (2026-11 or 11/2026) or a date (2026-11-17)"`
 		Account  *string `json:"account,omitempty" mcp:"Only the transactions of this account or credit card (code or id)"`
 		Type     *string `json:"type,omitempty" mcp:"Only the transactions of this type" enum:"expense,income,transfer,payment"`
+		Goal     *string `json:"goal,omitempty" mcp:"Only the transactions linked to this goal (code or id)"`
 		Limit    *int    `json:"limit,omitempty" mcp:"Most transactions to return. Default: 100"`
 		Offset   *int    `json:"offset,omitempty" mcp:"Number of transactions to skip, to read the next page. Default: 0"`
 	}
@@ -749,6 +855,7 @@ func transactionTools() []mcp.Tool {
 		Date        *string `json:"date,omitempty" mcp:"YYYY-MM-DD or DD/MM/YYYY. Default: today"`
 		To          *string `json:"to,omitempty" mcp:"For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer"`
 		Received    *string `json:"received,omitempty" mcp:"For a transfer between accounts of different currencies: the amount the other account receives"`
+		Goal        *string `json:"goal,omitempty" mcp:"Code or id of the goal the transaction counts toward. The goal must have the currency of the account"`
 	}
 	type editArguments struct {
 		ID          uint    `json:"id" mcp:"Id of the transaction"`
@@ -760,6 +867,7 @@ func transactionTools() []mcp.Tool {
 		Tags        *string `json:"tags,omitempty" mcp:"New tags; they replace the tags of the transaction. An empty string removes all tags"`
 		Account     *string `json:"account,omitempty" mcp:"Code or id of the new account or credit card. Give value also when the currency is different"`
 		Date        *string `json:"date,omitempty" mcp:"New date, YYYY-MM-DD or DD/MM/YYYY"`
+		Goal        *string `json:"goal,omitempty" mcp:"Code or id of the new goal. An empty string takes the goal away"`
 	}
 	type deleteArguments struct {
 		ID      uint `json:"id" mcp:"Id of the transaction"`
@@ -769,8 +877,8 @@ func transactionTools() []mcp.Tool {
 		reads(tool("transaction_list", "List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset.",
 			func(db *gorm.DB, a listArguments) (any, error) {
 				c := newTransactionsCommand(db)
-				sent := given(map[string]bool{"category": a.Category != nil, "tag": a.Tags != nil, "date": a.Date != nil, "account": a.Account != nil, "type": a.Type != nil})
-				filter, err := c.filter(listFlags{text(a.Category), text(a.Tags), text(a.Search), text(a.Date), text(a.Account), text(a.Type)}, sent)
+				sent := given(map[string]bool{"category": a.Category != nil, "tag": a.Tags != nil, "date": a.Date != nil, "account": a.Account != nil, "type": a.Type != nil, "goal": a.Goal != nil})
+				filter, err := c.filter(listFlags{category: text(a.Category), tags: text(a.Tags), search: text(a.Search), date: text(a.Date), account: text(a.Account), kind: text(a.Type), goal: text(a.Goal)}, sent)
 				if err != nil {
 					return nil, err
 				}
@@ -792,16 +900,18 @@ func transactionTools() []mcp.Tool {
 			func(db *gorm.DB, a showArguments) (any, error) {
 				return newTransactionsCommand(db).one(a.ID)
 			})),
-		tool("transaction_add", "Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay.",
+		tool("transaction_add", "Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal.",
 			func(db *gorm.DB, a addArguments) (any, error) {
 				c := newTransactionsCommand(db)
 				values := transactionFlags{
 					title: a.Title, value: a.Value, account: a.Account, category: text(a.Category), kind: text(a.Type),
 					description: text(a.Description), tags: text(a.Tags), date: text(a.Date), to: text(a.To), received: text(a.Received),
+					goal: text(a.Goal),
 				}
 				sent := given(map[string]bool{
 					"title": true, "value": true, "account": true, "category": a.Category != nil, "type": a.Type != nil,
 					"description": a.Description != nil, "tags": a.Tags != nil, "date": a.Date != nil, "to": a.To != nil, "received": a.Received != nil,
+					"goal": a.Goal != nil,
 				})
 				draft, complete, err := c.newDraft(values, sent)
 				if err != nil {
@@ -814,21 +924,22 @@ func transactionTools() []mcp.Tool {
 				if err != nil {
 					return nil, err
 				}
-				return c.one(created.ID)
+				return c.savedResult(created.ID)
 			}),
 		tool("transaction_edit", "Change a transaction. Give only the arguments to change. A change of one side of a transfer also changes the other side. A payment of a bill cannot change: delete it.",
 			func(db *gorm.DB, a editArguments) (any, error) {
 				c := newTransactionsCommand(db)
 				values := transactionFlags{
 					title: text(a.Title), description: text(a.Description), value: text(a.Value), kind: text(a.Type),
-					category: text(a.Category), tags: text(a.Tags), account: text(a.Account), date: text(a.Date),
+					category: text(a.Category), tags: text(a.Tags), account: text(a.Account), date: text(a.Date), goal: text(a.Goal),
 				}
 				sent := given(map[string]bool{
 					"title": a.Title != nil, "description": a.Description != nil, "value": a.Value != nil, "type": a.Type != nil,
 					"category": a.Category != nil, "tags": a.Tags != nil, "account": a.Account != nil, "date": a.Date != nil,
+					"goal": a.Goal != nil,
 				})
 				if len(sent) == 0 {
-					return nil, errors.New("give at least one of title, description, value, type, category, tags, account, date")
+					return nil, errors.New("give at least one of title, description, value, type, category, tags, account, date, goal")
 				}
 				var changes transaction.Draft
 				if err := values.check("edit", sent, &changes); err != nil {
@@ -849,7 +960,7 @@ func transactionTools() []mcp.Tool {
 				if err != nil {
 					return nil, err
 				}
-				return c.one(updated.ID)
+				return c.savedResult(updated.ID)
 			}),
 		deletes(tool("transaction_delete", "Delete a transaction permanently. The delete of one side of a transfer also deletes the other side. The delete of a payment opens its bill again.",
 			func(db *gorm.DB, a deleteArguments) (any, error) {
@@ -1195,6 +1306,459 @@ func creditCardTools() []mcp.Tool {
 					return nil, err
 				}
 				return map[string]any{"deleted": true, "credit_card": current.Code, "transactions_deleted": purchases, "payments_converted": payments}, nil
+			})),
+	}
+}
+
+// --- Goals ---------------------------------------------------------------
+
+func newGoalsCommand(db *gorm.DB) *goalsCommand {
+	return &goalsCommand{streams: quiet, db: db, store: goal.NewStore(db)}
+}
+
+// reload returns the goal as the database has it now.
+func (c *goalsCommand) reload(id uint) (any, error) {
+	found, err := c.store.Find(strconv.FormatUint(uint64(id), 10), true)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"goal": goalResult(found)}, nil
+}
+
+func goalTools() []mcp.Tool {
+	type referenceArguments struct {
+		Goal string `json:"goal" mcp:"Code or id of the goal"`
+	}
+	type addArguments struct {
+		Title       string  `json:"title" mcp:"Title of the goal, at most 60 characters"`
+		Type        string  `json:"type" mcp:"How a linked transaction counts. save and purchase: an income adds and an expense removes. payoff: an expense adds and an income removes" enum:"save,payoff,purchase"`
+		Target      string  `json:"target" mcp:"Amount to reach, as a decimal string, for example \"10000\""`
+		Currency    string  `json:"currency" mcp:"Currency of the goal; it cannot change later. Only transactions in this currency can link" enum:"USD,EUR,BRL,BTC"`
+		DueDate     *string `json:"due_date,omitempty" mcp:"Final date, YYYY-MM-DD or DD/MM/YYYY. Optional"`
+		Code        *string `json:"code,omitempty" mcp:"Short code, 1 to 5 letters and digits. Default: made from the title"`
+		Description *string `json:"description,omitempty" mcp:"Description, at most 200 characters"`
+	}
+	type editArguments struct {
+		Goal        string  `json:"goal" mcp:"Code or id of the goal"`
+		Title       *string `json:"title,omitempty" mcp:"New title"`
+		Code        *string `json:"code,omitempty" mcp:"New code, 1 to 5 letters and digits"`
+		Description *string `json:"description,omitempty" mcp:"New description"`
+		Type        *string `json:"type,omitempty" mcp:"New type; the progress is counted again" enum:"save,payoff,purchase"`
+		Target      *string `json:"target,omitempty" mcp:"New amount to reach, as a decimal string"`
+		DueDate     *string `json:"due_date,omitempty" mcp:"New final date, YYYY-MM-DD or DD/MM/YYYY. An empty string removes it"`
+	}
+	type deleteArguments struct {
+		Goal    string `json:"goal" mcp:"Code or id of the goal"`
+		Confirm bool   `json:"confirm,omitempty" mcp:"Set to true to delete. Without it the tool only tells what it will delete."`
+	}
+	// find finds a goal, also when it is archived.
+	find := func(c *goalsCommand, ref string) (goal.Goal, error) {
+		return c.resolve("show", ref, "", scopeAll)
+	}
+	// linked is a transaction of a goal with what it adds to the goal.
+	type linked struct {
+		transactionJSON
+		Effect cashJSON `json:"effect"`
+	}
+	return []mcp.Tool{
+		reads(tool("goal_list", "List the goals with their target, progress and status. The progress comes from the transactions linked to each goal. Status is active, reached or overdue.",
+			func(db *gorm.DB, a listArguments) (any, error) {
+				goals, err := goal.NewStore(db).List(a.IncludeArchived)
+				if err != nil {
+					return nil, err
+				}
+				results := make([]goalJSON, len(goals))
+				for i, current := range goals {
+					results[i] = goalResult(current)
+				}
+				return map[string]any{"goals": results}, nil
+			})),
+		reads(tool("goal_show", "Show one goal and the transactions linked to it, the newest first. Each transaction has effect: what it adds to the goal, below zero when it removes. A transfer shows one time.",
+			func(db *gorm.DB, a referenceArguments) (any, error) {
+				c := newGoalsCommand(db)
+				found, err := find(c, a.Goal)
+				if err != nil {
+					return nil, err
+				}
+				details, err := c.gather(found)
+				if err != nil {
+					return nil, err
+				}
+				transactions := []linked{}
+				for _, view := range details.Transactions {
+					if effect := found.Effect(view.Type, view.Amount); effect != 0 {
+						transactions = append(transactions, linked{transactionResult(view), cash(effect, found.Currency)})
+					}
+				}
+				return map[string]any{"goal": goalResult(found), "transactions": transactions}, nil
+			})),
+		tool("goal_add", "Create a goal: an amount to save, a debt to pay off or a purchase to save for. Link transactions to it with the argument goal of transaction_add and transaction_edit.",
+			func(db *gorm.DB, a addArguments) (any, error) {
+				c := newGoalsCommand(db)
+				values := goalFlags{
+					title: a.Title, kind: a.Type, target: a.Target, currency: a.Currency,
+					due: text(a.DueDate), code: text(a.Code), description: text(a.Description),
+				}
+				sent := given(map[string]bool{
+					"title": true, "type": true, "target": true, "currency": true,
+					"due": a.DueDate != nil, "code": a.Code != nil, "description": a.Description != nil,
+				})
+				var draft goal.Goal
+				if err := values.apply("add", sent, &draft); err != nil {
+					return nil, err
+				}
+				if a.Code == nil {
+					if draft.Code = c.suggest(draft.Title); draft.Code == "" {
+						return nil, fmt.Errorf("cannot make a code from the title %q; give code", draft.Title)
+					}
+				}
+				if err := c.store.Create(&draft); err != nil {
+					return nil, err
+				}
+				return c.reload(draft.ID)
+			}),
+		tool("goal_edit", "Change a goal. Give only the arguments to change. The currency cannot change.",
+			func(db *gorm.DB, a editArguments) (any, error) {
+				c := newGoalsCommand(db)
+				values := goalFlags{
+					title: text(a.Title), code: text(a.Code), description: text(a.Description), kind: text(a.Type),
+					target: text(a.Target), due: text(a.DueDate),
+				}
+				sent := given(map[string]bool{
+					"title": a.Title != nil, "code": a.Code != nil, "description": a.Description != nil, "type": a.Type != nil,
+					"target": a.Target != nil, "due": a.DueDate != nil,
+				})
+				if len(sent) == 0 {
+					return nil, errors.New("give at least one of title, code, description, type, target, due_date")
+				}
+				current, err := find(c, a.Goal)
+				if err != nil {
+					return nil, err
+				}
+				if current.Archived() {
+					return nil, fmt.Errorf("goal not found: %s (it is archived; restore it first)", current.Code)
+				}
+				if err := values.apply("edit", sent, &current); err != nil {
+					return nil, err
+				}
+				if err := c.store.Update(&current); err != nil {
+					return nil, err
+				}
+				return c.reload(current.ID)
+			}),
+		tool("goal_archive", "Archive a goal: it leaves the lists and takes no new transactions, but its transactions keep the link. goal_restore brings it back.",
+			func(db *gorm.DB, a referenceArguments) (any, error) {
+				c := newGoalsCommand(db)
+				current, err := find(c, a.Goal)
+				if err != nil {
+					return nil, err
+				}
+				if current.Archived() {
+					return nil, fmt.Errorf("goal %s is already archived", current.Code)
+				}
+				if err := c.store.Archive(current.ID); err != nil {
+					return nil, err
+				}
+				return c.reload(current.ID)
+			}),
+		tool("goal_restore", "Restore an archived goal.",
+			func(db *gorm.DB, a referenceArguments) (any, error) {
+				c := newGoalsCommand(db)
+				current, err := find(c, a.Goal)
+				if err != nil {
+					return nil, err
+				}
+				if !current.Archived() {
+					return nil, fmt.Errorf("goal %s is not archived", current.Code)
+				}
+				if err := c.store.Restore(current.ID); err != nil {
+					return nil, err
+				}
+				return c.reload(current.ID)
+			}),
+		deletes(tool("goal_delete", "Delete a goal permanently. No transaction is deleted: the linked transactions stay and only lose the link. To keep the goal and its links, use goal_archive.",
+			func(db *gorm.DB, a deleteArguments) (any, error) {
+				c := newGoalsCommand(db)
+				current, err := find(c, a.Goal)
+				if err != nil {
+					return nil, err
+				}
+				if !a.Confirm {
+					return confirmation(fmt.Sprintf("Delete goal %s (%s) permanently%s? No transaction is deleted.", current.Code, current.Title, lostLinks(current, "lose"))), nil
+				}
+				if err := c.purge(current); err != nil {
+					return nil, err
+				}
+				return map[string]any{"deleted": true, "goal": current.Code, "transactions_unlinked": current.Links}, nil
+			})),
+	}
+}
+
+// --- Budgets -------------------------------------------------------------
+
+func newBudgetsCommand(db *gorm.DB) *budgetsCommand {
+	return &budgetsCommand{streams: quiet, db: db, store: budget.NewStore(db)}
+}
+
+// results makes results from budgets. It reads the categories one time
+// for their codes.
+func (c *budgetsCommand) results(budgets []budget.Budget) ([]budgetJSON, error) {
+	categories, err := category.NewStore(c.db).List()
+	if err != nil {
+		return nil, err
+	}
+	results := make([]budgetJSON, len(budgets))
+	for i, b := range budgets {
+		codes := []string{}
+		for _, known := range categories {
+			if slices.Contains(b.CategoryIDs, known.ID) {
+				codes = append(codes, known.Code)
+			}
+		}
+		results[i] = budgetJSON{
+			ID: b.ID, Code: b.Code, Title: b.Title, Description: b.Description, Currency: b.Currency, Archived: b.Archived(),
+			Limit: cash(b.Limit, b.Currency), Categories: codes, Period: b.Recurrence(), Every: b.Every, Unit: b.Unit,
+			StartDate: b.StartDate, EndDate: b.EndDate, Rollover: b.Rollover, Status: b.Status(today()),
+		}
+		if usage, ok := b.Shown(today()); ok {
+			current := usageResult(usage, b.Currency)
+			results[i].Current = &current
+		}
+	}
+	return results, nil
+}
+
+// reload returns the budget as the database has it now.
+func (c *budgetsCommand) reload(id uint) (any, error) {
+	found, err := c.store.Find(strconv.FormatUint(uint64(id), 10), true, today())
+	if err != nil {
+		return nil, err
+	}
+	results, err := c.results([]budget.Budget{found})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"budget": results[0]}, nil
+}
+
+func budgetTools() []mcp.Tool {
+	type referenceArguments struct {
+		Budget string `json:"budget" mcp:"Code or id of the budget"`
+	}
+	type showArguments struct {
+		Budget  string  `json:"budget" mcp:"Code or id of the budget"`
+		Date    *string `json:"date,omitempty" mcp:"A date in the period to show, YYYY-MM-DD or DD/MM/YYYY. Default: the current period"`
+		History *int    `json:"history,omitempty" mcp:"Number of periods before it to return, the newest first. Default: 6"`
+	}
+	type addArguments struct {
+		Title       string  `json:"title" mcp:"Title of the budget, at most 60 characters"`
+		Limit       string  `json:"limit" mcp:"Amount of one period, as a decimal string, for example \"800\""`
+		Currency    string  `json:"currency" mcp:"Currency of the budget; it cannot change later. Only transactions in this currency count" enum:"USD,EUR,BRL,BTC"`
+		Categories  *string `json:"categories,omitempty" mcp:"Codes of the categories that count, for example \"FOOD,FUN\". Default, or \"all\": all categories but the income ones"`
+		Every       *string `json:"every,omitempty" mcp:"Length of a period of a recurring budget: \"day\", \"week\", \"month\", \"year\" or a number of them, for example \"2 weeks\". Without it the budget is for one time and needs end_date"`
+		StartDate   *string `json:"start_date,omitempty" mcp:"First day of the first period. The periods count from it: a monthly budget that starts on day 5 has periods from day 5 to day 4. Default: the first day of this week, month or year for a period of one of them; today for the others"`
+		EndDate     *string `json:"end_date,omitempty" mcp:"Last day of the budget. Optional with every; necessary without it"`
+		Rollover    *bool   `json:"rollover,omitempty" mcp:"Move what a period did not spend, or spent too much, to the next period. Default: false"`
+		Code        *string `json:"code,omitempty" mcp:"Short code, 1 to 5 letters and digits. Default: made from the title"`
+		Description *string `json:"description,omitempty" mcp:"Description, at most 200 characters"`
+	}
+	type editArguments struct {
+		Budget      string  `json:"budget" mcp:"Code or id of the budget"`
+		Title       *string `json:"title,omitempty" mcp:"New title"`
+		Code        *string `json:"code,omitempty" mcp:"New code, 1 to 5 letters and digits"`
+		Description *string `json:"description,omitempty" mcp:"New description"`
+		Limit       *string `json:"limit,omitempty" mcp:"New amount of one period, as a decimal string. It also changes the periods in the past"`
+		Categories  *string `json:"categories,omitempty" mcp:"New codes of the categories that count; they replace the list. \"all\" counts all categories but the income ones"`
+		Every       *string `json:"every,omitempty" mcp:"New length of a period, for example \"month\" or \"2 weeks\". \"none\" makes a one-time budget, which needs an end date"`
+		StartDate   *string `json:"start_date,omitempty" mcp:"New first day of the first period"`
+		EndDate     *string `json:"end_date,omitempty" mcp:"New last day of the budget. An empty string removes it"`
+		Rollover    *bool   `json:"rollover,omitempty" mcp:"Start or stop the move of what a period left to the next period"`
+	}
+	type deleteArguments struct {
+		Budget  string `json:"budget" mcp:"Code or id of the budget"`
+		Confirm bool   `json:"confirm,omitempty" mcp:"Set to true to delete. Without it the tool only tells what it will delete."`
+	}
+	// find finds a budget, also when it is archived.
+	find := func(c *budgetsCommand, ref string) (budget.Budget, error) {
+		return c.resolve("show", ref, "", scopeAll, today())
+	}
+	// counted is a transaction of a period with what it adds to the spent
+	// amount.
+	type counted struct {
+		transactionJSON
+		Counts cashJSON `json:"counts"`
+	}
+	return []mcp.Tool{
+		reads(tool("budget_list", "List the budgets with their limit, categories, period and status. current is the period of today: what it has available, what it spent and what remains. Status is ok, near (80% spent or more), over, upcoming or ended.",
+			func(db *gorm.DB, a listArguments) (any, error) {
+				c := newBudgetsCommand(db)
+				budgets, err := c.store.List(a.IncludeArchived, today())
+				if err != nil {
+					return nil, err
+				}
+				results, err := c.results(budgets)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"budgets": results}, nil
+			})),
+		reads(tool("budget_show", "Show one budget with one period, the transactions that count in it, the newest first, and the periods before it. Each transaction has counts: what it adds to the spent amount, below zero for an income. Give date to see the period of a date in the past.",
+			func(db *gorm.DB, a showArguments) (any, error) {
+				c := newBudgetsCommand(db)
+				date, until, history := "", today(), defaultHistory
+				if a.Date != nil {
+					var err error
+					if date, err = transaction.ParseDate(*a.Date); err != nil {
+						return nil, err
+					}
+					until = max(until, date)
+				}
+				if a.History != nil {
+					if history = *a.History; history < 0 {
+						return nil, errors.New("history must be 0 or more")
+					}
+				}
+				found, err := c.resolve("show", a.Budget, "", scopeAll, until)
+				if err != nil {
+					return nil, err
+				}
+				details, err := c.gather(found, date, history)
+				if err != nil {
+					return nil, err
+				}
+				results, err := c.results([]budget.Budget{found})
+				if err != nil {
+					return nil, err
+				}
+				result := map[string]any{"budget": results[0]}
+				if details.Usage != nil {
+					result["period"] = usageResult(*details.Usage, found.Currency)
+				}
+				transactions := []counted{}
+				for _, view := range details.Transactions {
+					transactions = append(transactions, counted{transactionResult(view), cash(-view.Amount, found.Currency)})
+				}
+				past := []usageJSON{}
+				for _, usage := range details.History {
+					past = append(past, usageResult(usage, found.Currency))
+				}
+				result["transactions"], result["history"] = transactions, past
+				return result, nil
+			})),
+		tool("budget_add", "Create a budget: a limit of money for some categories in a period. Every expense and income of those categories counts on it without a link: an expense adds to the spent amount and an income gives money back. Transfers and payments of credit card bills do not count. Give every for a recurring budget, or end_date for a one-time budget.",
+			func(db *gorm.DB, a addArguments) (any, error) {
+				c := newBudgetsCommand(db)
+				if a.Every == nil && a.EndDate == nil {
+					return nil, errors.New("give every or end_date")
+				}
+				values := budgetFlags{
+					title: a.Title, limit: a.Limit, currency: a.Currency, categories: text(a.Categories), every: text(a.Every),
+					start: text(a.StartDate), until: text(a.EndDate), rollover: a.Rollover != nil && *a.Rollover,
+					code: text(a.Code), description: text(a.Description),
+				}
+				sent := given(map[string]bool{
+					"title": true, "limit": true, "currency": true, "categories": a.Categories != nil, "every": a.Every != nil,
+					"start": a.StartDate != nil, "until": a.EndDate != nil, "rollover": a.Rollover != nil,
+					"code": a.Code != nil, "description": a.Description != nil,
+				})
+				var draft budget.Budget
+				if err := c.apply("add", values, sent, &draft); err != nil {
+					return nil, err
+				}
+				if a.StartDate == nil {
+					draft.StartDate = budget.DefaultStart(draft.Every, draft.Unit, today())
+				}
+				if err := checkPeriod("add", draft); err != nil {
+					return nil, err
+				}
+				if a.Code == nil {
+					if draft.Code = code.Suggest(draft.Title, c.taken(0)); draft.Code == "" {
+						return nil, fmt.Errorf("cannot make a code from the title %q; give code", draft.Title)
+					}
+				}
+				if err := c.store.Create(&draft); err != nil {
+					return nil, err
+				}
+				return c.reload(draft.ID)
+			}),
+		tool("budget_edit", "Change a budget. Give only the arguments to change. The currency cannot change. A change of the limit, the categories or the dates counts all the periods again.",
+			func(db *gorm.DB, a editArguments) (any, error) {
+				c := newBudgetsCommand(db)
+				values := budgetFlags{
+					title: text(a.Title), code: text(a.Code), description: text(a.Description), limit: text(a.Limit),
+					categories: text(a.Categories), every: text(a.Every), start: text(a.StartDate), until: text(a.EndDate),
+					rollover: a.Rollover != nil && *a.Rollover,
+				}
+				sent := given(map[string]bool{
+					"title": a.Title != nil, "code": a.Code != nil, "description": a.Description != nil, "limit": a.Limit != nil,
+					"categories": a.Categories != nil, "every": a.Every != nil, "start": a.StartDate != nil, "until": a.EndDate != nil,
+					"rollover": a.Rollover != nil,
+				})
+				if len(sent) == 0 {
+					return nil, errors.New("give at least one of title, code, description, limit, categories, every, start_date, end_date, rollover")
+				}
+				current, err := find(c, a.Budget)
+				if err != nil {
+					return nil, err
+				}
+				if current.Archived() {
+					return nil, fmt.Errorf("budget not found: %s (it is archived; restore it first)", current.Code)
+				}
+				if err := c.apply("edit", values, sent, &current); err != nil {
+					return nil, err
+				}
+				if err := checkPeriod("edit", current); err != nil {
+					return nil, err
+				}
+				if err := c.store.Update(&current); err != nil {
+					return nil, err
+				}
+				return c.reload(current.ID)
+			}),
+		tool("budget_archive", "Archive a budget: it leaves the lists and gives no warnings, but it keeps its history. budget_restore brings it back.",
+			func(db *gorm.DB, a referenceArguments) (any, error) {
+				c := newBudgetsCommand(db)
+				current, err := find(c, a.Budget)
+				if err != nil {
+					return nil, err
+				}
+				if current.Archived() {
+					return nil, fmt.Errorf("budget %s is already archived", current.Code)
+				}
+				if err := c.store.Archive(current.ID); err != nil {
+					return nil, err
+				}
+				return c.reload(current.ID)
+			}),
+		tool("budget_restore", "Restore an archived budget.",
+			func(db *gorm.DB, a referenceArguments) (any, error) {
+				c := newBudgetsCommand(db)
+				current, err := find(c, a.Budget)
+				if err != nil {
+					return nil, err
+				}
+				if !current.Archived() {
+					return nil, fmt.Errorf("budget %s is not archived", current.Code)
+				}
+				if err := c.store.Restore(current.ID); err != nil {
+					return nil, err
+				}
+				return c.reload(current.ID)
+			}),
+		deletes(tool("budget_delete", "Delete a budget permanently. No transaction changes: a budget has no link to its transactions. To keep the budget and its history, use budget_archive.",
+			func(db *gorm.DB, a deleteArguments) (any, error) {
+				c := newBudgetsCommand(db)
+				current, err := find(c, a.Budget)
+				if err != nil {
+					return nil, err
+				}
+				if !a.Confirm {
+					return confirmation(fmt.Sprintf("Delete budget %s (%s) permanently? No transaction changes.", current.Code, current.Title)), nil
+				}
+				if err := c.store.Delete(current.ID); err != nil {
+					return nil, err
+				}
+				return map[string]any{"deleted": true, "budget": current.Code}, nil
 			})),
 	}
 }

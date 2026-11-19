@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -12,32 +13,62 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"finux/src/account"
+	"finux/src/budget"
 	"finux/src/card"
 	"finux/src/category"
 	"finux/src/code"
+	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/transaction"
 )
 
 // Field identifies one input of a form.
 type Field int
 
 // The fields of a form, in display order. Each form shows a part of
-// them: the limit and the days are only for a credit card, the opening
-// balance only for an account.
+// them: the limit is for a credit card and a budget, the days are only
+// for a credit card, the opening balance only for an account.
 const (
 	FieldName Field = iota
 	FieldCode
 	FieldDescription
+	// FieldKind is the type of a goal.
+	FieldKind
 	FieldCurrency
 	FieldBalance
 	FieldLimit
+	// FieldTarget and FieldDate are the target and the final date of a goal.
+	FieldTarget
+	// FieldCategories, FieldEvery and FieldStart are the categories, the
+	// period and the start date of a budget.
+	FieldCategories
+	FieldEvery
+	FieldStart
 	FieldClosing
 	FieldDue
+	FieldDate
+	// FieldRollover tells whether a budget moves what a period left to
+	// the next period.
+	FieldRollover
 	FieldColor
 	fieldCount
 )
 
-var fieldLabels = [fieldCount]string{"Name", "Code", "Description", "Currency", "Opening balance", "Limit", "Closing day", "Due day", "Color"}
+var fieldLabels = [fieldCount]string{
+	"Name", "Code", "Description", "Type", "Currency", "Opening balance", "Limit", "Target",
+	"Categories", "Period", "Start date", "Closing day", "Due day", "Final date", "Rollover", "Color",
+}
+
+// goalFields are the fields only a goal form has. A budget form has the
+// date too, as its end date.
+var goalFields = []Field{FieldKind, FieldTarget, FieldDate}
+
+// budgetFields are the fields only a budget form has.
+var budgetFields = []Field{FieldCategories, FieldEvery, FieldStart, FieldRollover}
+
+// otherFields are the fields that an account, a credit card and a
+// category do not have.
+var otherFields = append(slices.Clone(goalFields), budgetFields...)
 
 const (
 	labelWidth   = 17
@@ -62,7 +93,7 @@ type FormOptions struct {
 }
 
 type formKeys struct {
-	Next, Back, Save, Cancel, Left, Right, Up, Down key.Binding
+	Next, Back, Save, Cancel, Left, Right, Up, Down, Toggle key.Binding
 }
 
 var formKeyMap = formKeys{
@@ -74,6 +105,7 @@ var formKeyMap = formKeys{
 	Right:  key.NewBinding(key.WithKeys("right")),
 	Up:     key.NewBinding(key.WithKeys("up"), key.WithHelp("arrows", "choose")),
 	Down:   key.NewBinding(key.WithKeys("down")),
+	Toggle: key.NewBinding(key.WithKeys("space", " "), key.WithHelp("space", "pick")),
 }
 
 // formColor is one choice of the color field.
@@ -86,10 +118,20 @@ type formColor struct {
 // Form is the interactive screen that creates or edits an account or a
 // category.
 type Form struct {
-	title       string
-	initial     account.Account
-	category    *category.Category
-	card        *card.Card
+	title    string
+	initial  account.Account
+	category *category.Category
+	card     *card.Card
+	goal     *goal.Goal
+	kind     int
+	budget   *budget.Budget
+	// categories are the choices of the categories field of a budget;
+	// picked tells which ones count and cursor is the one under the keys.
+	categories  []category.Category
+	picked      []bool
+	cursor      int
+	rollover    int
+	today       string
 	colors      []formColor
 	edit        bool
 	fields      []Field
@@ -120,6 +162,9 @@ func NewForm(options FormOptions) Form {
 		hidden[field] = true
 	}
 	hidden[FieldLimit], hidden[FieldClosing], hidden[FieldDue] = true, true, true
+	for _, field := range otherFields {
+		hidden[field] = true
+	}
 	if options.Edit {
 		hidden[FieldCurrency], hidden[FieldBalance] = true, true
 	}
@@ -175,7 +220,7 @@ func NewCardForm(options CardFormOptions) Form {
 		}
 	}
 	hidden := map[Field]bool{FieldBalance: true, FieldCurrency: options.Edit}
-	for _, field := range options.Preset {
+	for _, field := range append(slices.Clone(options.Preset), otherFields...) {
 		hidden[field] = true
 	}
 	initial := options.Initial
@@ -227,7 +272,7 @@ func NewCategoryForm(options CategoryFormOptions) Form {
 		}
 	}
 	hidden := map[Field]bool{FieldCurrency: true, FieldBalance: true, FieldLimit: true, FieldClosing: true, FieldDue: true}
-	for _, field := range options.Preset {
+	for _, field := range append(slices.Clone(options.Preset), otherFields...) {
 		hidden[field] = true
 	}
 	colors := make([]formColor, len(category.Colors))
@@ -241,6 +286,143 @@ func NewCategoryForm(options CategoryFormOptions) Form {
 		FieldCode:        initial.Code,
 		FieldDescription: initial.Description,
 	}, "Groceries", "FOOD")
+	return f
+}
+
+// GoalFormOptions configures a goal form.
+type GoalFormOptions struct {
+	// Title is the heading of the form.
+	Title string
+	// Initial holds the starting values. In edit mode it is the goal to change.
+	Initial goal.Goal
+	// Target is the starting text of the target field.
+	Target string
+	// Edit hides the currency: it does not change after creation.
+	Edit bool
+	// Preset lists fields that already have a final value. The form hides them.
+	Preset []Field
+	// Taken reports whether another goal uses a code.
+	Taken func(code string) bool
+}
+
+// NewGoalForm builds a goal form. Its fields are title, code,
+// description, type, currency, target and final date.
+func NewGoalForm(options GoalFormOptions) Form {
+	title := options.Title
+	if title == "" {
+		title = "New goal"
+		if options.Edit {
+			title = "Edit goal"
+		}
+	}
+	hidden := map[Field]bool{
+		FieldBalance: true, FieldLimit: true, FieldClosing: true, FieldDue: true, FieldColor: true, FieldCurrency: options.Edit,
+	}
+	for _, field := range append(slices.Clone(options.Preset), budgetFields...) {
+		hidden[field] = true
+	}
+	initial := options.Initial
+	f := Form{title: title, goal: &initial, edit: options.Edit, taken: options.Taken}
+	for i, code := range money.Codes() {
+		if code == initial.Currency {
+			f.currency = i
+		}
+	}
+	f.kind = max(0, slices.Index(goal.Types(), initial.Type))
+	date := ""
+	if initial.DueDate != "" {
+		date = transaction.FormatDate(initial.DueDate)
+	}
+	f.build(hidden, "", map[Field]string{
+		FieldName:        initial.Title,
+		FieldCode:        initial.Code,
+		FieldDescription: initial.Description,
+		FieldTarget:      options.Target,
+		FieldDate:        date,
+	}, "Trip to Japan", "TRIP")
+	f.inputs[FieldDescription].CharLimit = goal.MaxDescription
+	return f
+}
+
+// BudgetFormOptions configures a budget form.
+type BudgetFormOptions struct {
+	// Title is the heading of the form.
+	Title string
+	// Initial holds the starting values. In edit mode it is the budget to
+	// change.
+	Initial budget.Budget
+	// Limit is the starting text of the limit field.
+	Limit string
+	// Categories are the categories the user can pick.
+	Categories []category.Category
+	// Today is the current date as YYYY-MM-DD. A budget without a start
+	// date starts from it.
+	Today string
+	// Edit hides the currency: it does not change after creation.
+	Edit bool
+	// Preset lists fields that already have a final value. The form hides them.
+	Preset []Field
+	// Taken reports whether another budget uses a code.
+	Taken func(code string) bool
+}
+
+// NewBudgetForm builds a budget form. Its fields are title, code,
+// description, currency, limit, categories, period, start date, end date
+// and rollover.
+func NewBudgetForm(options BudgetFormOptions) Form {
+	title := options.Title
+	if title == "" {
+		title = "New budget"
+		if options.Edit {
+			title = "Edit budget"
+		}
+	}
+	hidden := map[Field]bool{
+		FieldKind: true, FieldBalance: true, FieldTarget: true, FieldClosing: true, FieldDue: true, FieldColor: true, FieldCurrency: options.Edit,
+	}
+	for _, field := range options.Preset {
+		hidden[field] = true
+	}
+	initial := options.Initial
+	f := Form{
+		title: title, budget: &initial, edit: options.Edit, taken: options.Taken,
+		categories: options.Categories, picked: make([]bool, len(options.Categories)), today: options.Today,
+	}
+	for i, code := range money.Codes() {
+		if code == initial.Currency {
+			f.currency = i
+		}
+	}
+	for i, choice := range options.Categories {
+		f.picked[i] = slices.Contains(initial.CategoryIDs, choice.ID)
+	}
+	if initial.Rollover {
+		f.rollover = 1
+	}
+	date := func(iso string) string {
+		if iso == "" {
+			return ""
+		}
+		return transaction.FormatDate(iso)
+	}
+	// A new budget is monthly, unless it already is a one-time budget.
+	every := strings.TrimPrefix(initial.Recurrence(), "every ")
+	if !initial.Recurring() {
+		every = ""
+		if !options.Edit && initial.EndDate == "" {
+			every = budget.Month
+		}
+	}
+	f.build(hidden, "", map[Field]string{
+		FieldName:        initial.Title,
+		FieldCode:        initial.Code,
+		FieldDescription: initial.Description,
+		FieldLimit:       options.Limit,
+		FieldEvery:       every,
+		FieldStart:       date(initial.StartDate),
+		FieldDate:        date(initial.EndDate),
+	}, "Food", "FOOD")
+	f.inputs[FieldDescription].CharLimit = budget.MaxDescription
 	return f
 }
 
@@ -263,8 +445,10 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 	placeholders := map[Field]string{
 		FieldName: namePlaceholder, FieldCode: codePlaceholder, FieldDescription: "optional",
 		FieldClosing: "day of the month, 1 to 31", FieldDue: "day of the month, 1 to 31",
+		FieldDate: "optional, DD/MM/YYYY", FieldStart: "optional, DD/MM/YYYY",
+		FieldEvery: "month, 2 weeks, 15 days; empty for one time",
 	}
-	for _, field := range []Field{FieldName, FieldCode, FieldDescription, FieldBalance, FieldLimit, FieldClosing, FieldDue} {
+	for _, field := range textFields {
 		input := textinput.New()
 		input.Prompt = ""
 		input.Placeholder = placeholders[field]
@@ -279,6 +463,10 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 	f.inputs[FieldLimit].CharLimit = 24
 	f.inputs[FieldClosing].CharLimit = 2
 	f.inputs[FieldDue].CharLimit = 2
+	f.inputs[FieldTarget].CharLimit = 24
+	f.inputs[FieldDate].CharLimit = 10
+	f.inputs[FieldStart].CharLimit = 10
+	f.inputs[FieldEvery].CharLimit = 16
 	f.codeTouched = values[FieldCode] != ""
 	f.suggestCode()
 	f.syncBalancePlaceholder()
@@ -304,11 +492,26 @@ func (f Form) Value(field Field) string {
 	case FieldCurrency:
 		return money.Codes()[f.currency]
 	case FieldColor:
+		if len(f.colors) == 0 {
+			return ""
+		}
 		return f.colors[f.color].key
-	case FieldName, FieldCode, FieldDescription, FieldBalance, FieldLimit, FieldClosing, FieldDue:
+	case FieldKind:
+		return goal.Types()[f.kind]
+	case FieldCategories:
+		return f.pickedCodes()
+	case FieldRollover:
+		return yesNo(f.rollover == 1)
+	}
+	if f.isText(field) {
 		return f.inputs[field].Value()
 	}
 	return ""
+}
+
+// textFields are the fields the user types in.
+var textFields = []Field{
+	FieldName, FieldCode, FieldDescription, FieldBalance, FieldLimit, FieldTarget, FieldEvery, FieldStart, FieldClosing, FieldDue, FieldDate,
 }
 
 // Error returns the validation message of the focused field, or "".
@@ -374,6 +577,80 @@ func (f Form) Card() card.Card {
 	return result
 }
 
+// Goal returns the initial goal with the values of the form applied.
+// Use it for a form that NewGoalForm built.
+func (f Form) Goal() goal.Goal {
+	var result goal.Goal
+	if f.goal != nil {
+		result = *f.goal
+	}
+	result.Title = strings.TrimSpace(f.Value(FieldName))
+	result.Code = f.Value(FieldCode)
+	result.Description = strings.TrimSpace(f.Value(FieldDescription))
+	result.Type = f.Value(FieldKind)
+	if !f.edit {
+		result.Currency = f.Value(FieldCurrency)
+	}
+	if target, err := money.Parse(f.Value(FieldTarget), result.Currency); err == nil {
+		result.Target = target
+	}
+	result.DueDate = ""
+	if date, err := transaction.ParseDate(f.Value(FieldDate)); err == nil {
+		result.DueDate = date
+	}
+	return result
+}
+
+// pickedCodes returns the codes of the picked categories of a budget
+// form: "FOOD, FUN". It is "" when no category is picked.
+func (f Form) pickedCodes() string {
+	var codes []string
+	for i, choice := range f.categories {
+		if f.picked[i] {
+			codes = append(codes, choice.Code)
+		}
+	}
+	return strings.Join(codes, ", ")
+}
+
+// Budget returns the initial budget with the values of the form applied.
+// Use it for a form that NewBudgetForm built. A budget without a start
+// date gets the default one of its period.
+func (f Form) Budget() budget.Budget {
+	var result budget.Budget
+	if f.budget != nil {
+		result = *f.budget
+	}
+	result.Title = strings.TrimSpace(f.Value(FieldName))
+	result.Code = f.Value(FieldCode)
+	result.Description = strings.TrimSpace(f.Value(FieldDescription))
+	if !f.edit {
+		result.Currency = f.Value(FieldCurrency)
+	}
+	if limit, err := money.Parse(f.Value(FieldLimit), result.Currency); err == nil {
+		result.Limit = limit
+	}
+	result.CategoryIDs = nil
+	for i, choice := range f.categories {
+		if f.picked[i] {
+			result.CategoryIDs = append(result.CategoryIDs, choice.ID)
+		}
+	}
+	if every, unit, err := budget.ParseEvery(f.Value(FieldEvery)); err == nil {
+		result.Every, result.Unit = every, unit
+	}
+	result.StartDate = budget.DefaultStart(result.Every, result.Unit, f.today)
+	if date, err := transaction.ParseDate(f.Value(FieldStart)); err == nil {
+		result.StartDate = date
+	}
+	result.EndDate = ""
+	if date, err := transaction.ParseDate(f.Value(FieldDate)); err == nil {
+		result.EndDate = date
+	}
+	result.Rollover = f.rollover == 1
+	return result
+}
+
 // colorsInRow reports whether the color field is one row of choices,
 // not a grid.
 func (f Form) colorsInRow() bool { return len(f.colors) <= paletteWidth }
@@ -392,11 +669,17 @@ func (f Form) currencyCode() string {
 	if f.card != nil && f.edit {
 		return f.card.Currency
 	}
+	if f.goal != nil && f.edit {
+		return f.goal.Currency
+	}
+	if f.budget != nil && f.edit {
+		return f.budget.Currency
+	}
 	return f.Value(FieldCurrency)
 }
 
 func (f Form) isText(field Field) bool {
-	return field != FieldCurrency && field != FieldColor && field < fieldCount
+	return slices.Contains(textFields, field)
 }
 
 func (f *Form) suggestCode() {
@@ -410,6 +693,7 @@ func (f *Form) suggestCode() {
 func (f *Form) syncBalancePlaceholder() {
 	f.inputs[FieldBalance].Placeholder = money.Placeholder(f.Value(FieldCurrency))
 	f.inputs[FieldLimit].Placeholder = money.Placeholder(f.currencyCode())
+	f.inputs[FieldTarget].Placeholder = money.Placeholder(f.currencyCode())
 }
 
 func (f *Form) setFocus(index int) tea.Cmd {
@@ -426,7 +710,7 @@ func (f Form) validate(field Field) string {
 	switch field {
 	case FieldName:
 		if strings.TrimSpace(f.Value(FieldName)) == "" {
-			return "Name is required"
+			return f.label(FieldName) + " is required"
 		}
 	case FieldCode:
 		value := f.Value(FieldCode)
@@ -456,6 +740,45 @@ func (f Form) validate(field Field) string {
 		}
 		if limit < 0 {
 			return "Limit cannot be negative"
+		}
+		if f.budget != nil && limit == 0 {
+			return "Limit must be more than zero"
+		}
+	case FieldEvery:
+		if _, _, err := budget.ParseEvery(f.Value(FieldEvery)); err != nil {
+			return reason(err)
+		}
+	case FieldStart:
+		if strings.TrimSpace(f.Value(FieldStart)) == "" {
+			return ""
+		}
+		if _, err := transaction.ParseDate(f.Value(FieldStart)); err != nil {
+			return reason(err)
+		}
+	case FieldTarget:
+		if strings.TrimSpace(f.Value(FieldTarget)) == "" {
+			return "Target is required"
+		}
+		target, err := money.Parse(f.Value(FieldTarget), f.currencyCode())
+		if err != nil {
+			return reason(err)
+		}
+		if target <= 0 {
+			return "Target must be more than zero"
+		}
+	case FieldDate:
+		if strings.TrimSpace(f.Value(FieldDate)) == "" {
+			if f.budget != nil && !f.Budget().Recurring() {
+				return "End date is necessary without a period"
+			}
+			return ""
+		}
+		date, err := transaction.ParseDate(f.Value(FieldDate))
+		if err != nil {
+			return reason(err)
+		}
+		if f.budget != nil && date < f.Budget().StartDate {
+			return "End date is before the start date"
 		}
 	case FieldClosing, FieldDue:
 		day, err := strconv.Atoi(strings.TrimSpace(f.Value(field)))
@@ -521,9 +844,24 @@ func (f Form) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return f, f.setFocus(f.focus + 1)
 	}
 	switch f.Focus() {
+	case FieldKind:
+		f.kind = move(f.kind, len(goal.Types()), press, 1, 0)
+		return f, nil
 	case FieldCurrency:
 		f.currency = move(f.currency, len(money.Codes()), press, 1, 0)
 		f.syncBalancePlaceholder()
+		return f, nil
+	case FieldCategories:
+		if key.Matches(press, formKeyMap.Toggle) && len(f.picked) > 0 {
+			// The form is a value: change a copy of the choices.
+			f.picked = slices.Clone(f.picked)
+			f.picked[f.cursor] = !f.picked[f.cursor]
+			return f, nil
+		}
+		f.cursor = move(f.cursor, len(f.categories), press, 1, 0)
+		return f, nil
+	case FieldRollover:
+		f.rollover = move(f.rollover, 2, press, 1, 0)
 		return f, nil
 	case FieldColor:
 		vertical := paletteWidth
@@ -618,8 +956,10 @@ func (f Form) View() tea.View {
 func (f Form) bindings() []key.Binding {
 	bindings := []key.Binding{formKeyMap.Next, formKeyMap.Back}
 	switch f.Focus() {
-	case FieldCurrency:
+	case FieldCurrency, FieldKind, FieldRollover:
 		bindings = append(bindings, formKeyMap.Left)
+	case FieldCategories:
+		bindings = append(bindings, formKeyMap.Left, formKeyMap.Toggle)
 	case FieldColor:
 		if f.colorsInRow() {
 			bindings = append(bindings, formKeyMap.Left)
@@ -631,13 +971,23 @@ func (f Form) bindings() []key.Binding {
 }
 
 func (f Form) row(field Field, focused bool) string {
-	label := styleDim.Width(labelWidth).Render(fieldLabels[field])
+	label := styleDim.Width(labelWidth).Render(f.label(field))
 	if focused {
-		label = styleTitle.Width(labelWidth).Render(fieldLabels[field])
+		label = styleTitle.Width(labelWidth).Render(f.label(field))
 	}
 	switch field {
+	case FieldKind:
+		labels := make([]string, len(goal.Types()))
+		for i, kind := range goal.Types() {
+			labels[i] = goalTypeLabel(kind)
+		}
+		return label + pills(labels, f.kind, focused)
 	case FieldCurrency:
 		return label + f.currencyRow(focused)
+	case FieldCategories:
+		return lipgloss.JoinHorizontal(lipgloss.Top, label, f.categoryRows(focused))
+	case FieldRollover:
+		return label + pills([]string{"no", "yes"}, f.rollover, focused)
 	case FieldColor:
 		if f.colorsInRow() {
 			return label + f.colorRow(focused)
@@ -647,19 +997,64 @@ func (f Form) row(field Field, focused bool) string {
 	return label + f.inputs[field].View()
 }
 
+// label returns the label of a field. A goal and a budget have a title,
+// not a name. The date of a budget is its end date.
+func (f Form) label(field Field) string {
+	switch {
+	case (f.goal != nil || f.budget != nil) && field == FieldName:
+		return "Title"
+	case f.budget != nil && field == FieldDate:
+		return "End date"
+	}
+	return fieldLabels[field]
+}
+
+// categoryRows shows the categories of a budget form in lines. A picked
+// category has a mark; the one under the keys is reversed.
+func (f Form) categoryRows(focused bool) string {
+	if len(f.categories) == 0 {
+		return styleDim.Render("no categories")
+	}
+	room := f.width - 6 - labelWidth
+	var lines []string
+	line, width := "", 0
+	for index, choice := range f.categories {
+		text, style := "  "+choice.Code+" ", styleDim
+		if f.picked[index] {
+			text, style = " ✓"+choice.Code+" ", styleTitle
+		}
+		if focused && index == f.cursor {
+			style = style.Reverse(true)
+		}
+		if width > 0 && width+lipgloss.Width(text) > room {
+			lines = append(lines, line)
+			line, width = "", 0
+		}
+		line += style.Render(text)
+		width += lipgloss.Width(text)
+	}
+	return strings.Join(append(lines, line), "\n")
+}
+
 func (f Form) currencyRow(focused bool) string {
-	var pills []string
-	for index, code := range money.Codes() {
+	return pills(money.Codes(), f.currency, focused)
+}
+
+// pills shows the choices of a field in one row, with the selected one
+// marked.
+func pills(labels []string, selected int, focused bool) string {
+	var rendered []string
+	for index, label := range labels {
 		style := styleDim
-		if index == f.currency {
+		if index == selected {
 			style = styleTitle
 			if focused {
 				style = style.Reverse(true)
 			}
 		}
-		pills = append(pills, style.Render(" "+code+" "))
+		rendered = append(rendered, style.Render(" "+label+" "))
 	}
-	return strings.Join(pills, " ")
+	return strings.Join(rendered, " ")
 }
 
 // colorRow shows a few colors as pills with their labels.
@@ -703,6 +1098,46 @@ func (f Form) colorGrid(focused bool) string {
 }
 
 func (f Form) preview() string {
+	if f.budget != nil {
+		current := f.Budget()
+		code, title := current.Code, current.Title
+		if code == "" {
+			code = "CODE"
+		}
+		if title == "" {
+			title = "Budget title"
+		}
+		categories := f.pickedCodes()
+		switch count := len(current.CategoryIDs); {
+		case count == 0:
+			categories = "all categories"
+		case count > 3:
+			categories = fmt.Sprintf("%d categories", count)
+		}
+		details := current.Recurrence() + " · " + money.Format(current.Limit, current.Currency) + " · " + categories
+		// The title gets the room the other parts leave in one line.
+		room := f.width - 6 - labelWidth - lipgloss.Width(code) - 4 - lipgloss.Width(details)
+		return styleDim.Width(labelWidth).Render("Preview") +
+			styleBold.Render(code) + "  " + cut(title, max(room, 6)) + "  " + styleDim.Render(details)
+	}
+	if f.goal != nil {
+		current := f.Goal()
+		code, title := current.Code, current.Title
+		if code == "" {
+			code = "CODE"
+		}
+		if title == "" {
+			title = "Goal title"
+		}
+		details := goalTypeLabel(current.Type) + " · " + money.Format(current.Target, current.Currency)
+		if current.DueDate != "" {
+			details += " · until " + transaction.FormatDate(current.DueDate)
+		}
+		// The title gets the room the other parts leave in one line.
+		room := f.width - 6 - labelWidth - lipgloss.Width(code) - 4 - lipgloss.Width(details)
+		return styleDim.Width(labelWidth).Render("Preview") +
+			styleBold.Render(code) + "  " + cut(title, max(room, 6)) + "  " + styleDim.Render(details)
+	}
 	dot := paint(f.colors[f.color].hex, "●")
 	if f.category != nil {
 		current := f.Category()

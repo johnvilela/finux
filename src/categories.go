@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"finux/src/budget"
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/transaction"
@@ -343,8 +344,35 @@ func (c *categoriesCommand) remove(current category.Category, used int64, other 
 				return err
 			}
 		}
+		if transactionsReady(tx) {
+			if err := budget.NewStore(tx).DropCategory(current.ID); err != nil {
+				return err
+			}
+		}
 		return category.NewStore(tx).Delete(current.ID)
 	})
+}
+
+// budgetsAllow refuses the delete of a category that is the only
+// category of a budget, active or archived. Without it, the budget
+// would count all categories.
+func (c *categoriesCommand) budgetsAllow(current category.Category) error {
+	if !transactionsReady(c.db) {
+		return nil
+	}
+	budgets, err := budget.NewStore(c.db).OnlyCategoryOf(current.ID)
+	if err != nil || len(budgets) == 0 {
+		return err
+	}
+	codes := make([]string, len(budgets))
+	for i, only := range budgets {
+		codes[i] = only.Code
+	}
+	noun := "budget"
+	if len(codes) > 1 {
+		noun = "budgets"
+	}
+	return fmt.Errorf("category %s is the only category of the %s %s: change or delete the %s first", current.Code, noun, strings.Join(codes, ", "), noun)
 }
 
 func (c *categoriesCommand) delete(args []string) error {
@@ -362,6 +390,9 @@ func (c *categoriesCommand) delete(args []string) error {
 	}
 	used, other, err := c.usage(current)
 	if err != nil {
+		return err
+	}
+	if err := c.budgetsAllow(current); err != nil {
 		return err
 	}
 	moved := ""

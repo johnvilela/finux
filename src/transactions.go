@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"finux/src/account"
+	"finux/src/budget"
 	"finux/src/card"
 	"finux/src/category"
+	"finux/src/goal"
 	"finux/src/money"
 	"finux/src/transaction"
 	"finux/src/ui"
@@ -37,6 +39,7 @@ func transactionsHelp() string {
   --search <text>       Transactions whose title contains the text
   --date <date>         A year (2026), a month (11/2026 or 2026/11) or a date
   --account <code>      Transactions of an account or a credit card
+  --goal <code>         Transactions linked to a goal
   --type <type>         ` + strings.Join(transaction.Types(), ", ") + `, ` + transaction.Payment + `
 
 ` + green.Render("Options for add and edit:") + `
@@ -49,6 +52,8 @@ func transactionsHelp() string {
   --tags <tags>         Tags, for example "market weekly" or "#market #weekly"
   --account <code>      Account or credit card of the transaction
   --date <date>         DD/MM/YYYY or YYYY/MM/DD (default: today)
+  --goal <code>         Goal the transaction counts toward; 'none' takes it away.
+                        See 'finux goals --help'
 
 ` + green.Render("Options for add, for a transfer between accounts:") + `
   --to <code>           Account that receives the money
@@ -83,18 +88,22 @@ type transactionsCommand struct {
 	accounts   *account.Store
 	categories *category.Store
 	cards      *card.Store
+	goals      *goal.Store
+	budgets    *budget.Store
 }
 
 // errOutdated means the database lacks tables or columns of this Finux.
 var errOutdated = errors.New("the database is out of date. Run 'finux init' to update it")
 
 // transactionsReady reports whether the database has the tables of the
-// transactions and the credit cards. A database from an older Finux
+// transactions, the credit cards, the goals and the budgets. A database from an older Finux
 // gets them with 'finux init'.
 func transactionsReady(db *gorm.DB) bool {
 	migrator := db.Migrator()
 	return migrator.HasTable(&transaction.Transaction{}) && migrator.HasTable(&card.Card{}) && migrator.HasTable(&card.Bill{}) &&
-		migrator.HasColumn(&transaction.Transaction{}, "card_id") && migrator.HasColumn(&transaction.Transaction{}, "bill_id")
+		migrator.HasColumn(&transaction.Transaction{}, "card_id") && migrator.HasColumn(&transaction.Transaction{}, "bill_id") &&
+		migrator.HasTable(&goal.Goal{}) && migrator.HasColumn(&transaction.Transaction{}, "goal_id") &&
+		migrator.HasTable(&budget.Budget{}) && migrator.HasTable(&budget.Link{})
 }
 
 func runTransactions(args []string, io streams) int {
@@ -130,7 +139,7 @@ func runTransactions(args []string, io streams) int {
 		return exitStatus(io, "transactions", err)
 	}
 	command.store, command.accounts, command.categories = transaction.NewStore(db), account.NewStore(db), category.NewStore(db)
-	command.cards = card.NewStore(db)
+	command.cards, command.goals, command.budgets = card.NewStore(db), goal.NewStore(db), budget.NewStore(db)
 	return exitStatus(io, "transactions", handler(rest))
 }
 
@@ -208,6 +217,20 @@ func (c *transactionsCommand) findAccount(ref string, archived bool) (account.Ac
 	return found, err
 }
 
+// findGoal finds the goal for the text of a --goal option. It returns 0
+// for the word none and for an empty text: no goal. An archived goal is
+// found, so that the store can tell why it takes no new transaction.
+func (c *transactionsCommand) findGoal(ref string) (goal.Goal, error) {
+	if ref = strings.TrimSpace(ref); ref == "" || strings.EqualFold(ref, noGoal) {
+		return goal.Goal{}, nil
+	}
+	found, err := c.goals.Find(ref, true)
+	if errors.Is(err, goal.ErrNotFound) {
+		return found, fmt.Errorf("goal not found: %s", ref)
+	}
+	return found, err
+}
+
 func (c *transactionsCommand) findCategory(ref string) (category.Category, error) {
 	found, err := c.categories.Find(ref)
 	if errors.Is(err, category.ErrNotFound) {
@@ -217,7 +240,7 @@ func (c *transactionsCommand) findCategory(ref string) (category.Category, error
 }
 
 func (c *transactionsCommand) list(args []string) error {
-	var categoryRef, tags, search, date, accountRef, kind string
+	var categoryRef, tags, search, date, accountRef, kind, goalRef string
 	_, given, err := parse("list", args, func(f *flag.FlagSet) {
 		f.StringVar(&categoryRef, "category", "", "")
 		f.StringVar(&tags, "tag", "", "")
@@ -225,11 +248,12 @@ func (c *transactionsCommand) list(args []string) error {
 		f.StringVar(&date, "date", "", "")
 		f.StringVar(&accountRef, "account", "", "")
 		f.StringVar(&kind, "type", "", "")
+		f.StringVar(&goalRef, "goal", "", "")
 	}, 0)
 	if err != nil {
 		return err
 	}
-	filter, err := c.filter(listFlags{categoryRef, tags, search, date, accountRef, kind}, given)
+	filter, err := c.filter(listFlags{category: categoryRef, tags: tags, search: search, date: date, account: accountRef, kind: kind, goal: goalRef}, given)
 	if err != nil {
 		return err
 	}
@@ -260,7 +284,7 @@ func (c *transactionsCommand) list(args []string) error {
 
 // listFlags holds the text of the filters of list.
 type listFlags struct {
-	category, tags, search, date, account, kind string
+	category, tags, search, date, account, kind, goal string
 }
 
 // filter makes the filter of a list from the options that were given.
@@ -296,6 +320,16 @@ func (c *transactionsCommand) filter(values listFlags, given map[string]bool) (t
 		}
 		filter.Account = found.Code
 	}
+	if given["goal"] {
+		found, err := c.findGoal(values.goal)
+		if err != nil {
+			return filter, err
+		}
+		if found.ID == 0 {
+			return filter, usageError("list: give the code of a goal")
+		}
+		filter.Goal = found.Code
+	}
 	return filter, nil
 }
 
@@ -313,7 +347,7 @@ func (c *transactionsCommand) show(args []string) error {
 
 // transactionFlags holds the text of the options of add and edit.
 type transactionFlags struct {
-	title, description, value, kind, category, tags, account, date, to, received string
+	title, description, value, kind, category, tags, account, date, to, received, goal string
 }
 
 func (v *transactionFlags) define(flags *flag.FlagSet, transfer bool) {
@@ -325,6 +359,7 @@ func (v *transactionFlags) define(flags *flag.FlagSet, transfer bool) {
 	flags.StringVar(&v.tags, "tags", "", "")
 	flags.StringVar(&v.account, "account", "", "")
 	flags.StringVar(&v.date, "date", "", "")
+	flags.StringVar(&v.goal, "goal", "", "")
 	if transfer {
 		flags.StringVar(&v.to, "to", "", "")
 		flags.StringVar(&v.received, "received", "", "")
@@ -403,7 +438,26 @@ func (c *transactionsCommand) add(args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.print(ui.Success(label(created, "created")) + "\n")
+	return c.saved(created, "created")
+}
+
+// saved prints the feedback of a transaction that was created or
+// changed, then one line for each budget that it leaves near or over
+// its limit.
+func (c *transactionsCommand) saved(current transaction.Transaction, action string) error {
+	out := ui.Success(label(current, action)) + "\n"
+	view, err := c.store.Find(current.ID)
+	if err != nil {
+		return err
+	}
+	warnings, err := budgetWarnings(c.budgets, view)
+	if err != nil {
+		return err
+	}
+	for _, warning := range warnings {
+		out += ui.Warning(warning.Message) + "\n"
+	}
+	return c.print(out)
 }
 
 // newDraft makes the draft of a new transaction from the options that
@@ -466,6 +520,13 @@ func (c *transactionsCommand) newDraft(values transactionFlags, given map[string
 			return draft, false, err
 		}
 	}
+	if given["goal"] {
+		target, err := c.findGoal(values.goal)
+		if err != nil {
+			return draft, false, err
+		}
+		draft.GoalID = target.ID
+	}
 	if given["received"] {
 		if draft.Received, err = amount("add", values.received, to.Currency); err != nil {
 			return draft, false, err
@@ -496,10 +557,14 @@ func (c *transactionsCommand) form(title string, draft transaction.Draft, values
 	if err != nil {
 		return draft, err
 	}
+	goals, err := c.goals.List(false)
+	if err != nil {
+		return draft, err
+	}
 	var preset []ui.TxField
 	for name, field := range map[string]ui.TxField{
 		"title": ui.TxTitle, "description": ui.TxDescription, "value": ui.TxValue, "category": ui.TxCategory,
-		"tags": ui.TxTags, "account": ui.TxAccount, "date": ui.TxDate, "to": ui.TxTo, "received": ui.TxReceived,
+		"tags": ui.TxTags, "account": ui.TxAccount, "date": ui.TxDate, "to": ui.TxTo, "received": ui.TxReceived, "goal": ui.TxGoal,
 	} {
 		if given[name] {
 			preset = append(preset, field)
@@ -512,7 +577,7 @@ func (c *transactionsCommand) form(title string, draft transaction.Draft, values
 	}
 	form, err := program(ui.NewTransactionForm(ui.TransactionFormOptions{
 		Title: title, Initial: draft, Value: values.value, Received: values.received,
-		Accounts: accounts, Cards: cards, Categories: categories, Titles: titles, Tags: tags, Preset: preset, Today: today(),
+		Accounts: accounts, Cards: cards, Categories: categories, Goals: goals, Titles: titles, Tags: tags, Preset: preset, Today: today(),
 	}))
 	if err != nil {
 		return draft, err
@@ -543,7 +608,7 @@ func (c *transactionsCommand) edit(args []string) error {
 		return err
 	}
 	if len(given) == 0 && !c.interactive {
-		return usageError("edit: give --title, --description, --value, --type, --category, --tags, --account or --date when input is not a terminal")
+		return usageError("edit: give --title, --description, --value, --type, --category, --tags, --account, --date or --goal when input is not a terminal")
 	}
 	current, err := c.resolve("edit", reference(positional), "Edit transaction")
 	if err != nil {
@@ -565,7 +630,7 @@ func (c *transactionsCommand) edit(args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.print(ui.Success(label(updated, "updated")) + "\n")
+	return c.saved(updated, "updated")
 }
 
 // editForm opens the form with the values of a transaction.
@@ -594,6 +659,13 @@ func (c *transactionsCommand) change(current transaction.View, draft, changes tr
 			return draft, err
 		}
 		draft.CategoryID = found.ID
+	}
+	if given["goal"] {
+		target, err := c.findGoal(values.goal)
+		if err != nil {
+			return draft, err
+		}
+		draft.GoalID = target.ID
 	}
 	currency := current.Account.Currency
 	if given["account"] {
@@ -641,8 +713,16 @@ func (c *transactionsCommand) editForm(current transaction.View, draft transacti
 	if err != nil {
 		return draft, err
 	}
+	goals, err := c.goals.List(false)
+	if err != nil {
+		return draft, err
+	}
+	// The goal the transaction has can be archived.
+	if current.Goal != nil && !slices.ContainsFunc(goals, func(g goal.Goal) bool { return g.ID == current.GoalID }) {
+		goals = append(goals, *current.Goal)
+	}
 	form, err := program(ui.NewTransactionForm(ui.TransactionFormOptions{
-		Title: fmt.Sprintf("Edit transaction %d", current.ID), Initial: draft, Edit: true,
+		Title: fmt.Sprintf("Edit transaction %d", current.ID), Initial: draft, Edit: true, Goals: goals,
 		Value:    money.Input(current.Value(), current.Account.Currency),
 		Accounts: accounts, Cards: cards, Categories: categories, Titles: titles, Tags: tags,
 	}))

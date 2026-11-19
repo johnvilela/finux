@@ -58,6 +58,12 @@ func run(args []string, io streams) int {
 			return runTransactions(args[1:], io)
 		case "credit-card", "credit-cards", "cc":
 			return runCreditCards(args[1:], io)
+		case "goals", "goal", "gl":
+			return runGoals(args[1:], io)
+		case "budgets", "budget", "bg":
+			return runBudgets(args[1:], io)
+		case "resume", "rs":
+			return runResume(args[1:], io)
 		case "mcp":
 			return runMCP(args[1:], io)
 		case "skills":
@@ -105,6 +111,6 @@ func welcome() string {
 	}
 	return strings.Join(lines, "\n") + "\n\nYour personal finance manager\n\n" +
 		green.Render("Usage:") + " finux [command]\n\n" +
-		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  mcp               Run the MCP server for AI agents\n  skills            Install the skills for AI agents\n  help              Show this help\n\n" +
+		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  goals, gl         Manage goals\n  budgets, bg       Manage budgets\n  resume, rs        Show your financial resume\n  mcp               Run the MCP server for AI agents\n  skills            Install the skills for AI agents\n  help              Show this help\n\n" +
 		green.Render("Options:") + "\n  -h, --help        Show this help\n"
 }

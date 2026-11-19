@@ -54,6 +54,9 @@ Commands:
   categories, ct    Manage categories
   transactions, tx  Manage transactions
   credit-card, cc   Manage credit cards
+  goals, gl         Manage goals
+  budgets, bg       Manage budgets
+  resume, rs        Show your financial resume
   mcp               Run the MCP server for AI agents
   skills            Install the skills for AI agents
   help              Show this help
@@ -84,8 +87,9 @@ make dev
 build, `make dev` applies the migrations to it and adds sample data:
 
 - If the database does not exist, it is created with the base categories, a
-  base set of 8 accounts, 2 credit cards and 24 transactions. The credit card
-  `VISA` has an open bill, a late bill and a paid bill.
+  base set of 8 accounts, 2 credit cards, 3 goals, 3 budgets and 24
+  transactions. The credit card `VISA` has an open bill, a late bill and a
+  paid bill.
 - If the database exists, it keeps its data and gets 3 more random accounts and
   5 more random transactions.
 
@@ -459,6 +463,157 @@ transactions, but takes no new ones. `delete --hard` deletes the card, its
 bills and its transactions permanently. Each payment stays in its account: it
 becomes an expense of the category `OTHER`, with a note in its description.
 
+## Goals
+
+A goal is an amount of money to reach: to save, to pay off, or to put
+aside for a purchase. Its progress comes from the transactions you link to
+it.
+
+```sh
+./bin/finux goals                 # list goals; alias: gl
+./bin/finux gl add --title "Trip to Japan" --type save --target 10000 \
+  --currency BRL --due 30/06/2027 --code TRIP
+./bin/finux gl TRIP               # progress and linked transactions
+./bin/finux gl edit TRIP --target 12000 --due none
+./bin/finux gl delete TRIP        # archive; --hard deletes permanently
+./bin/finux gl restore TRIP
+```
+
+A goal has a title, a code, a description, a type, a target, one currency
+and an optional final date. Without options, `add` and `edit` open a form.
+The currency does not change after creation.
+
+### Link transactions
+
+```sh
+./bin/finux tx add --title Bonus --value 400 --account NU --category SAL --goal TRIP
+./bin/finux tx edit 12 --goal TRIP    # link a transaction that exists
+./bin/finux tx edit 12 --goal none    # take the goal away
+./bin/finux tx list --goal TRIP
+```
+
+The transaction form has a `Goal` field when you have goals. In the list,
+the search input also reads `goal:CODE`.
+
+- A transaction has at most one goal, and the goal must have the currency
+  of its account or credit card.
+- The type of the goal tells how a transaction counts:
+
+  | Type | Income | Expense | Transfer |
+  | --- | --- | --- | --- |
+  | `save`, `purchase` | adds | removes | adds one time |
+  | `payoff` | removes | adds | adds one time |
+
+  `purchase` counts as `save`; it only tells what the money is for.
+- The progress is never below zero.
+- The payment of a credit card bill (`finux cc pay`) cannot have a goal.
+
+### Status, archive and delete
+
+A goal is `active`, then `reached` when the progress is the target or
+more. A goal with a final date in the past that is not reached is
+`overdue`.
+
+`delete` archives a goal: it leaves the list and takes no new
+transactions, but its transactions keep the link. `delete --hard` deletes
+the goal permanently. It never deletes a transaction: the linked
+transactions stay and only lose the goal.
+
+## Budgets
+
+A budget is a limit of money for some categories in a period. You do not
+link a transaction to a budget: every expense and income of its categories
+counts by itself, in the period that has its date.
+
+```sh
+./bin/finux budgets               # list budgets; alias: bg
+./bin/finux bg add --title Food --limit 800 --currency BRL \
+  --categories FOOD,FUN --every month --code FOOD
+./bin/finux bg FOOD               # current period, its transactions, history
+./bin/finux bg show FOOD --period 15/10/2026   # the period of a date
+./bin/finux bg edit FOOD --limit 900 --rollover
+./bin/finux bg delete FOOD        # archive; --hard deletes permanently
+./bin/finux bg restore FOOD
+```
+
+A budget has a title, a code, a description, a limit, one currency, a list
+of categories and a period. Without options, `add` and `edit` open a form.
+The currency does not change after creation.
+
+### Period
+
+| Options | Budget |
+| --- | --- |
+| `--every month` | Recurring: a new period starts when one ends |
+| `--every "2 weeks"`, `--every "15 days"` | Recurring, with a number of days, weeks, months or years |
+| `--every month --until 31/12/2027` | Recurring until a date |
+| `--until 31/12/2026` | One time: one period from the start date to that date |
+
+The periods count from the start date (`--start`). A monthly budget that
+starts on 05/11/2026 has periods from day 5 to day 4. Without `--start`, a
+budget of one week, month or year starts on the first day of this week
+(Monday), month or year; any other budget starts today.
+
+### What counts
+
+- An expense adds to what the period spent. An income gives money back.
+  The spent amount is never below zero.
+- Only the categories of the budget count. Without `--categories`, or with
+  `--categories all`, all categories count but the income (green) ones.
+- Only transactions in the currency of the budget count.
+- A transfer and the payment of a credit card bill (`finux cc pay`) do not
+  count. A purchase with a card counts on the day of the purchase.
+
+A period is `ok`, then `near` when it spent 80% of its amount or more, then
+`over`. A budget that did not start is `upcoming`; one whose end date
+passed is `ended`. `finux tx add` and `finux tx edit` print a line when the
+transaction leaves a budget near or over its limit:
+
+```
+✓ Transaction 42 created
+! Budget FOOD: 85% spent, R$ 120,00 left until 30/11/2026
+```
+
+### Rollover
+
+With `--rollover`, a period gets what the period before did not spend, and
+loses what it spent too much. The amount carries from the start date of the
+budget. `--rollover=false` in `edit` stops it. Without rollover, each period
+has the limit.
+
+A change of the limit, the categories or the dates counts all the periods
+again: Finux does not keep the old limit of a past period.
+
+### Archive and delete
+
+`delete` archives a budget: it leaves the list and gives no warnings, but it
+keeps its history. `delete --hard` deletes the budget permanently. A delete
+never changes a transaction.
+
+When you delete a category, it leaves the budgets that have it. Finux
+refuses to delete a category that is the only category of a budget: change
+or delete the budget first.
+
+
+## Resume
+
+The resume is the summary of your finances on the date of today.
+
+```sh
+./bin/finux resume                  # the month of today; alias: rs
+./bin/finux rs --month 10/2026      # the incomes and expenses of another month
+```
+
+For each currency, it shows the incomes, the expenses, the net amount, the
+expenses per day and the top expense categories of the month. A transfer and
+the payment of a credit card bill do not count: a purchase with a card counts
+on the day of the purchase. The expenses per day use the days of the month up
+to today.
+
+It also shows the accounts with their balances and a total for each currency,
+the credit card bills to pay, the budgets with a period today and the goals.
+These are always as they are today, also with `--month`.
+
 ## MCP server for AI agents
 
 `finux mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
@@ -528,6 +683,8 @@ Each tool returns JSON. The tools with `*` need `confirm: true`.
 | Categories | `category_list`, `category_show` | `category_add`, `category_edit`, `category_delete`* |
 | Transactions | `transaction_list`, `transaction_show`, `transaction_suggestions` | `transaction_add`, `transaction_edit`, `transaction_delete`* |
 | Credit cards | `credit_card_list`, `credit_card_show`, `credit_card_bills` | `credit_card_add`, `credit_card_edit`, `credit_card_pay`, `credit_card_unpay`*, `credit_card_archive`, `credit_card_restore`, `credit_card_delete`* |
+| Goals | `goal_list`, `goal_show` | `goal_add`, `goal_edit`, `goal_archive`, `goal_restore`, `goal_delete`* |
+| Budgets | `budget_list`, `budget_show` | `budget_add`, `budget_edit`, `budget_archive`, `budget_restore`, `budget_delete`* |
 
 The rules are the rules of the CLI, with these differences:
 

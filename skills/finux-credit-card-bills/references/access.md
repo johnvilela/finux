@@ -54,10 +54,10 @@ Rules for the CLI:
 | `category_add` | `finux ct add --name <text> --color <red\|green\|grey> [--code <code>] [--description <text>]` |
 | `category_edit` | `finux ct edit <code> [--name] [--code] [--description] [--color]` |
 | `category_delete` | `finux ct delete <code> --yes` |
-| `transaction_list` | `finux tx list [--category <code>] [--tag <tags>] [--search <text>] [--date <date>] [--account <code>] [--type <type>]` |
+| `transaction_list` | `finux tx list [--category <code>] [--tag <tags>] [--search <text>] [--date <date>] [--account <code>] [--type <type>] [--goal <code>]` |
 | `transaction_show` | `finux tx show <id>` |
-| `transaction_add` | `finux tx add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--description <text>] [--tags <tags>] [--date <date>] [--to <code>] [--received <amount>]` |
-| `transaction_edit` | `finux tx edit <id> [--title] [--description] [--value] [--type] [--category] [--tags] [--account] [--date]` |
+| `transaction_add` | `finux tx add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--description <text>] [--tags <tags>] [--date <date>] [--to <code>] [--received <amount>] [--goal <code>]` |
+| `transaction_edit` | `finux tx edit <id> [--title] [--description] [--value] [--type] [--category] [--tags] [--account] [--date] [--goal <code\|none>]` |
 | `transaction_delete` | `finux tx delete <id> --yes` |
 | `transaction_suggestions` | No command. Read the titles and the tags in the output of `finux tx list` |
 | `credit_card_list` | `finux cc list [--all]` |
@@ -70,6 +70,20 @@ Rules for the CLI:
 | `credit_card_archive` | `finux cc delete <code> --yes` |
 | `credit_card_restore` | `finux cc restore <code>` |
 | `credit_card_delete` | `finux cc delete <code> --hard --yes` |
+| `goal_list` | `finux gl list [--all]` |
+| `goal_show` | `finux gl show <code>` |
+| `goal_add` | `finux gl add --title <text> --type <save\|payoff\|purchase> --target <amount> --currency <code> [--due <date>] [--code <code>] [--description <text>]` |
+| `goal_edit` | `finux gl edit <code> [--title] [--code] [--description] [--type] [--target] [--due <date\|none>]` |
+| `goal_archive` | `finux gl delete <code> --yes` |
+| `goal_restore` | `finux gl restore <code>` |
+| `goal_delete` | `finux gl delete <code> --hard --yes` |
+| `budget_list` | `finux bg list [--all]` |
+| `budget_show` | `finux bg show <code> [--period <date>] [--history <number>]` |
+| `budget_add` | `finux bg add --title <text> --limit <amount> --currency <code> [--categories <codes\|all>] [--every <period>] [--start <date>] [--until <date>] [--rollover] [--code <code>] [--description <text>]` |
+| `budget_edit` | `finux bg edit <code> [--title] [--code] [--description] [--limit] [--categories <codes\|all>] [--every <period\|none>] [--start <date>] [--until <date\|none>] [--rollover[=false]]` |
+| `budget_archive` | `finux bg delete <code> --yes` |
+| `budget_restore` | `finux bg restore <code>` |
+| `budget_delete` | `finux bg delete <code> --hard --yes` |
 
 Differences from the MCP tools:
 

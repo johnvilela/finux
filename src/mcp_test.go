@@ -16,6 +16,7 @@ import (
 
 	"finux/src/account"
 	"finux/src/category"
+	"finux/src/goal"
 	"finux/src/money"
 	"finux/src/transaction"
 )
@@ -192,6 +193,8 @@ func TestMCPTools(t *testing.T) {
 		"transaction_list", "transaction_show", "transaction_add", "transaction_edit", "transaction_delete", "transaction_suggestions",
 		"credit_card_list", "credit_card_show", "credit_card_bills", "credit_card_add", "credit_card_edit", "credit_card_pay",
 		"credit_card_unpay", "credit_card_archive", "credit_card_restore", "credit_card_delete",
+		"goal_list", "goal_show", "goal_add", "goal_edit", "goal_archive", "goal_restore", "goal_delete",
+		"budget_list", "budget_show", "budget_add", "budget_edit", "budget_archive", "budget_restore", "budget_delete",
 	}
 	if got := toolNames(t, responses[1]); !slices.Equal(got, want) {
 		t.Errorf("tools = %v\nwant    %v", got, want)
@@ -206,6 +209,7 @@ func TestMCPTools(t *testing.T) {
 	want = []string{
 		"database_doctor", "account_list", "account_show", "category_list", "category_show",
 		"transaction_list", "transaction_show", "transaction_suggestions", "credit_card_list", "credit_card_show", "credit_card_bills",
+		"goal_list", "goal_show", "budget_list", "budget_show",
 	}
 	if got := toolNames(t, readOnly[0]); !slices.Equal(got, want) {
 		t.Errorf("read-only tools = %v\nwant              %v", got, want)
@@ -222,6 +226,7 @@ func TestMCPEnums(t *testing.T) {
 		"category_add.color": category.ColorKeys(), "category_edit.color": category.ColorKeys(),
 		"transaction_add.type": transaction.Types(), "transaction_edit.type": transaction.Types(),
 		"transaction_list.type": append(transaction.Types(), transaction.Payment),
+		"goal_add.type":         goal.Types(), "goal_edit.type": goal.Types(),
 	}
 	checked := 0
 	for _, tool := range mcpTools(false) {
@@ -240,8 +245,8 @@ func TestMCPEnums(t *testing.T) {
 			checked++
 		}
 	}
-	if checked != 11 {
-		t.Errorf("checked %d enums, want 11", checked)
+	if checked != 15 {
+		t.Errorf("checked %d enums, want 15", checked)
 	}
 }
 
@@ -669,4 +674,236 @@ func TestMCPHTTPOptions(t *testing.T) {
 			t.Errorf("config %s with token: status %d, stderr %q, stdout:\n%s", agent, status, stderr, stdout)
 		}
 	}
+}
+
+func TestMCPGoals(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "5000"})
+	h.ok("account_add", map[string]any{"name": "Inter", "currency": "BRL", "code": "INTER"})
+	h.ok("account_add", map[string]any{"name": "Wise", "currency": "USD", "code": "WISE"})
+	h.want(h.ok("goal_list", nil), "[]", "goals")
+
+	created := h.ok("goal_add", map[string]any{"title": "Trip to Japan", "type": "save", "target": "1000", "currency": "brl", "due_date": "10/11/2026", "code": "trip", "description": "In 2027"})
+	h.want(created, "TRIP", "goal", "code")
+	h.want(created, "Trip to Japan", "goal", "title")
+	h.want(created, "save", "goal", "type")
+	h.want(created, "BRL", "goal", "currency")
+	h.want(created, "100000", "goal", "target", "minor")
+	h.want(created, "0", "goal", "progress", "minor")
+	h.want(created, "100000", "goal", "remaining", "minor")
+	h.want(created, "0", "goal", "percent")
+	h.want(created, "2026-11-10", "goal", "due_date")
+	h.want(created, "overdue", "goal", "status")
+	h.want(created, "false", "goal", "archived")
+	loan := h.ok("goal_add", map[string]any{"title": "Loan", "type": "payoff", "target": "500", "currency": "BRL"})
+	h.want(loan, "LOAN", "goal", "code")
+	h.want(loan, "active", "goal", "status")
+	if at(t, loan, "goal", "due_date") != "<nil>" {
+		t.Fatalf("goal without a final date has due_date: %v", loan)
+	}
+	h.fail("target must be more than zero", "goal_add", map[string]any{"title": "X", "type": "save", "target": "0", "currency": "BRL"})
+	h.fail("already in use", "goal_add", map[string]any{"title": "X", "type": "save", "target": "1", "currency": "BRL", "code": "TRIP"})
+	h.fail(`argument "type" must be one of save, payoff, purchase`, "goal_add", map[string]any{"title": "X", "type": "budget", "target": "1", "currency": "BRL"})
+
+	bonus := h.ok("transaction_add", map[string]any{"title": "Bonus", "value": "400", "account": "NU", "category": "SAL", "goal": "trip"})
+	h.want(bonus, "TRIP", "transaction", "goal")
+	h.ok("transaction_add", map[string]any{"title": "Withdrawal", "value": "100", "account": "NU", "category": "OTHER", "type": "expense", "goal": "TRIP"})
+	h.ok("transaction_add", map[string]any{"title": "To savings", "value": "200", "account": "NU", "to": "INTER", "goal": "TRIP"})
+	plain := h.ok("transaction_add", map[string]any{"title": "Market", "value": "50", "account": "NU", "category": "FOOD"})
+	if at(t, plain, "transaction", "goal") != "<nil>" {
+		t.Fatalf("a transaction without a goal has a goal: %v", plain)
+	}
+	h.fail("goal TRIP is in BRL, not in USD", "transaction_add", map[string]any{"title": "A", "value": "1", "account": "WISE", "category": "FOOD", "goal": "TRIP"})
+	h.fail("goal not found: NOPE", "transaction_add", map[string]any{"title": "A", "value": "1", "account": "NU", "category": "FOOD", "goal": "NOPE"})
+
+	shown := h.ok("goal_show", map[string]any{"goal": "TRIP"})
+	h.want(shown, "50000", "goal", "progress", "minor")
+	h.want(shown, "50", "goal", "percent")
+	h.want(shown, "3", "goal", "transactions")
+	h.want(shown, "To savings", "transactions", 0, "title")
+	h.want(shown, "20000", "transactions", 0, "effect", "minor")
+	h.want(shown, "Withdrawal", "transactions", 1, "title")
+	h.want(shown, "-10000", "transactions", 1, "effect", "minor")
+	h.want(shown, "Bonus", "transactions", 2, "title")
+	if count := len(shown["transactions"].([]any)); count != 3 {
+		t.Fatalf("goal_show has %d transactions, want 3", count)
+	}
+	h.want(h.ok("transaction_list", map[string]any{"goal": "TRIP"}), "4", "total")
+
+	moved := h.ok("transaction_edit", map[string]any{"id": 2, "goal": "LOAN"})
+	h.want(moved, "LOAN", "transaction", "goal")
+	h.want(h.ok("goal_show", map[string]any{"goal": "LOAN"}), "10000", "goal", "progress", "minor")
+	unlinked := h.ok("transaction_edit", map[string]any{"id": 2, "goal": ""})
+	if at(t, unlinked, "transaction", "goal") != "<nil>" {
+		t.Fatalf("an empty goal kept the link: %v", unlinked)
+	}
+	h.want(h.ok("transaction_edit", map[string]any{"id": 1, "title": "Big bonus"}), "TRIP", "transaction", "goal")
+
+	edited := h.ok("goal_edit", map[string]any{"goal": "TRIP", "title": "Japan", "target": "600", "due_date": "", "type": "purchase"})
+	h.want(edited, "Japan", "goal", "title")
+	h.want(edited, "purchase", "goal", "type")
+	h.want(edited, "reached", "goal", "status")
+	h.want(edited, "100", "goal", "percent")
+	if at(t, edited, "goal", "due_date") != "<nil>" {
+		t.Fatalf("an empty due_date kept the date: %v", edited)
+	}
+	h.fail("give at least one", "goal_edit", map[string]any{"goal": "TRIP"})
+	h.fail("goal not found: NOPE", "goal_show", map[string]any{"goal": "NOPE"})
+
+	h.want(h.ok("goal_archive", map[string]any{"goal": "TRIP"}), "true", "goal", "archived")
+	h.fail("already archived", "goal_archive", map[string]any{"goal": "TRIP"})
+	h.fail("goal TRIP is archived", "transaction_add", map[string]any{"title": "A", "value": "1", "account": "NU", "category": "SAL", "goal": "TRIP"})
+	if list := h.ok("goal_list", nil); len(list["goals"].([]any)) != 1 {
+		t.Fatalf("active goals = %v, want 1", list)
+	}
+	if list := h.ok("goal_list", map[string]any{"include_archived": true}); len(list["goals"].([]any)) != 2 {
+		t.Fatalf("all goals = %v, want 2", list)
+	}
+	h.want(h.ok("goal_restore", map[string]any{"goal": "TRIP"}), "false", "goal", "archived")
+	h.fail("not archived", "goal_restore", map[string]any{"goal": "TRIP"})
+
+	preview := h.ok("goal_delete", map[string]any{"goal": "TRIP"})
+	h.want(preview, "true", "confirm_required")
+	if message := at(t, preview, "message"); !strings.Contains(message, "Delete goal TRIP (Japan) permanently; 2 transactions lose the link? No transaction is deleted.") {
+		t.Fatalf("preview = %q", message)
+	}
+	h.ok("goal_show", map[string]any{"goal": "TRIP"})
+	deleted := h.ok("goal_delete", map[string]any{"goal": "TRIP", "confirm": true})
+	h.want(deleted, "true", "deleted")
+	h.want(deleted, "2", "transactions_unlinked")
+	h.fail("goal not found", "goal_show", map[string]any{"goal": "TRIP"})
+	list := h.ok("transaction_list", nil)
+	h.want(list, "5", "total")
+	if at(t, h.ok("transaction_show", map[string]any{"id": 1}), "transaction", "goal") != "<nil>" {
+		t.Fatal("the transaction kept the deleted goal")
+	}
+}
+
+func TestMCPBudgets(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "5000"})
+	h.want(h.ok("budget_list", nil), "[]", "budgets")
+
+	created := h.ok("budget_add", map[string]any{"title": "Food", "limit": "800", "currency": "brl", "categories": "food, fun", "every": "month", "code": "food", "description": "Market"})
+	for _, want := range []struct {
+		value string
+		path  []any
+	}{
+		{"FOOD", []any{"code"}}, {"Food", []any{"title"}}, {"Market", []any{"description"}}, {"BRL", []any{"currency"}},
+		{"80000", []any{"limit", "minor"}}, {"every month", []any{"period"}}, {"1", []any{"every"}}, {"month", []any{"unit"}},
+		{"2026-11-01", []any{"start_date"}}, {"false", []any{"rollover"}}, {"ok", []any{"status"}}, {"false", []any{"archived"}},
+		{"FOOD", []any{"categories", 0}}, {"FUN", []any{"categories", 1}},
+		{"2026-11-01", []any{"current", "from"}}, {"2026-11-30", []any{"current", "to"}}, {"0", []any{"current", "spent", "minor"}},
+		{"80000", []any{"current", "available", "minor"}}, {"80000", []any{"current", "remaining", "minor"}},
+		{"0", []any{"current", "percent"}}, {"ok", []any{"current", "level"}},
+	} {
+		h.want(created, want.value, append([]any{"budget"}, want.path...)...)
+	}
+	if at(t, created, "budget", "end_date") != "<nil>" {
+		t.Fatalf("a budget without an end date has end_date: %v", created)
+	}
+	once := h.ok("budget_add", map[string]any{"title": "Trip", "limit": "3000", "currency": "USD", "start_date": "01/12/2026", "end_date": "31/12/2026"})
+	h.want(once, "TRIP", "budget", "code")
+	h.want(once, "one time", "budget", "period")
+	h.want(once, "2026-12-31", "budget", "end_date")
+	h.want(once, "upcoming", "budget", "status")
+	h.want(once, "[]", "budget", "categories")
+	if at(t, once, "budget", "current") != "<nil>" || at(t, once, "budget", "unit") != "<nil>" {
+		t.Fatalf("a budget that did not start has a period: %v", once)
+	}
+	h.fail("give every or end_date", "budget_add", map[string]any{"title": "X", "limit": "1", "currency": "BRL"})
+	h.fail("give a period or an end date", "budget_add", map[string]any{"title": "X", "limit": "1", "currency": "BRL", "every": "none"})
+	h.fail("limit must be more than zero", "budget_add", map[string]any{"title": "X", "limit": "0", "currency": "BRL", "every": "month"})
+	h.fail("category not found: NOPE", "budget_add", map[string]any{"title": "X", "limit": "1", "currency": "BRL", "every": "month", "categories": "NOPE"})
+	h.fail("already in use", "budget_add", map[string]any{"title": "X", "limit": "1", "currency": "BRL", "every": "month", "code": "FOOD"})
+	h.fail(`invalid period "fortnight"`, "budget_add", map[string]any{"title": "X", "limit": "1", "currency": "BRL", "every": "fortnight"})
+
+	// A transaction tells when it leaves a budget near or over its limit.
+	quiet := h.ok("transaction_add", map[string]any{"title": "Market", "value": "600", "account": "NU", "category": "FOOD"})
+	if at(t, quiet, "budget_warnings") != "<nil>" {
+		t.Fatalf("a transaction below the warning has budget_warnings: %v", quiet)
+	}
+	near := h.ok("transaction_add", map[string]any{"title": "Bakery", "value": "80", "account": "NU", "category": "FOOD"})
+	h.want(near, "FOOD", "budget_warnings", 0, "budget")
+	h.want(near, "near", "budget_warnings", 0, "level")
+	h.want(near, "Budget FOOD: 85% spent, R$ 120,00 left until 30/11/2026", "budget_warnings", 0, "message")
+	over := h.ok("transaction_add", map[string]any{"title": "Dinner", "value": "200", "account": "NU", "category": "FUN"})
+	h.want(over, "over", "budget_warnings", 0, "level")
+	h.ok("transaction_add", map[string]any{"title": "Old", "value": "50", "account": "NU", "category": "FOOD", "date": "2026-10-10"})
+	edited := h.ok("transaction_edit", map[string]any{"id": 3, "value": "250"})
+	h.want(edited, "Budget FOOD: over the limit by R$ 130,00 until 30/11/2026", "budget_warnings", 0, "message")
+
+	shown := h.ok("budget_show", map[string]any{"budget": "food"})
+	h.want(shown, "over", "budget", "status")
+	h.want(shown, "93000", "budget", "current", "spent", "minor")
+	h.want(shown, "2026-11-01", "period", "from")
+	h.want(shown, "116", "period", "percent")
+	h.want(shown, "13000", "period", "over", "minor")
+	h.want(shown, "0", "period", "remaining", "minor")
+	h.want(shown, "over", "period", "level")
+	h.want(shown, "Dinner", "transactions", 0, "title")
+	h.want(shown, "25000", "transactions", 0, "counts", "minor")
+	h.want(shown, "[]", "history")
+	if count := len(shown["transactions"].([]any)); count != 3 {
+		t.Fatalf("budget_show has %d transactions, want 3", count)
+	}
+
+	rolled := h.ok("budget_edit", map[string]any{"budget": "FOOD", "start_date": "2026-10-01", "rollover": true})
+	h.want(rolled, "true", "budget", "rollover")
+	h.want(rolled, "75000", "budget", "current", "carried", "minor")
+	h.want(rolled, "155000", "budget", "current", "available", "minor")
+	h.want(rolled, "ok", "budget", "status")
+	shown = h.ok("budget_show", map[string]any{"budget": "FOOD"})
+	h.want(shown, "2026-10-01", "history", 0, "from")
+	h.want(shown, "5000", "history", 0, "spent", "minor")
+	if at(t, h.ok("budget_show", map[string]any{"budget": "FOOD", "history": 0}), "history") != "[]" {
+		t.Fatal("history: 0 returned periods")
+	}
+	past := h.ok("budget_show", map[string]any{"budget": "FOOD", "date": "15/10/2026"})
+	h.want(past, "2026-10-31", "period", "to")
+	h.want(past, "Old", "transactions", 0, "title")
+	h.want(past, "[]", "history")
+	h.fail("budget FOOD has no period on 01/09/2026", "budget_show", map[string]any{"budget": "FOOD", "date": "2026-09-01"})
+	h.fail("budget not found: NOPE", "budget_show", map[string]any{"budget": "NOPE"})
+
+	changed := h.ok("budget_edit", map[string]any{"budget": "FOOD", "title": "Meals", "limit": "900", "categories": "all", "every": "2 weeks", "end_date": "2026-12-31", "rollover": false})
+	h.want(changed, "Meals", "budget", "title")
+	h.want(changed, "90000", "budget", "limit", "minor")
+	h.want(changed, "[]", "budget", "categories")
+	h.want(changed, "every 2 weeks", "budget", "period")
+	h.want(changed, "2026-12-31", "budget", "end_date")
+	h.want(changed, "false", "budget", "rollover")
+	if at(t, h.ok("budget_edit", map[string]any{"budget": "FOOD", "end_date": ""}), "budget", "end_date") != "<nil>" {
+		t.Fatal("an empty end_date kept the date")
+	}
+	h.fail("give a period or an end date", "budget_edit", map[string]any{"budget": "FOOD", "every": "none"})
+	h.fail("give at least one", "budget_edit", map[string]any{"budget": "FOOD"})
+
+	h.want(h.ok("budget_archive", map[string]any{"budget": "FOOD"}), "true", "budget", "archived")
+	h.fail("already archived", "budget_archive", map[string]any{"budget": "FOOD"})
+	h.fail("it is archived; restore it first", "budget_edit", map[string]any{"budget": "FOOD", "title": "X"})
+	silent := h.ok("transaction_add", map[string]any{"title": "Snack", "value": "900", "account": "NU", "category": "FOOD"})
+	if at(t, silent, "budget_warnings") != "<nil>" {
+		t.Fatalf("an archived budget warns: %v", silent)
+	}
+	if list := h.ok("budget_list", nil); len(list["budgets"].([]any)) != 1 {
+		t.Fatalf("active budgets = %v, want 1", list)
+	}
+	if list := h.ok("budget_list", map[string]any{"include_archived": true}); len(list["budgets"].([]any)) != 2 {
+		t.Fatalf("all budgets = %v, want 2", list)
+	}
+	h.want(h.ok("budget_restore", map[string]any{"budget": "FOOD"}), "false", "budget", "archived")
+	h.fail("not archived", "budget_restore", map[string]any{"budget": "FOOD"})
+
+	preview := h.ok("budget_delete", map[string]any{"budget": "FOOD"})
+	h.want(preview, "true", "confirm_required")
+	if message := at(t, preview, "message"); !strings.Contains(message, "Delete budget FOOD (Meals) permanently? No transaction changes.") {
+		t.Fatalf("preview = %q", message)
+	}
+	h.ok("budget_show", map[string]any{"budget": "FOOD"})
+	deleted := h.ok("budget_delete", map[string]any{"budget": "FOOD", "confirm": true})
+	h.want(deleted, "true", "deleted")
+	h.want(deleted, "FOOD", "budget")
+	h.fail("budget not found", "budget_show", map[string]any{"budget": "FOOD"})
+	h.want(h.ok("transaction_list", nil), "5", "total")
 }

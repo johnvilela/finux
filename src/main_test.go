@@ -29,6 +29,9 @@ Commands:
   categories, ct    Manage categories
   transactions, tx  Manage transactions
   credit-card, cc   Manage credit cards
+  goals, gl         Manage goals
+  budgets, bg       Manage budgets
+  resume, rs        Show your financial resume
   mcp               Run the MCP server for AI agents
   skills            Install the skills for AI agents
   help              Show this help

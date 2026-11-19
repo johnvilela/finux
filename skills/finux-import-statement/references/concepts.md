@@ -1,7 +1,7 @@
 # Finux concepts
 
 Finux is a personal finance manager for one user. It has accounts,
-categories, transactions and credit cards with bills. This file gives the
+categories, transactions, credit cards with bills, and goals. This file gives the
 rules an agent needs to read and change that data correctly.
 
 ## Codes and references
@@ -12,7 +12,8 @@ argument that names one of them accepts the code or the numeric id. Prefer
 the code.
 
 Accounts and credit cards share one set of codes: a code is an account or a
-credit card, not the two. Categories have their own set.
+credit card, not the two. Categories have their own set, and goals have
+their own set.
 
 ## Money
 
@@ -139,15 +140,110 @@ The total of a bill is `carried` (what the bill before left) plus `spent`
 - A permanent delete of a credit card deletes its bills and its purchases.
   Each payment stays in its account as an expense of the category `OTHER`.
 
+## Goals
+
+A goal is an amount of money the user wants to reach: a title, a type, a
+target, one currency and an optional final date. Its progress comes only
+from the transactions linked to it.
+
+- Link a transaction with the argument `goal` of `transaction_add` or
+  `transaction_edit`. In an edit, an empty `goal` takes the link away. A
+  transaction has at most one goal.
+- A goal takes only transactions in its currency: the currency of the
+  account or the credit card of the transaction.
+- The payment of a credit card bill cannot have a goal. To follow a debt
+  on a card, link the purchases or other expenses.
+- The type tells how a linked transaction counts:
+
+| Type | An income | An expense | A transfer |
+| --- | --- | --- | --- |
+| `save` | adds | removes | adds one time |
+| `purchase` | adds | removes | adds one time |
+| `payoff` | removes | adds | adds one time |
+
+- `purchase` counts as `save`; it only tells that the money is for one
+  thing. Money put aside is often a transfer to a savings account: link
+  that transfer.
+- `progress` is never below zero. `remaining` is the target less the
+  progress. `percent` is a whole number from 0 to 100.
+- Link a transaction only when the user wants it to count. Do not link
+  the usual expenses of a month to a `save` goal: each one removes
+  progress.
+
+A goal has one status:
+
+| Status | Meaning |
+| --- | --- |
+| `active` | Not reached, and no final date or a final date that did not pass |
+| `reached` | The progress is the target or more |
+| `overdue` | The final date passed and the goal is not reached |
+
+An archived goal leaves the lists and takes no new transactions; its
+transactions keep the link, and it can be restored. `goal_delete` deletes
+the goal only: no transaction is deleted, the linked ones lose the link.
+
+## Budgets
+
+A budget is a limit of money for some categories in a period: a title, a
+limit, one currency, a list of categories and a period. A transaction has
+no link to a budget. Each expense and income counts by itself when it is in
+a category of the budget, in the currency of the budget, on a date in a
+period.
+
+- An expense adds to `spent`. An income gives money back: it removes from
+  `spent`. `spent` is never below zero.
+- A transfer and the payment of a credit card bill do not count. A purchase
+  with a credit card counts on the day of the purchase, not on the day the
+  bill is paid.
+- `categories` is a list of codes. An empty list means all categories but
+  the income (green) ones, so a salary does not pay for the expenses.
+- A budget takes only transactions in its currency: the currency of the
+  account or the credit card of the transaction.
+- A budget is recurring (`every`: `month`, `2 weeks`, `15 days`, ...) or
+  for one time (no `every`, and an `end_date`). A recurring budget can also
+  have an `end_date`: its last period stops there.
+- The periods count from `start_date`. A monthly budget that starts on
+  2026-11-05 has the periods 2026-11-05 to 2026-12-04, 2026-12-05 to
+  2027-01-04 and so on. A month too short for the day uses its last day.
+- With `rollover`, a period gets what the period before did not spend and
+  loses what it spent too much: `carried`, which can be below zero.
+  `available` is the limit and `carried`. Without rollover, `carried` is
+  zero and each period has the limit.
+- A change of the limit, the categories or the dates of a budget counts
+  all its periods again. Finux does not keep the old limit of a past
+  period.
+
+A period has one level, and a budget has the level of its current period
+as its status:
+
+| Status | Meaning |
+| --- | --- |
+| `ok` | The period spent less than 80% of `available` |
+| `near` | The period spent 80% of `available` or more |
+| `over` | The period spent more than `available` |
+| `upcoming` | The start date is in the future; the budget has no period yet |
+| `ended` | The end date passed; `current` is the last period |
+
+`transaction_add` and `transaction_edit` return `budget_warnings` when the
+transaction leaves an active budget `near` or `over`: a list with `budget`
+(code), `level` and `message`. Tell the user about each one. The result
+has no `budget_warnings` when no budget needs attention.
+
+An archived budget leaves the lists and gives no warnings; it keeps its
+history and can be restored. `budget_delete` deletes the budget only: no
+transaction changes. A deleted category leaves the budgets that have it;
+Finux refuses to delete a category that is the only category of a budget.
+
 ## Deletes need confirmation
 
-`account_delete`, `category_delete`, `transaction_delete`,
-`credit_card_delete` and `credit_card_unpay` do nothing without
+`account_delete`, `category_delete`, `transaction_delete`, `goal_delete`,
+`budget_delete`, `credit_card_delete` and `credit_card_unpay` do nothing without
 `confirm: true`. The first call returns
 `{"confirm_required": true, "message": "..."}`, where the message tells
 what the tool will delete. Show that message to the user and wait for a
-clear yes before the call with `confirm: true`. Prefer `account_archive`
-and `credit_card_archive` when the user only wants an item out of the way.
+clear yes before the call with `confirm: true`. Prefer `account_archive`,
+`credit_card_archive`, `goal_archive` and `budget_archive` when the user
+only wants an item out of the way.
 
 ## Objects in a result
 
@@ -168,12 +264,35 @@ its place:
 - a payment: `account`, and the `credit_card` and `bill` it paid;
 - a transfer: `account`, `pair_id` and `other_account`.
 
+A transaction linked to a goal also has `goal` (code).
+
 **Credit card:** `id`, `code`, `name`, `description`, `color`, `currency`,
 `archived`, `limit`, `used`, `available`, `closing_day`, `due_day`.
 
 **Bill:** `period` (`YYYY-MM`), `closes_on`, `due_on`, `status`, `carried`,
 `spent`, `total`. A paid bill also has `paid_on`, `paid`, `remaining` (the
 value that went to the next bill) and `payment_id`.
+
+**Goal:** `id`, `code`, `title`, `description`, `type`, `currency`,
+`archived`, `target`, `progress`, `remaining`, `percent`, `status`,
+`transactions` (the number of linked transactions; a transfer is one), and
+`due_date` when the goal has a final date. `goal_show` also returns the
+linked transactions, each with `effect`: what it adds to the goal, below
+zero when it removes.
+
+**Budget:** `id`, `code`, `title`, `description`, `currency`, `archived`,
+`limit`, `categories` (list of codes; empty for all), `period` (in words:
+`every 2 weeks` or `one time`), `every` and `unit` (only in a recurring
+budget), `start_date`, `end_date` (when the budget has one), `rollover`,
+`status`, and `current`: the period of today, or the last period of a
+budget that ended. A budget that did not start has no `current`.
+
+**Period of a budget:** `from`, `to`, `carried`, `available`, `spent`,
+`remaining`, `over` (what it spent above `available`), `percent` (can be
+more than 100) and `level`. `budget_show` returns `period` (the period it
+shows), `transactions` (the ones that count in it, each with `counts`: what
+it adds to `spent`, below zero for an income) and `history` (the periods
+before it, the newest first).
 
 **List of transactions** (`transaction_list`): `total` (all that match the
 filters), `offset`, `count` (in this page), `transactions`, and `totals`:

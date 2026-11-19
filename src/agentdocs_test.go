@@ -141,7 +141,7 @@ func TestAgentSkillReferencesAreCopies(t *testing.T) {
 
 var (
 	frontmatter = regexp.MustCompile(`(?s)\A---\nname: ([^\n]+)\ndescription: ([^\n]+)\n---\n\n# `)
-	toolMention = regexp.MustCompile("`((?:database|account|category|transaction|credit_card)_[a-z_]+)`")
+	toolMention = regexp.MustCompile("`((?:database|account|category|transaction|credit_card|goal|budget)_[a-z_]+)`")
 	linkTarget  = regexp.MustCompile(`\]\(([^)#]+\.md)(?:#[^)]*)?\)`)
 )
 
@@ -230,7 +230,7 @@ func TestAgentDocsNameRealTools(t *testing.T) {
 }
 
 // resultFields are names of result fields that look like tool names.
-var resultFields = map[string]bool{"transactions_deleted": true, "transactions_moved": true, "transfers_converted": true, "payments_converted": true}
+var resultFields = map[string]bool{"transactions_deleted": true, "transactions_moved": true, "transfers_converted": true, "payments_converted": true, "transactions_unlinked": true, "budget_warnings": true}
 
 func TestAgentDocsLinksResolve(t *testing.T) {
 	for _, path := range markdownFiles(t) {

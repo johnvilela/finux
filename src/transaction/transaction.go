@@ -14,6 +14,7 @@ import (
 	"finux/src/account"
 	"finux/src/card"
 	"finux/src/category"
+	"finux/src/goal"
 )
 
 // The types of a transaction.
@@ -87,6 +88,9 @@ type Transaction struct {
 	// BillID is the bill of a card transaction, or the bill that a
 	// payment pays. It is 0 for the other transactions.
 	BillID uint `gorm:"index"`
+	// GoalID is the goal the transaction counts toward, or 0. The two
+	// sides of a transfer have the same goal. A payment has no goal.
+	GoalID uint `gorm:"index"`
 	// Date is the day of the transaction as YYYY-MM-DD.
 	Date string `gorm:"size:10;index"`
 	// Tags holds the tags separated by one space, for example
@@ -128,6 +132,8 @@ type View struct {
 	Card *card.Card
 	// Bill is the bill of a card transaction or of a payment.
 	Bill *card.Bill
+	// Goal is the goal of the transaction, or nil.
+	Goal *goal.Goal
 }
 
 // Draft holds the values of a transaction to create or to change.
@@ -142,6 +148,8 @@ type Draft struct {
 	Date, Tags string
 	// CardID is the credit card, in place of AccountID.
 	CardID uint
+	// GoalID is the goal the transaction counts toward, or 0.
+	GoalID uint
 	// ToAccountID is the account that receives a transfer.
 	ToAccountID uint
 	// Received is the amount the other account receives, for a transfer
@@ -153,7 +161,7 @@ type Draft struct {
 func DraftOf(t Transaction) Draft {
 	return Draft{
 		Title: t.Title, Description: t.Description, Type: t.Type, Value: t.Value(),
-		AccountID: t.AccountID, CardID: t.CardID, CategoryID: t.CategoryID, Date: t.Date, Tags: t.Tags,
+		AccountID: t.AccountID, CardID: t.CardID, CategoryID: t.CategoryID, Date: t.Date, Tags: t.Tags, GoalID: t.GoalID,
 	}
 }
 

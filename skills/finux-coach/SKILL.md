@@ -50,6 +50,9 @@ plainly. This skill reads data; it changes nothing.
 
 - `account_list`, `credit_card_list`, and `credit_card_show` for each
   card.
+- `goal_list`, and `goal_show` for each active or overdue goal.
+- `budget_list`, and `budget_show` for each budget that is `near` or
+  `over`.
 - `transaction_list` with `date` for each of the last six complete months
   and for the current month. Read all pages of each month: add 100 to
   `offset` until you have `total`. With less history, use what exists and
@@ -75,6 +78,25 @@ Check each of these and report the ones that are true, in this order:
 6. **Money that does not cover the month:** when the open bills plus the
    closed bills are more than the sum of the account balances in the
    same currency, say so with the two numbers.
+
+7. **Overdue goals** (`status` `overdue`): the progress, what remains
+   and the final date that passed.
+8. **Goals behind their date:** for an active goal with a final date,
+   divide what remains by the months until that date. Compare that with
+   what the goal got in each of the last three months (the sum of
+   `effect` by month). Warn when the goal needs more each month than it
+   got. Give the two numbers.
+
+9. **Budgets over the limit** (`status` `over`): what the period spent,
+   what it had (`available`), by how much it is over and the day the
+   period ends. Name the largest transactions of `budget_show`.
+10. **Budgets near the limit** (`status` `near`): what remains and the
+    days until the period ends. Warn when the period is less than half
+    done.
+11. **Budgets that are over again and again:** a budget whose `history`
+    has three or more periods `over` has a limit that does not match the
+    spending. Say so, with the average of `spent`, and ask the user
+    which one must change.
 
 When none is true, say in one line that there is no alert.
 
@@ -110,9 +132,13 @@ Use this order and leave out an empty part:
    of the last complete month and the trend.
 3. **Findings:** at most five, each with its evidence, the largest
    amount first.
-4. **Recurring charges:** the table, when the user asked about
+4. **Goals:** progress of each active goal in one line, when the user
+   has goals. Leave out a goal that an alert already covers.
+5. **Budgets:** the current period of each budget in one line, when the
+   user has budgets. Leave out a budget that an alert already covers.
+6. **Recurring charges:** the table, when the user asked about
    subscriptions or when it holds a surprise.
-5. **Worth a look:** at most three things to examine, each a question or
+7. **Worth a look:** at most three things to examine, each a question or
    a fact, not an order. Example: "Three streaming subscriptions add up
    to R$ 120,00 a month."
 

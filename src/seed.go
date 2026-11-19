@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"finux/src/account"
+	"finux/src/budget"
 	"finux/src/card"
 	"finux/src/category"
 	"finux/src/code"
+	"finux/src/goal"
 	"finux/src/money"
 	"finux/src/storage"
 	"finux/src/transaction"
@@ -69,13 +71,15 @@ type seedEntry struct {
 	daysAgo                        int
 	to                             string
 	received                       int64
+	// goal is the code of the goal the transaction counts toward.
+	goal string
 }
 
 // seedTransactions is the base data of a new development database. It
 // has all types, tags in use by many transactions, a transfer in one
 // currency and a transfer between two currencies.
 var seedTransactions = []seedEntry{
-	{title: "Salary", account: "INTER", category: "SAL", tags: "#work", value: 650000, daysAgo: 20},
+	{title: "Salary", account: "INTER", category: "SAL", tags: "#work", value: 650000, daysAgo: 20, goal: "BIKE"},
 	{title: "Rent", account: "INTER", category: "HOME", tags: "#fixed", value: 180000, daysAgo: 18},
 	{title: "Electricity", account: "INTER", category: "BILLS", tags: "#fixed", value: 21050, daysAgo: 15},
 	{title: "Internet", account: "INTER", category: "BILLS", tags: "#fixed", value: 9990, daysAgo: 15},
@@ -83,8 +87,8 @@ var seedTransactions = []seedEntry{
 	{title: "Weekly market", account: "NUBAN", category: "FOOD", tags: "#market #weekly", value: 34270, daysAgo: 12},
 	{title: "Headphones", account: "WISE", category: "SHOP", tags: "#tech", value: 7999, daysAgo: 11},
 	{title: "Cinema", account: "NUBAN", category: "FUN", tags: "#weekend", value: 6400, daysAgo: 9},
-	{title: "Website project", account: "INTER", category: "FREE", tags: "#work", value: 240000, daysAgo: 8},
-	{title: "Fuel", account: "NUBAN", category: "TRANS", tags: "#car", value: 25000, daysAgo: 7},
+	{title: "Website project", account: "INTER", category: "FREE", tags: "#work", value: 240000, daysAgo: 8, goal: "TRIP"},
+	{title: "Fuel", account: "NUBAN", category: "TRANS", tags: "#car", value: 25000, daysAgo: 7, goal: "CAR"},
 	{title: "Weekly market", account: "NUBAN", category: "FOOD", tags: "#market #weekly", value: 29815, daysAgo: 5},
 	{title: "Bakery", account: "CASH", category: "FOOD", tags: "#market", value: 1850, daysAgo: 3},
 	{title: "Card payment", account: "INTER", category: "XFER", tags: "#fixed", value: 35075, daysAgo: 2, to: "NUBAN"},
@@ -94,6 +98,34 @@ var seedTransactions = []seedEntry{
 
 // seedCards is the base data of a new development database. The days
 // of VISA come from the date of today: see seedBaseCards.
+// seedGoals has one goal of each type and of each status: TRIP is
+// active, CAR is overdue and BIKE is reached. dueIn is the number of days
+// from today to the final date; 0 is no final date.
+var seedGoals = []struct {
+	goal  goal.Goal
+	dueIn int
+}{
+	{goal: goal.Goal{Title: "Trip to Europe", Code: "TRIP", Description: "Two weeks in July", Type: goal.Save, Currency: "BRL", Target: 1000000}, dueIn: 200},
+	{goal: goal.Goal{Title: "Car repair loan", Code: "CAR", Type: goal.PayOff, Currency: "BRL", Target: 50000}, dueIn: -10},
+	{goal: goal.Goal{Title: "New bike", Code: "BIKE", Type: goal.Purchase, Currency: "BRL", Target: 300000}},
+}
+
+// seedBudgets has budgets in three states. FOOD is monthly and near its
+// limit. FUN has rollover: its first period spent too much, so the
+// current one starts with less and is over. VACA is for one time and did
+// not start. startIn and endIn are numbers of days from today; an endIn
+// of 0 is no end date.
+var seedBudgets = []struct {
+	budget     budget.Budget
+	categories []string
+	startIn    int
+	endIn      int
+}{
+	{budget: budget.Budget{Title: "Food", Code: "FOOD", Description: "Market and restaurants", Currency: "BRL", Limit: 100000, Every: 1, Unit: budget.Month}, categories: []string{"FOOD"}, startIn: -14},
+	{budget: budget.Budget{Title: "Fun money", Code: "FUN", Currency: "BRL", Limit: 5000, Every: 2, Unit: budget.Week, Rollover: true}, categories: []string{"FUN"}, startIn: -21},
+	{budget: budget.Budget{Title: "Vacation", Code: "VACA", Description: "All spending of the trip", Currency: "BRL", Limit: 300000}, startIn: 10, endIn: 24},
+}
+
 var seedCards = []card.Card{
 	{Name: "Visa Gold", Code: "VISA", Description: "Main credit card", Color: "blue", Currency: "BRL", Limit: 800000},
 	{Name: "Amex", Code: "AMEX", Description: "Travel", Color: "teal", Currency: "USD", Limit: 200000, ClosingDay: 3, DueDay: 10},
@@ -199,6 +231,9 @@ func seed(path string, fresh bool) (string, error) {
 		if err := seedBase(store); err != nil {
 			return "", err
 		}
+		if err := seedBaseGoals(db); err != nil {
+			return "", err
+		}
 		added, err := seedBaseTransactions(db)
 		if err != nil {
 			return "", err
@@ -207,8 +242,11 @@ func seed(path string, fresh bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Development database created: %s (%d accounts, %d credit cards, %d transactions)",
-			path, len(seedAccounts), len(seedCards), added+purchases), nil
+		if err := seedBaseBudgets(db); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Development database created: %s (%d accounts, %d credit cards, %d goals, %d budgets, %d transactions)",
+			path, len(seedAccounts), len(seedCards), len(seedGoals), len(seedBudgets), added+purchases), nil
 	}
 	if err := seedMore(store, seedBatch); err != nil {
 		return "", err
@@ -227,6 +265,30 @@ func seed(path string, fresh bool) (string, error) {
 	}
 	return fmt.Sprintf("Development database updated: %s (%d accounts and %d transactions added; %d accounts and %d transactions in total)",
 		path, seedBatch, added, len(all), len(movements)), nil
+}
+
+// seedBaseBudgets adds the sample budgets. They count the sample
+// transactions of their categories.
+func seedBaseBudgets(db *gorm.DB) error {
+	store, categories := budget.NewStore(db), category.NewStore(db)
+	for _, entry := range seedBudgets {
+		created := entry.budget
+		created.StartDate = daysAgo(-entry.startIn)
+		if entry.endIn != 0 {
+			created.EndDate = daysAgo(-entry.endIn)
+		}
+		for _, code := range entry.categories {
+			group, err := categories.Find(code)
+			if err != nil {
+				return fmt.Errorf("category %s: %w", code, err)
+			}
+			created.CategoryIDs = append(created.CategoryIDs, group.ID)
+		}
+		if err := store.Create(&created); err != nil {
+			return fmt.Errorf("create budget %s: %w", created.Code, err)
+		}
+	}
+	return nil
 }
 
 // daysAgo returns the date that many days before today.
@@ -285,8 +347,25 @@ func seedBaseCards(db *gorm.DB) (int, error) {
 
 // seedBaseTransactions adds the base transactions. It returns the number
 // of transactions in the database: a transfer is two.
+// seedBaseGoals adds the sample goals. The sample transactions link to
+// them by code.
+func seedBaseGoals(db *gorm.DB) error {
+	store := goal.NewStore(db)
+	for _, entry := range seedGoals {
+		created := entry.goal
+		if entry.dueIn != 0 {
+			created.DueDate = daysAgo(-entry.dueIn)
+		}
+		if err := store.Create(&created); err != nil {
+			return fmt.Errorf("create goal %s: %w", created.Code, err)
+		}
+	}
+	return nil
+}
+
 func seedBaseTransactions(db *gorm.DB) (int, error) {
 	accounts, categories, store := account.NewStore(db), category.NewStore(db), transaction.NewStore(db)
+	goals := goal.NewStore(db)
 	added := 0
 	for _, entry := range seedTransactions {
 		from, err := accounts.Find(entry.account, false)
@@ -300,6 +379,13 @@ func seedBaseTransactions(db *gorm.DB) (int, error) {
 		draft := transaction.Draft{
 			Title: entry.title, Value: entry.value, AccountID: from.ID, CategoryID: group.ID,
 			Date: daysAgo(entry.daysAgo), Tags: entry.tags, Received: entry.received, Type: transaction.Expense,
+		}
+		if entry.goal != "" {
+			target, err := goals.Find(entry.goal, false)
+			if err != nil {
+				return added, fmt.Errorf("goal %s: %w", entry.goal, err)
+			}
+			draft.GoalID = target.ID
 		}
 		added++
 		switch {

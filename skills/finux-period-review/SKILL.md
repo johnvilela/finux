@@ -51,6 +51,9 @@ the transactions inside the range.
 - `account_list` for the balances of today.
 - `credit_card_list`, and `credit_card_show` for each card, for the open
   bill and the bills that wait for a payment.
+- `goal_list` for the goals and their progress.
+- `budget_list` for the budgets, and `budget_show` with a `date` of the
+  period for each budget that had a period in it.
 
 ### 3. Calculate, for each currency
 
@@ -80,7 +83,15 @@ remained. Then use this order and leave out an empty part:
    today, not of the end of the period.
 6. **Credit cards:** used and available, the open bill, and each bill
    that is closed or late with its due date.
-7. **To look at:** at most three facts that need attention, for example a
+7. **Goals:** each active or overdue goal with its progress, percent,
+   what remains and its final date. Say what the period added: the sum
+   of `effect` of the transactions of `goal_show` that have a date in
+   the period.
+8. **Budgets:** each budget that had a period in the period of the
+   review, with `spent`, `available`, `percent` and `level`. A budget
+   period can start or end on other days than the review: give its
+   dates. Put the budgets that are `over` first.
+9. **To look at:** at most three facts that need attention, for example a
    late bill, a category that doubled, or many transactions in `OTHER`.
 
 Show amounts with `formatted`. Keep the report short enough to read on

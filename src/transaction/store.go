@@ -10,6 +10,7 @@ import (
 	"finux/src/account"
 	"finux/src/card"
 	"finux/src/category"
+	"finux/src/goal"
 	"finux/src/money"
 
 	"gorm.io/gorm"
@@ -96,6 +97,29 @@ func (s *Store) billFor(owner card.Card, date string) (card.Bill, error) {
 	return bill, nil
 }
 
+// linkable checks that a transaction in the given currency can have the
+// goal. A goal takes transactions of its currency only. An archived
+// goal takes no new transaction; kept is true for a transaction that
+// already has the goal.
+func (s *Store) linkable(goalID uint, currency string, kept bool) error {
+	if goalID == 0 {
+		return nil
+	}
+	var found goal.Goal
+	if err := s.db.Unscoped().Take(&found, goalID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("goal not found: id %d", goalID)
+	} else if err != nil {
+		return err
+	}
+	if found.Archived() && !kept {
+		return fmt.Errorf("goal %s is archived: restore it first", found.Code)
+	}
+	if found.Currency != currency {
+		return fmt.Errorf("goal %s is in %s, not in %s", found.Code, found.Currency, currency)
+	}
+	return nil
+}
+
 // place checks that a draft has an account or a credit card.
 func place(draft Draft) error {
 	switch {
@@ -147,6 +171,7 @@ func (s *Store) Create(draft Draft) (Transaction, error) {
 	created := Transaction{
 		Title: draft.Title, Description: draft.Description, Type: draft.Type, Amount: signed(draft.Type, draft.Value),
 		AccountID: draft.AccountID, CardID: draft.CardID, CategoryID: draft.CategoryID, Date: draft.Date, Tags: draft.Tags,
+		GoalID: draft.GoalID,
 	}
 	if draft.CardID != 0 {
 		owner, err := s.card(draft.CardID, false)
@@ -154,6 +179,9 @@ func (s *Store) Create(draft Draft) (Transaction, error) {
 			return Transaction{}, err
 		}
 		if _, err := s.category(draft); err != nil {
+			return Transaction{}, err
+		}
+		if err := s.linkable(draft.GoalID, owner.Currency, false); err != nil {
 			return Transaction{}, err
 		}
 		bill, err := s.billFor(owner, draft.Date)
@@ -168,6 +196,9 @@ func (s *Store) Create(draft Draft) (Transaction, error) {
 		return Transaction{}, err
 	}
 	if _, err := s.category(draft); err != nil {
+		return Transaction{}, err
+	}
+	if err := s.linkable(draft.GoalID, from.Currency, false); err != nil {
 		return Transaction{}, err
 	}
 	if draft.Type != Transfer {
@@ -224,7 +255,7 @@ func (s *Store) take(id uint) (Transaction, error) {
 }
 
 // shared lists the columns that the two sides of a transfer have in common.
-var shared = []string{"Title", "Description", "CategoryID", "Date", "Tags"}
+var shared = []string{"Title", "Description", "CategoryID", "Date", "Tags", "GoalID"}
 
 // Update changes the transaction id to the values of the draft. A
 // transfer keeps its type and its accounts; the change also goes to its
@@ -259,6 +290,7 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 	}
 	// The account or the card a transaction already has can be archived.
 	var billID uint
+	var currency string
 	if draft.CardID != 0 {
 		owner, err := s.card(draft.CardID, draft.CardID == current.CardID)
 		if err != nil {
@@ -268,8 +300,28 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 		if err != nil {
 			return Transaction{}, err
 		}
-		billID = bill.ID
-	} else if _, err := s.account(draft.AccountID, draft.AccountID == current.AccountID); err != nil {
+		billID, currency = bill.ID, owner.Currency
+	} else {
+		holder, err := s.account(draft.AccountID, draft.AccountID == current.AccountID)
+		if err != nil {
+			return Transaction{}, err
+		}
+		currency = holder.Currency
+	}
+	// The goal of a transfer has the currency of the account the money
+	// leaves, on the two sides.
+	if current.Type == Transfer && !current.Outgoing() {
+		pair, err := s.take(current.PairID)
+		if err != nil {
+			return Transaction{}, fmt.Errorf("other side of the transfer: %w", err)
+		}
+		source, err := s.account(pair.AccountID, true)
+		if err != nil {
+			return Transaction{}, err
+		}
+		currency = source.Currency
+	}
+	if err := s.linkable(draft.GoalID, currency, draft.GoalID == current.GoalID); err != nil {
 		return Transaction{}, err
 	}
 
@@ -279,7 +331,7 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 	}
 	current.Title, current.Description, current.Type, current.Amount = draft.Title, draft.Description, draft.Type, amount
 	current.AccountID, current.CategoryID, current.Date, current.Tags = draft.AccountID, draft.CategoryID, draft.Date, draft.Tags
-	current.CardID, current.BillID = draft.CardID, billID
+	current.CardID, current.BillID, current.GoalID = draft.CardID, billID, draft.GoalID
 	columns := append([]string{"Type", "Amount", "AccountID", "CardID", "BillID"}, shared...)
 	if current.PairID == 0 {
 		return current, s.db.Model(&current).Select(columns).Updates(&current).Error
@@ -299,6 +351,7 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 	}
 	pairColumns := shared
 	pair.Title, pair.Description, pair.CategoryID, pair.Date, pair.Tags = current.Title, current.Description, current.CategoryID, current.Date, current.Tags
+	pair.GoalID = current.GoalID
 	if here.Currency == there.Currency {
 		pair.Amount = -current.Amount
 		pairColumns = append([]string{"Amount"}, shared...)
@@ -375,6 +428,14 @@ func (s *Store) views(transactions []Transaction) ([]View, error) {
 	for _, current := range bills {
 		billByID[current.ID] = current
 	}
+	var goals []goal.Goal
+	if err := s.db.Unscoped().Find(&goals).Error; err != nil {
+		return nil, err
+	}
+	goalByID := map[uint]goal.Goal{}
+	for _, current := range goals {
+		goalByID[current.ID] = current
+	}
 	// The other side of a transfer can be outside the given transactions.
 	var pairIDs []uint
 	for _, current := range transactions {
@@ -397,6 +458,9 @@ func (s *Store) views(transactions []Transaction) ([]View, error) {
 		views[i] = View{Transaction: current, Account: accountByID[current.AccountID], Category: categoryByID[current.CategoryID]}
 		if other, ok := accountByID[pairAccount[current.PairID]]; ok && current.PairID != 0 {
 			views[i].Other = &other
+		}
+		if target, ok := goalByID[current.GoalID]; ok && current.GoalID != 0 {
+			views[i].Goal = &target
 		}
 		bill, ok := billByID[current.BillID]
 		if !ok || current.BillID == 0 {
@@ -543,6 +607,21 @@ func (s *Store) PurgeAccount(deleted account.Account, other category.Category) e
 		}
 		return tx.Where("account_id = ?", deleted.ID).Delete(&Transaction{}).Error
 	})
+}
+
+// ByGoal returns the transactions linked to a goal, the newest first.
+func (s *Store) ByGoal(goalID uint) ([]View, error) {
+	var transactions []Transaction
+	if err := s.db.Where("goal_id = ?", goalID).Order("date DESC, id DESC").Find(&transactions).Error; err != nil {
+		return nil, err
+	}
+	return s.views(transactions)
+}
+
+// ClearGoal removes the link to a goal from its transactions. The
+// transactions stay.
+func (s *Store) ClearGoal(goalID uint) error {
+	return s.db.Model(&Transaction{}).Where("goal_id = ?", goalID).Update("goal_id", 0).Error
 }
 
 // ByBill returns the transactions of a bill, the newest date first.

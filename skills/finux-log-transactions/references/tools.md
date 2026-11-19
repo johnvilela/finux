@@ -155,6 +155,7 @@ No arguments.
 | `account` | string | no | Only the transactions of this account or credit card (code or id) |
 | `category` | string | no | Only the transactions of this category (code or id) |
 | `date` | string | no | A year (2026), a month (2026-11 or 11/2026) or a date (2026-11-17) |
+| `goal` | string | no | Only the transactions linked to this goal (code or id) |
 | `limit` | integer | no | Most transactions to return. Default: 100 |
 | `offset` | integer | no | Number of transactions to skip, to read the next page. Default: 0 |
 | `search` | string | no | Only the transactions whose title contains this text |
@@ -171,7 +172,7 @@ No arguments.
 
 ### `transaction_add`
 
-*Change.* Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay.
+*Change.* Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -181,6 +182,7 @@ No arguments.
 | `category` | string | no | Code or id of the category. Necessary, but for a transfer, which has the default XFER |
 | `date` | string | no | YYYY-MM-DD or DD/MM/YYYY. Default: today |
 | `description` | string | no | Description, at most 200 characters |
+| `goal` | string | no | Code or id of the goal the transaction counts toward. The goal must have the currency of the account |
 | `received` | string | no | For a transfer between accounts of different currencies: the amount the other account receives |
 | `tags` | string | no | Tags divided by spaces, for example "market weekly". Use transaction_suggestions to find the tags in use |
 | `to` | string | no | For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer |
@@ -197,6 +199,7 @@ No arguments.
 | `category` | string | no | Code or id of the new category |
 | `date` | string | no | New date, YYYY-MM-DD or DD/MM/YYYY |
 | `description` | string | no | New description, at most 200 characters |
+| `goal` | string | no | Code or id of the new goal. An empty string takes the goal away |
 | `tags` | string | no | New tags; they replace the tags of the transaction. An empty string removes all tags |
 | `title` | string | no | New title, at most 60 characters |
 | `type` | string | no | New type. A transfer keeps its type. One of: `expense`, `income`, `transfer` |
@@ -318,4 +321,154 @@ No arguments.
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `credit_card` | string | yes | Code or id of the credit card |
+| `confirm` | boolean | no | Set to true to delete. Without it the tool only tells what it will delete. |
+
+## Goal
+
+### `goal_list`
+
+*Read.* List the goals with their target, progress and status. The progress comes from the transactions linked to each goal. Status is active, reached or overdue.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `include_archived` | boolean | no | Also return the archived ones |
+
+### `goal_show`
+
+*Read.* Show one goal and the transactions linked to it, the newest first. Each transaction has effect: what it adds to the goal, below zero when it removes. A transfer shows one time.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `goal` | string | yes | Code or id of the goal |
+
+### `goal_add`
+
+*Change.* Create a goal: an amount to save, a debt to pay off or a purchase to save for. Link transactions to it with the argument goal of transaction_add and transaction_edit.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `title` | string | yes | Title of the goal, at most 60 characters |
+| `type` | string | yes | How a linked transaction counts. save and purchase: an income adds and an expense removes. payoff: an expense adds and an income removes. One of: `save`, `payoff`, `purchase` |
+| `target` | string | yes | Amount to reach, as a decimal string, for example "10000" |
+| `currency` | string | yes | Currency of the goal; it cannot change later. Only transactions in this currency can link. One of: `USD`, `EUR`, `BRL`, `BTC` |
+| `code` | string | no | Short code, 1 to 5 letters and digits. Default: made from the title |
+| `description` | string | no | Description, at most 200 characters |
+| `due_date` | string | no | Final date, YYYY-MM-DD or DD/MM/YYYY. Optional |
+
+### `goal_edit`
+
+*Change.* Change a goal. Give only the arguments to change. The currency cannot change.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `goal` | string | yes | Code or id of the goal |
+| `code` | string | no | New code, 1 to 5 letters and digits |
+| `description` | string | no | New description |
+| `due_date` | string | no | New final date, YYYY-MM-DD or DD/MM/YYYY. An empty string removes it |
+| `target` | string | no | New amount to reach, as a decimal string |
+| `title` | string | no | New title |
+| `type` | string | no | New type; the progress is counted again. One of: `save`, `payoff`, `purchase` |
+
+### `goal_archive`
+
+*Change.* Archive a goal: it leaves the lists and takes no new transactions, but its transactions keep the link. goal_restore brings it back.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `goal` | string | yes | Code or id of the goal |
+
+### `goal_restore`
+
+*Change.* Restore an archived goal.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `goal` | string | yes | Code or id of the goal |
+
+### `goal_delete`
+
+*Delete.* Delete a goal permanently. No transaction is deleted: the linked transactions stay and only lose the link. To keep the goal and its links, use goal_archive.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `goal` | string | yes | Code or id of the goal |
+| `confirm` | boolean | no | Set to true to delete. Without it the tool only tells what it will delete. |
+
+## Budget
+
+### `budget_list`
+
+*Read.* List the budgets with their limit, categories, period and status. current is the period of today: what it has available, what it spent and what remains. Status is ok, near (80% spent or more), over, upcoming or ended.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `include_archived` | boolean | no | Also return the archived ones |
+
+### `budget_show`
+
+*Read.* Show one budget with one period, the transactions that count in it, the newest first, and the periods before it. Each transaction has counts: what it adds to the spent amount, below zero for an income. Give date to see the period of a date in the past.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `budget` | string | yes | Code or id of the budget |
+| `date` | string | no | A date in the period to show, YYYY-MM-DD or DD/MM/YYYY. Default: the current period |
+| `history` | integer | no | Number of periods before it to return, the newest first. Default: 6 |
+
+### `budget_add`
+
+*Change.* Create a budget: a limit of money for some categories in a period. Every expense and income of those categories counts on it without a link: an expense adds to the spent amount and an income gives money back. Transfers and payments of credit card bills do not count. Give every for a recurring budget, or end_date for a one-time budget.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `title` | string | yes | Title of the budget, at most 60 characters |
+| `limit` | string | yes | Amount of one period, as a decimal string, for example "800" |
+| `currency` | string | yes | Currency of the budget; it cannot change later. Only transactions in this currency count. One of: `USD`, `EUR`, `BRL`, `BTC` |
+| `categories` | string | no | Codes of the categories that count, for example "FOOD,FUN". Default, or "all": all categories but the income ones |
+| `code` | string | no | Short code, 1 to 5 letters and digits. Default: made from the title |
+| `description` | string | no | Description, at most 200 characters |
+| `end_date` | string | no | Last day of the budget. Optional with every; necessary without it |
+| `every` | string | no | Length of a period of a recurring budget: "day", "week", "month", "year" or a number of them, for example "2 weeks". Without it the budget is for one time and needs end_date |
+| `rollover` | boolean | no | Move what a period did not spend, or spent too much, to the next period. Default: false |
+| `start_date` | string | no | First day of the first period. The periods count from it: a monthly budget that starts on day 5 has periods from day 5 to day 4. Default: the first day of this week, month or year for a period of one of them; today for the others |
+
+### `budget_edit`
+
+*Change.* Change a budget. Give only the arguments to change. The currency cannot change. A change of the limit, the categories or the dates counts all the periods again.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `budget` | string | yes | Code or id of the budget |
+| `categories` | string | no | New codes of the categories that count; they replace the list. "all" counts all categories but the income ones |
+| `code` | string | no | New code, 1 to 5 letters and digits |
+| `description` | string | no | New description |
+| `end_date` | string | no | New last day of the budget. An empty string removes it |
+| `every` | string | no | New length of a period, for example "month" or "2 weeks". "none" makes a one-time budget, which needs an end date |
+| `limit` | string | no | New amount of one period, as a decimal string. It also changes the periods in the past |
+| `rollover` | boolean | no | Start or stop the move of what a period left to the next period |
+| `start_date` | string | no | New first day of the first period |
+| `title` | string | no | New title |
+
+### `budget_archive`
+
+*Change.* Archive a budget: it leaves the lists and gives no warnings, but it keeps its history. budget_restore brings it back.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `budget` | string | yes | Code or id of the budget |
+
+### `budget_restore`
+
+*Change.* Restore an archived budget.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `budget` | string | yes | Code or id of the budget |
+
+### `budget_delete`
+
+*Delete.* Delete a budget permanently. No transaction changes: a budget has no link to its transactions. To keep the budget and its history, use budget_archive.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `budget` | string | yes | Code or id of the budget |
 | `confirm` | boolean | no | Set to true to delete. Without it the tool only tells what it will delete. |

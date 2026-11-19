@@ -14,6 +14,7 @@ import (
 	"finux/src/account"
 	"finux/src/card"
 	"finux/src/category"
+	"finux/src/goal"
 	"finux/src/money"
 	"finux/src/transaction"
 )
@@ -32,13 +33,16 @@ const (
 	TxTo
 	TxReceived
 	TxCategory
+	// TxGoal is the goal the transaction counts toward. The form shows it
+	// only when the user has goals.
+	TxGoal
 	TxDate
 	TxTags
 	TxDescription
 	txFieldCount
 )
 
-var txLabels = [txFieldCount]string{"Type", "Title", "Value", "Account", "To account", "Received", "Category", "Date", "Tags", "Description"}
+var txLabels = [txFieldCount]string{"Type", "Title", "Value", "Account", "To account", "Received", "Category", "Goal", "Date", "Tags", "Description"}
 
 // TransactionFormOptions configures a transaction form.
 type TransactionFormOptions struct {
@@ -58,6 +62,9 @@ type TransactionFormOptions struct {
 	// Cards are the credit cards the user can choose in place of an
 	// account. A card is not for a transfer.
 	Cards []card.Card
+	// Goals are the goals the user can link the transaction to. Give the
+	// active goals and, in an edit, the goal the transaction has.
+	Goals []goal.Goal
 	// Titles and Tags are the values in use. The form suggests them
 	// while the user types.
 	Titles, Tags []string
@@ -88,6 +95,8 @@ type TransactionForm struct {
 	edit       bool
 	accounts   []account.Account
 	categories []category.Category
+	goals      []goal.Goal
+	goalID     uint
 	tags       []string
 	types      []string
 	hidden     [txFieldCount]bool
@@ -115,6 +124,7 @@ func NewTransactionForm(options TransactionFormOptions) TransactionForm {
 	f := TransactionForm{
 		title: title, initial: options.Initial, edit: options.Edit,
 		accounts: slices.Clone(options.Accounts), categories: options.Categories, tags: options.Tags,
+		goals: options.Goals, goalID: options.Initial.GoalID,
 		accountID: options.Initial.AccountID, toID: options.Initial.ToAccountID, categoryID: options.Initial.CategoryID,
 		help: help.New(), width: formWidth,
 	}
@@ -128,6 +138,9 @@ func NewTransactionForm(options TransactionFormOptions) TransactionForm {
 	}
 	for _, field := range options.Preset {
 		f.hidden[field] = true
+	}
+	if len(options.Goals) == 0 {
+		f.hidden[TxGoal] = true
 	}
 	// The types the user can choose. A transfer needs two accounts.
 	switch {
@@ -184,7 +197,7 @@ func (f TransactionForm) Init() tea.Cmd { return textinput.Blink }
 func (f TransactionForm) kindName() string { return f.types[f.kind] }
 
 func (f TransactionForm) isText(field TxField) bool {
-	return field != TxType && field != TxAccount && field != TxTo && field != TxCategory
+	return field != TxType && field != TxAccount && field != TxTo && field != TxCategory && field != TxGoal
 }
 
 // fields returns the fields the form shows now, in order.
@@ -233,6 +246,15 @@ func (f TransactionForm) choices() []category.Category {
 	})
 }
 
+// targets returns the goals the transaction can have: the goals in the
+// currency of its account.
+func (f TransactionForm) targets() []goal.Goal {
+	from, _ := f.accountByID(f.accountID)
+	return slices.DeleteFunc(slices.Clone(f.goals), func(current goal.Goal) bool {
+		return current.Currency != from.Currency
+	})
+}
+
 // twoCurrencies reports whether the form is a new transfer between
 // accounts with different currencies.
 func (f TransactionForm) twoCurrencies() bool {
@@ -265,6 +287,11 @@ func (f *TransactionForm) sync() {
 			f.categoryID = choices[0].ID
 		}
 	}
+	// A goal takes transactions of its currency only. A hidden field
+	// keeps the goal the transaction has.
+	if !f.hidden[TxGoal] && !slices.ContainsFunc(f.targets(), func(current goal.Goal) bool { return current.ID == f.goalID }) {
+		f.goalID = 0
+	}
 	from, _ := f.accountByID(f.accountID)
 	to, _ := f.accountByID(f.toID)
 	f.inputs[TxValue].Placeholder = money.Placeholder(from.Currency)
@@ -289,6 +316,13 @@ func (f TransactionForm) Value(field TxField) string {
 	case TxCategory:
 		for _, current := range f.categories {
 			if current.ID == f.categoryID {
+				return current.Code
+			}
+		}
+		return ""
+	case TxGoal:
+		for _, current := range f.goals {
+			if current.ID == f.goalID {
 				return current.Code
 			}
 		}
@@ -319,6 +353,7 @@ func (f TransactionForm) Draft() transaction.Draft {
 	draft.Description = strings.TrimSpace(f.Value(TxDescription))
 	draft.Type = f.kindName()
 	draft.AccountID, draft.CardID, draft.CategoryID = f.accountID, 0, f.categoryID
+	draft.GoalID = f.goalID
 	if isCard(f.accountID) {
 		draft.AccountID, draft.CardID = 0, f.accountID-cardOffset
 	}
@@ -527,6 +562,15 @@ func (f *TransactionForm) choose(press tea.KeyPressMsg) {
 		if next := cycle(labels, slices.Index(ids, f.categoryID), press); next >= 0 {
 			f.categoryID = ids[next]
 		}
+	case TxGoal:
+		// The first choice is no goal.
+		labels, ids := [][2]string{{"", noGoal}}, []uint{0}
+		for _, current := range f.targets() {
+			labels, ids = append(labels, [2]string{current.Code, current.Title}), append(ids, current.ID)
+		}
+		if next := cycle(labels, slices.Index(ids, f.goalID), press); next >= 0 {
+			f.goalID = ids[next]
+		}
 	}
 	f.sync()
 }
@@ -565,7 +609,7 @@ func cycle(labels [][2]string, index int, press tea.KeyPressMsg) int {
 	for _, part := range []int{0, 1} {
 		for offset := 1; offset <= count; offset++ {
 			candidate := (index + offset) % count
-			if strings.HasPrefix(strings.ToLower(labels[candidate][part]), letter) {
+			if labels[candidate][part] != "" && strings.HasPrefix(strings.ToLower(labels[candidate][part]), letter) {
 				return candidate
 			}
 		}
@@ -661,6 +705,15 @@ func (f TransactionForm) row(field TxField, focused bool) string {
 		current := choices[position]
 		color, _ := category.ColorByKey(current.Color)
 		return label + choice(paint(color.Hex, "●"), current.Code, current.Name, position, len(choices), focused)
+	case TxGoal:
+		targets := f.targets()
+		position := slices.IndexFunc(targets, func(g goal.Goal) bool { return g.ID == f.goalID })
+		if position < 0 {
+			return label + choice(styleDim.Render("○"), "", noGoal, 0, len(targets)+1, focused)
+		}
+		current := targets[position]
+		name := current.Title + " · " + goalTypeLabel(current.Type)
+		return label + choice(paint(colorIncome, "◎"), current.Code, name, position+1, len(targets)+1, focused)
 	case TxDescription:
 		if focused {
 			count := fmt.Sprintf("%d/%d", utf8.RuneCountInString(f.Value(field)), transaction.MaxDescription)
@@ -669,6 +722,9 @@ func (f TransactionForm) row(field TxField, focused bool) string {
 	}
 	return label + f.inputs[field].View()
 }
+
+// noGoal is the choice of the goal field that links no goal.
+const noGoal = "No goal"
 
 // choice shows the current record of a list the user goes through.
 func choice(dot, code, name string, position, count int, focused bool) string {

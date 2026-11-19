@@ -9,6 +9,7 @@ import (
 	"finux/src/account"
 	"finux/src/card"
 	"finux/src/category"
+	"finux/src/goal"
 	"finux/src/storage"
 )
 
@@ -18,6 +19,7 @@ type fixture struct {
 	accounts   *account.Store
 	categories *category.Store
 	cards      *card.Store
+	goals      *goal.Store
 	// ids by code
 	account  map[string]uint
 	category map[string]uint
@@ -27,7 +29,7 @@ type fixture struct {
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "finux.db")
-	if _, err := storage.Init(path, &account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &Transaction{}); err != nil {
+	if _, err := storage.Init(path, &account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &Transaction{}); err != nil {
 		t.Fatal(err)
 	}
 	db, err := storage.Open(path)
@@ -36,7 +38,7 @@ func newFixture(t *testing.T) fixture {
 	}
 	f := fixture{
 		store: NewStore(db), accounts: account.NewStore(db), categories: category.NewStore(db),
-		cards:   card.NewStore(db),
+		cards: card.NewStore(db), goals: goal.NewStore(db),
 		account: map[string]uint{}, category: map[string]uint{}, card: map[string]uint{},
 	}
 	for _, current := range []card.Card{

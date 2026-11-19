@@ -12,6 +12,8 @@ type Filter struct {
 	Title string
 	// Category and Account are codes. Type is a transaction type.
 	Category, Account, Type string
+	// Goal is the code of a goal.
+	Goal string
 	// Tags lists tags the transaction must have, with the # sign.
 	Tags []string
 	// Period is the start of a YYYY-MM-DD date: a year, a month or a day.
@@ -36,6 +38,7 @@ func (f Filter) Match(v View) bool {
 		f.Category != "" && !f.same(v.Category.Code, f.Category),
 		f.Account != "" && !f.same(v.Account.Code, f.Account),
 		f.Type != "" && !f.same(v.Type, f.Type),
+		f.Goal != "" && (v.Goal == nil || !f.same(v.Goal.Code, f.Goal)),
 		!strings.HasPrefix(v.Date, f.Period):
 		return false
 	}
@@ -64,6 +67,9 @@ func (f Filter) String() string {
 	if f.Type != "" {
 		parts = append(parts, "type:"+f.Type)
 	}
+	if f.Goal != "" {
+		parts = append(parts, "goal:"+f.Goal)
+	}
 	if f.Period != "" {
 		parts = append(parts, f.Period)
 	}
@@ -90,6 +96,8 @@ func ParseSearch(text string) Filter {
 			filter.Account = word[1:]
 		case strings.HasPrefix(lower, "cat:"):
 			filter.Category = word[len("cat:"):]
+		case strings.HasPrefix(lower, "goal:"):
+			filter.Goal = word[len("goal:"):]
 		case strings.HasPrefix(lower, "type:"):
 			filter.Type = word[len("type:"):]
 		case partialDate.MatchString(word):

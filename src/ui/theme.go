@@ -64,6 +64,11 @@ func Failure(message string) string {
 	return styleError.Render("✗") + " " + message
 }
 
+// Warning formats the feedback line of something the user must look at.
+func Warning(message string) string {
+	return paint(colorWarning, "!") + " " + message
+}
+
 // Hint formats secondary text.
 func Hint(message string) string {
 	return styleDim.Render(message)

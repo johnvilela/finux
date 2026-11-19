@@ -351,6 +351,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 		if view.Tags != "" {
 			fields = append(fields, [2]string{"Tags", view.Tags})
 		}
+		if view.Goal != nil {
+			fields = append(fields, [2]string{"Goal", view.Goal.Code + "  " + view.Goal.Title})
+		}
 		switch {
 		case view.Type == transaction.Payment && view.Other != nil:
 			fields = append(fields, [2]string{"Payment", "bill " + period + " of " + view.Other.Code + "  " + view.Other.Name})
@@ -425,6 +428,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 	)
 	if view.Tags != "" {
 		lines = append(lines, row("Tags", lipgloss.NewStyle().Foreground(tint).Render(view.Tags)))
+	}
+	if view.Goal != nil {
+		lines = append(lines, row("Goal", paint(colorIncome, "◎")+" "+styleBold.Render(view.Goal.Code)+"  "+view.Goal.Title))
 	}
 	lines = append(lines,
 		"",

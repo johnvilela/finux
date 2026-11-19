@@ -20,9 +20,9 @@ approves a draft before you write.
 
 ### 1. Read the context, one time for each conversation
 
-Call `account_list`, `credit_card_list`, `category_list` and
+Call `account_list`, `credit_card_list`, `category_list`, `goal_list` and
 `transaction_suggestions`. Keep the results: they give the codes, the
-currencies, and the titles and tags the user already uses.
+currencies, the goals, and the titles and tags the user already uses.
 
 ### 2. Make a draft for each transaction
 
@@ -36,6 +36,7 @@ currencies, and the titles and tags the user already uses.
 | `type` | Only for a grey category, or to make the direction clear |
 | `tags` | Only tags the user gives, or tags the same title had before |
 | `description` | Details that do not fit the title. Usually empty |
+| `goal` | Only when the user says the money is for a goal. See below |
 
 **Account or credit card.** Use what the user names ("on the Visa", "from
 Nubank", "cash"). Without a name, look at the last transactions with the
@@ -47,6 +48,14 @@ plausible accounts: a wrong account makes two balances wrong.
 description of a category. Use the category that the same title had
 before. When no category fits, propose `OTHER` and tell the user; do not
 create a category unless the user asks.
+
+**Goal.** Link a transaction to a goal only when the user says so ("for
+the trip", "this goes to the car fund", "toward my loan") or when the
+title had that goal each time before. Do not link the usual expenses of
+a month: in a `save` goal an expense removes progress. The goal must
+have the currency of the account. Money put aside is usually a transfer
+to a savings account; link the transfer. When a goal does not exist yet,
+offer to create it with `goal_add`; do not create it without a yes.
 
 **Special cases:**
 
@@ -89,6 +98,10 @@ at the first error and report it.
 Then report in a few lines: the id of each transaction, and what changed:
 the new balance of the account (`account_show`), or for a credit card the
 bill it went to (`bill` in the result) and the new total of that bill.
+For a transaction with a goal, also report the new progress of the goal
+(`goal_show`). When the result has `budget_warnings`, report the
+`message` of each one: the transaction left a budget near or over its
+limit. Do not link a transaction to a budget: it counts by its category.
 
 ## Corrections
 
@@ -102,5 +115,10 @@ user, and call it again with `confirm: true` only after a yes.
   the purchase in a bill that is already paid. Tell the user. Do not delete
   the payment unless the user asks.
 - `type is necessary: the category X is for all types`: send `type`.
+- `goal CODE is in BRL, not in USD`: the goal takes transactions of its
+  currency only. Record the transaction without the goal and tell the
+  user.
+- `goal CODE is archived`: the goal takes no new transaction. Ask the
+  user before `goal_restore`.
 - `account not found`: the account can be archived. `account_list` with
   `include_archived` shows it.

@@ -49,9 +49,9 @@ func mcpHelp() string {
   --url <url>           For config: the URL of a server that --http started
 
 The server gives an agent the tools of the CLI: accounts, categories,
-transactions, credit cards and the database commands. Each tool returns
-JSON. A tool that deletes data needs the argument confirm: without it, the
-tool tells what it will delete and changes nothing.
+transactions, credit cards, goals, budgets and the database commands. Each
+tool returns JSON. A tool that deletes data needs the argument confirm:
+without it, the tool tells what it will delete and changes nothing.
 
 With --http, the server is one process that many agents can use. Its
 endpoint is http://<address>/mcp. When the ` + mcpTokenVariable + ` environment
@@ -73,6 +73,8 @@ const mcpInstructions = `Finux is a personal finance manager. These tools read a
 - Send a date as YYYY-MM-DD or DD/MM/YYYY. Results give dates as YYYY-MM-DD and bills as YYYY-MM.
 - A transaction is in an account or in a credit card, not in the two. The argument account accepts the code of a credit card.
 - An expense has a negative amount and an income a positive one. A transfer is two transactions, one in each account. Transfers and payments are not in the totals.
+- A goal gets its progress from the transactions linked to it with the argument goal. A transaction has at most one goal, in the currency of the goal. A payment of a credit card bill cannot have a goal.
+- A budget has no link to its transactions: each expense and income of its categories counts by itself, in the currency of the budget, in the period of its date. transaction_add and transaction_edit return budget_warnings when a budget is near or over its limit: tell the user.
 - A tool that deletes data needs confirm: true. Without it, the tool returns confirm_required and a message, and changes nothing. Ask the user before you confirm.
 - If a tool reports that the database is not found or is out of date, call database_init.`
 
