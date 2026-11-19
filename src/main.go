@@ -43,6 +43,10 @@ func run(args []string, io streams) int {
 			return runInit(args[1:], io)
 		case "config":
 			return runConfig(args[1:], io)
+		case "update":
+			return runUpdate(args[1:], io)
+		case "version", "--version":
+			return runVersion(args[1:], io)
 		case "seed", "reseed":
 			// Only a development build has the seed and reseed commands.
 			if devDatabase == "" {
@@ -111,6 +115,6 @@ func welcome() string {
 	}
 	return strings.Join(lines, "\n") + "\n\nYour personal finance manager\n\n" +
 		green.Render("Usage:") + " finux [command]\n\n" +
-		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  goals, gl         Manage goals\n  budgets, bg       Manage budgets\n  scheduled, sc     Manage scheduled transactions\n  resume, rs        Show your financial resume\n  help              Show this help\n\n" +
-		green.Render("Options:") + "\n  -h, --help        Show this help\n"
+		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  goals, gl         Manage goals\n  budgets, bg       Manage budgets\n  scheduled, sc     Manage scheduled transactions\n  resume, rs        Show your financial resume\n  update            Update Finux to the newest version\n  version           Show the version\n  help              Show this help\n\n" +
+		green.Render("Options:") + "\n  -h, --help        Show this help\n      --version     Show the version\n"
 }

@@ -2,6 +2,62 @@
 
 A personal finance manager written in Go, starting with a CLI.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/johnvilela/finux/main/install.sh | sh
+```
+
+The script downloads the newest release for Linux x86-64, checks its SHA-256,
+puts `finux` in `~/.local/bin` and runs `finux init`, which creates the
+database `~/.finux/finux.db`. It needs `curl` or `wget`. When `~/.local/bin`
+is not in your `PATH`, the script tells you the line to add to the file of
+your shell. Then run `finux`.
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `FINUX_VERSION` | Release to install, for example `v0.10.0` | the newest |
+| `FINUX_INSTALL_DIR` | Folder of the binary | `~/.local/bin` |
+| `FINUX_DB` | Database file | `~/.finux/finux.db` |
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/johnvilela/finux/main/install.sh | FINUX_VERSION=v0.10.0 sh
+```
+
+For another system, [build from source](#build-and-run).
+
+### Update
+
+```sh
+finux version          # the version you have
+finux update --check   # tell if a newer version exists
+finux update           # install it
+```
+
+`finux update` asks GitHub for the newest release. When it is newer, Finux
+runs the install script of that release for the folder of your binary. The
+script makes a copy of your database beside it, as
+`finux.db.backup-<date>-<time>`, and the new version then applies its
+database migrations. When that works, the new binary replaces the old one.
+When it fails, the script puts the database back and your version stays.
+Delete the copy when the new version works for you.
+
+To uninstall, delete `~/.local/bin/finux`. Your data is in `~/.finux`.
+
+### Release a version
+
+A version is a Git tag such as `v0.10.0`. When the tag goes to GitHub, the
+workflow `.github/workflows/release.yml` runs the tests, builds the binary
+with that version and makes a release with `finux-linux-amd64` and
+`checksums.txt`:
+
+```sh
+git tag v0.10.1
+git push origin v0.10.1
+```
+
+## Development
+
 Requires Go 1.27.3 or newer and Make. SQLite builds require CGO enabled and a C
 compiler, such as GCC, when the database driver is used.
 
@@ -57,13 +113,18 @@ Commands:
   budgets, bg       Manage budgets
   scheduled, sc     Manage scheduled transactions
   resume, rs        Show your financial resume
+  update            Update Finux to the newest version
+  version           Show the version
   help              Show this help
 
 Options:
   -h, --help        Show this help
+      --version     Show the version
 ```
 
 The executable stays in the project; it is not installed on your PATH.
+`make prod` gives the binary the version of the Git tag, or the last tag
+with the distance to it (`v0.10.0-3-gabc1234`).
 
 Run `./bin/finux help`, `./bin/finux --help`, or `./bin/finux -h` for the same
 screen. Finux prints help and returns to the shell. Unsupported arguments exit

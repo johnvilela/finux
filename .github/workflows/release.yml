@@ -1,0 +1,42 @@
+# Build a release when a version tag is pushed, for example v0.10.0.
+# The install script and 'finux update' download its files.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # An older Ubuntu, so the binary also runs on systems with an older glibc.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          mkdir dist
+          go build -trimpath -ldflags="-s -w -X 'main.version=${GITHUB_REF_NAME}'" -o dist/finux-linux-amd64 ./src
+          cd dist
+          sha256sum finux-linux-amd64 > checksums.txt
+          ./finux-linux-amd64 version
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/finux-linux-amd64 dist/checksums.txt --title "Finux $GITHUB_REF_NAME" --generate-notes

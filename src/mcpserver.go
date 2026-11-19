@@ -18,9 +18,6 @@ import (
 	"finux/src/mcp"
 )
 
-// mcpVersion is the version the MCP server reports to its client.
-const mcpVersion = "0.1.0"
-
 // mcpTokenVariable names the environment variable that holds the bearer
 // token of the HTTP transport.
 const mcpTokenVariable = "FINUX_MCP_TOKEN"
@@ -98,7 +95,7 @@ func runMCP(args []string, io streams) int {
 	// A server that can write also creates the transactions of the
 	// automatic schedules.
 	mcpAutomatic = !readOnly
-	server := &mcp.Server{Name: "finux", Version: mcpVersion, Instructions: mcpInstructions, Tools: mcpTools(readOnly)}
+	server := &mcp.Server{Name: "finux", Version: version, Instructions: mcpInstructions, Tools: mcpTools(readOnly)}
 	switch {
 	case len(positional) == 0 && given["url"]:
 		err = usageError("--url is only for config")
