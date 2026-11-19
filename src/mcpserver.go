@@ -28,13 +28,13 @@ const mcpTokenVariable = "FINUX_MCP_TOKEN"
 // mcpPath is the path of the endpoint of the HTTP transport.
 const mcpPath = "/mcp"
 
-// mcpAgents lists the agents 'finux mcp config' knows.
+// mcpAgents lists the agents 'finux config mcp config' knows.
 var mcpAgents = []string{"claude", "codex", "opencode"}
 
 func mcpHelp() string {
 	return "Run the Finux MCP server for AI agents\n\n" +
-		green.Render("Usage:") + ` finux mcp [--read-only] [--http <address>]
-       finux mcp config <` + strings.Join(mcpAgents, "|") + `> [--read-only] [--url <url>]
+		green.Render("Usage:") + ` finux config mcp [--read-only] [--http <address>]
+       finux config mcp config <` + strings.Join(mcpAgents, "|") + `> [--read-only] [--url <url>]
 
 ` + green.Render("Commands:") + `
   (no command)          Start the server. It talks to the agent through its
@@ -93,7 +93,7 @@ func runMCP(args []string, io streams) int {
 		f.StringVar(&url, "url", "", "")
 	}, 2)
 	if err != nil {
-		return exitStatus(io, "mcp", err)
+		return exitStatus(io, "config mcp", err)
 	}
 	// A server that can write also creates the transactions of the
 	// automatic schedules.
@@ -122,7 +122,7 @@ func runMCP(args []string, io streams) int {
 	if err != nil && !errors.As(err, &usage) {
 		err = fmt.Errorf("mcp: %w", err)
 	}
-	return exitStatus(io, "mcp", err)
+	return exitStatus(io, "config mcp", err)
 }
 
 // serveHTTP serves the HTTP transport on the address until the process
@@ -166,7 +166,7 @@ func serveHTTP(server *mcp.Server, address string, io streams) error {
 
 // mcpConfig returns the instructions to install the server in an agent.
 // Without a URL, the agent starts this binary. With a URL, the agent
-// connects to a server that 'finux mcp --http' started.
+// connects to a server that 'finux config mcp --http' started.
 func mcpConfig(agent string, readOnly bool, url string) (string, error) {
 	if url != "" {
 		return mcpRemoteConfig(agent, url), nil
@@ -175,7 +175,7 @@ func mcpConfig(agent string, readOnly bool, url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("find the finux binary: %w", err)
 	}
-	arguments := []string{"mcp"}
+	arguments := []string{"config", "mcp"}
 	if readOnly {
 		arguments = append(arguments, "--read-only")
 	}
@@ -213,7 +213,7 @@ func mcpConfig(agent string, readOnly bool, url string) (string, error) {
 // HTTP transport. It names the token variable, never the token.
 func mcpRemoteConfig(agent, url string) string {
 	withToken := os.Getenv(mcpTokenVariable) != ""
-	note := "\nThe server must run: start it with 'finux mcp --http <address>'.\n"
+	note := "\nThe server must run: start it with 'finux config mcp --http <address>'.\n"
 	if withToken {
 		note += "The agent reads the token from the " + mcpTokenVariable + " environment variable.\n"
 	}

@@ -15,6 +15,7 @@ import (
 	"finux/src/goal"
 	"finux/src/money"
 	"finux/src/schedule"
+	"finux/src/setting"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -135,6 +136,7 @@ func transactionsReady(db *gorm.DB) bool {
 		migrator.HasTable(&goal.Goal{}) && migrator.HasColumn(&transaction.Transaction{}, "goal_id") &&
 		migrator.HasColumn(&transaction.Transaction{}, "installment_id") &&
 		migrator.HasTable(&schedule.Schedule{}) && migrator.HasColumn(&transaction.Transaction{}, "schedule_id") &&
+		migrator.HasTable(&setting.Setting{}) &&
 		migrator.HasTable(&budget.Budget{}) && migrator.HasTable(&budget.Link{})
 }
 

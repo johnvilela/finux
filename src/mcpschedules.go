@@ -100,7 +100,7 @@ func scheduleTools() []mcp.Tool {
 		Every       *string `json:"every,omitempty" mcp:"Time between two occurrences: day, week, month, year, or a number of them, for example \"2 weeks\". Without it the schedule is for one time"`
 		EndDate     *string `json:"end_date,omitempty" mcp:"With every: the last day an occurrence can have"`
 		Times       *int    `json:"times,omitempty" mcp:"With every: the number of occurrences, from 1 to 1000"`
-		Automatic   *bool   `json:"automatic,omitempty" mcp:"True creates each transaction on its date without a confirmation. Default: false. Set it only when the user asks for it"`
+		Automatic   *bool   `json:"automatic,omitempty" mcp:"True creates each transaction on its date without a confirmation, when the user also turned on the setting automatic-schedules. Default: false. Set it only when the user asks for it"`
 		Tags        *string `json:"tags,omitempty" mcp:"Tags of the transactions, divided by spaces"`
 		Goal        *string `json:"goal,omitempty" mcp:"Code or id of the goal the transactions count toward"`
 		Code        *string `json:"code,omitempty" mcp:"Short code, 1 to 5 letters and digits. Default: made from the title"`

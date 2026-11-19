@@ -11,7 +11,7 @@ import (
 
 func doctorHelp() string {
 	return "Check the Finux setup\n\n" +
-		green.Render("Usage:") + ` finux doctor
+		green.Render("Usage:") + ` finux config doctor
 
 Reports if the database exists and if it has all the database migrations.
 It does not change the database. To correct a problem, run 'finux init'.
@@ -25,7 +25,7 @@ func runDoctor(args []string, io streams) int {
 		if isHelp(args[0]) {
 			return write(io, doctorHelp())
 		}
-		fmt.Fprintf(io.stderr, "finux: doctor: unexpected argument: %s\nRun 'finux doctor --help' for usage.\n", args[0])
+		fmt.Fprintf(io.stderr, "finux: config doctor: unexpected argument: %s\nRun 'finux config doctor --help' for usage.\n", args[0])
 		return 2
 	}
 	report, healthy, err := checkDatabase()

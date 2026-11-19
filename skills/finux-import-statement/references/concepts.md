@@ -323,7 +323,11 @@ transfers.
   creates the transaction of each due occurrence by itself, with the date
   of the occurrence, the next time Finux runs. Never set it without a
   clear request of the user: money must not move in Finux without a
-  confirmation.
+  confirmation. It also needs the setting `automatic-schedules`, which
+  only the user turns on (`finux config set automatic-schedules on`; no
+  tool changes it). While the setting is off, an automatic schedule waits
+  as the others: its occurrences are in `due` and `schedule_pay` confirms
+  them.
 - A change with `schedule_edit` is for the occurrences that wait. A new
   `date` is the date of the next occurrence, and the ones after it count
   from that date.

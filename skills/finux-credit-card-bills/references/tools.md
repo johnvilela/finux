@@ -507,7 +507,7 @@ No arguments.
 | `value` | string | yes | Positive amount in the currency of the account, as a decimal string. The type gives the sign |
 | `account` | string | yes | Code or id of the account or the credit card of the transactions |
 | `category` | string | yes | Code or id of the category |
-| `automatic` | boolean | no | True creates each transaction on its date without a confirmation. Default: false. Set it only when the user asks for it |
+| `automatic` | boolean | no | True creates each transaction on its date without a confirmation, when the user also turned on the setting automatic-schedules. Default: false. Set it only when the user asks for it |
 | `code` | string | no | Short code, 1 to 5 letters and digits. Default: made from the title |
 | `date` | string | no | Date of the first occurrence, YYYY-MM-DD or DD/MM/YYYY. Default: today |
 | `description` | string | no | Description, at most 200 characters |

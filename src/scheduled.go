@@ -16,6 +16,7 @@ import (
 	"finux/src/goal"
 	"finux/src/money"
 	"finux/src/schedule"
+	"finux/src/setting"
 	"finux/src/transaction"
 	"finux/src/ui"
 
@@ -61,7 +62,8 @@ func scheduledHelp() string {
   --until <date>        Last day an occurrence can have. In edit, 'none' removes it
   --times <number>      Number of occurrences. In edit, 'none' removes it
   --auto                Create each transaction on its date, without your
-                        confirmation. In edit, --auto=false stops it
+                        confirmation. It needs the setting automatic-schedules;
+                        see 'finux config'. In edit, --auto=false stops it
 
 ` + green.Render("Options for pay:") + `
   --value <amount>      Real amount, when it is not the amount of the schedule
@@ -87,8 +89,10 @@ tell you when occurrences are due. A budget shows what the schedules of its
 categories still take from the current period.
 
 With --auto, Finux creates the transaction of each due occurrence the next
-time you run a finux command, with the date of the occurrence. Without
---auto, which is the default, nothing becomes a transaction by itself.
+time you run a finux command, with the date of the occurrence. It does this
+only when the setting automatic-schedules is on: 'finux config set
+automatic-schedules on'. The setting is off by default, and without --auto
+nothing becomes a transaction by itself.
 
 The occurrences count from the date of the first one: a monthly schedule
 that starts on 31/01 uses the last day of a shorter month. A change of the
@@ -272,7 +276,10 @@ func (c *scheduledCommand) details(current schedule.Schedule) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ui.ScheduleDetailsView(ui.ScheduleDetails{View: view, Transactions: created, Today: today()}, c.plain), nil
+	return ui.ScheduleDetailsView(ui.ScheduleDetails{
+		View: view, Transactions: created, Today: today(),
+		AutomaticOff: !setting.NewStore(c.db).Enabled(setting.AutomaticSchedules),
+	}, c.plain), nil
 }
 
 func (c *scheduledCommand) list(args []string) error {
@@ -527,7 +534,7 @@ func (c *scheduledCommand) add(args []string) error {
 	if err := c.store.Create(&draft); err != nil {
 		return err
 	}
-	return c.print(ui.Success("Schedule "+draft.Code+" created") + "\n")
+	return c.print(ui.Success("Schedule "+draft.Code+" created") + "\n" + automaticOff(c.db, draft))
 }
 
 func (c *scheduledCommand) edit(args []string) error {
@@ -552,7 +559,7 @@ func (c *scheduledCommand) edit(args []string) error {
 	if err := c.store.Update(&current); err != nil {
 		return err
 	}
-	return c.print(ui.Success("Schedule "+current.Code+" updated") + "\n")
+	return c.print(ui.Success("Schedule "+current.Code+" updated") + "\n" + automaticOff(c.db, current))
 }
 
 // occurrenceDraft returns the transaction of an occurrence of a
@@ -836,11 +843,23 @@ func dueNotice(store *schedule.Store) (string, error) {
 	return ui.Warning(fmt.Sprintf("%d scheduled transactions are due. Run 'finux sc'.", due)) + "\n", nil
 }
 
+// automaticOff returns one line that tells that an automatic schedule
+// waits because the setting is off, or "" when that is not so.
+func automaticOff(db *gorm.DB, current schedule.Schedule) string {
+	if !current.Auto || setting.NewStore(db).Enabled(setting.AutomaticSchedules) {
+		return ""
+	}
+	return ui.Warning(fmt.Sprintf("Automatic schedules are off, so %s waits for your confirmation. Run 'finux config set %s on' to turn them on.", current.Code, setting.AutomaticSchedules)) + "\n"
+}
+
 // runAutomatic creates the transactions of the due occurrences of the
-// schedules that are automatic. It returns one line of feedback for
+// schedules that are automatic, when the setting for them is on. It returns one line of feedback for
 // each transaction, and one for a schedule that failed: its
 // occurrences stay due.
 func runAutomatic(db *gorm.DB) []string {
+	if !setting.NewStore(db).Enabled(setting.AutomaticSchedules) {
+		return nil
+	}
 	store := schedule.NewStore(db)
 	schedules, err := store.List(false)
 	if err != nil {

@@ -139,7 +139,7 @@ func TestScheduledEditDeleteRestore(t *testing.T) {
 	h.ok("sc", "e", "HOME", "--every", "none", "--until", "none")
 	h.has(h.ok("sc", "HOME"), "Repeats     one time\n", "Next        10/01/2027\n")
 	h.ok("sc", "e", "HOME", "--account", "VISA", "--auto")
-	h.has(h.ok("sc", "HOME"), "Card        VISA  Visa Gold\n", "Confirm     automatic\n")
+	h.has(h.ok("sc", "HOME"), "Card        VISA  Visa Gold\n", "Confirm     automatic (off in 'finux config')\n")
 	h.ok("sc", "e", "HOME", "--auto=false")
 	h.has(h.ok("sc", "HOME"), "Confirm     manual\n")
 	h.fail(2, "edit: give --title", "sc", "edit", "HOME")
@@ -172,10 +172,20 @@ func TestScheduledEditDeleteRestore(t *testing.T) {
 
 func TestScheduledAutomatic(t *testing.T) {
 	h := newCardsHome(t)
-	h.ok("sc", "a", "--title", "Internet", "--value", "99,90", "--account", "NU", "--category", "BILLS", "--every", "month", "--date", "10/10/2026", "--auto", "--code", "NET")
+	// The setting is off: a schedule with --auto waits as the others, and
+	// Finux tells how to turn it on.
+	want := "✓ Schedule NET created\n! Automatic schedules are off, so NET waits for your confirmation. Run 'finux config set automatic-schedules on' to turn them on.\n"
+	if got := h.ok("sc", "a", "--title", "Internet", "--value", "99,90", "--account", "NU", "--category", "BILLS", "--every", "month", "--date", "10/10/2026", "--auto", "--code", "NET"); got != want {
+		t.Fatalf("add --auto with the setting off = %q", got)
+	}
+	if got := h.ok("tx"); !strings.HasPrefix(got, "No transactions yet.") || !strings.Contains(got, "! 2 scheduled transactions are due.") {
+		t.Fatalf("an automatic schedule ran with the setting off:\n%s", got)
+	}
+	h.has(h.ok("sc", "NET"), "Confirm     automatic (off in 'finux config')\n", "Status      2 due\n")
+	h.ok("config", "set", "automatic-schedules", "on")
 	// The next command creates the transactions of the automatic schedule
 	// that are due, with their dates, and tells them.
-	want := "✓ Schedule NET paid: transaction 1 created (10/10/2026, -R$ 99,90)\n✓ Schedule NET paid: transaction 2 created (10/11/2026, -R$ 99,90)\n✓ Schedule RENT created\n"
+	want = "✓ Schedule NET paid: transaction 1 created (10/10/2026, -R$ 99,90)\n✓ Schedule NET paid: transaction 2 created (10/11/2026, -R$ 99,90)\n✓ Schedule RENT created\n"
 	if got := h.ok("sc", "a", "--title", "Rent", "--value", "1500", "--account", "NU", "--category", "HOME", "--every", "month", "--date", "05/11/2026", "--code", "RENT"); got != want {
 		t.Fatalf("output of the next command = %q", got)
 	}

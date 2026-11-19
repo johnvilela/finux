@@ -294,7 +294,7 @@ func TestCategoryTable(t *testing.T) {
 	if got := CategoryTable(categories[:1], true); !strings.HasSuffix(got, "\n1 category\n") {
 		t.Fatalf("singular count missing:\n%s", got)
 	}
-	if got := CategoryTable(nil, true); got != "No categories yet. Run 'finux reseed' or 'finux ct add'.\n" {
+	if got := CategoryTable(nil, true); got != "No categories yet. Run 'finux ct add'.\n" {
 		t.Fatalf("empty table = %q", got)
 	}
 }

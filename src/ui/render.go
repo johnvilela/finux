@@ -176,7 +176,7 @@ func styledCard(current account.Account) string {
 // colors and no borders, for pipes and files.
 func CategoryTable(categories []category.Category, plain bool) string {
 	if len(categories) == 0 {
-		return "No categories yet. Run 'finux reseed' or 'finux ct add'.\n"
+		return "No categories yet. Run 'finux ct add'.\n"
 	}
 	headers := []string{"CODE", "NAME", "TYPE"}
 	const typeColumn = 2

@@ -15,12 +15,12 @@ When a tool reports that the database is not found or is out of date, call
 ## 2. CLI
 
 Without the MCP tools, run the `finux` binary in a shell. First run
-`finux doctor`; when it fails, `finux init` creates or updates the
+`finux config doctor`; when it fails, `finux init` creates or updates the
 database.
 
 Tell the user one time that the MCP server gives better results, and how
-to install it: `finux mcp config claude`, `finux mcp config codex` or
-`finux mcp config opencode` prints the steps.
+to install it: `finux config mcp config claude`, `finux config mcp config codex` or
+`finux config mcp config opencode` prints the steps.
 
 Rules for the CLI:
 
@@ -40,8 +40,8 @@ Rules for the CLI:
 | MCP tool | CLI command |
 | --- | --- |
 | `database_init` | `finux init` |
-| `database_doctor` | `finux doctor` |
-| `database_reseed` | `finux reseed` |
+| `database_doctor` | `finux config doctor` |
+| `database_reseed` | No command. Add a base category that is missing with `finux ct add`, for example `finux ct add --name Other --code OTHER --color grey` |
 | `account_list` | `finux ac list [--all]` |
 | `account_show` | `finux ac show <code>` |
 | `account_add` | `finux ac add --name <text> --currency <code> [--code <code>] [--description <text>] [--balance <amount>] [--color <name>]` |

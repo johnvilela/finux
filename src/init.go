@@ -11,6 +11,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/schedule"
+	"finux/src/setting"
 	"finux/src/storage"
 	"finux/src/transaction"
 	"finux/src/ui"
@@ -19,7 +20,7 @@ import (
 )
 
 // models lists the tables that 'finux init' migrates.
-var models = []any{&account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &budget.Budget{}, &budget.Link{}, &schedule.Schedule{}, &transaction.Transaction{}}
+var models = []any{&account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &budget.Budget{}, &budget.Link{}, &schedule.Schedule{}, &transaction.Transaction{}, &setting.Setting{}}
 
 func initHelp() string {
 	return "Set up the Finux database\n\n" +
@@ -28,7 +29,7 @@ func initHelp() string {
 Creates the database file if it does not exist, then applies the database
 migrations. The first setup also adds the base categories. It is safe to
 run again: it keeps your data and does not add base data again. To get
-base data back after you deleted it, run 'finux reseed'.
+a base category back after you deleted it, add it with 'finux ct add'.
 
 The database is the file in the FINUX_DB environment variable. Without
 FINUX_DB, it is ~/.finux/finux.db.

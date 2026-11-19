@@ -708,7 +708,7 @@ func (s *Store) transferCategory() (category.Category, error) {
 	err := s.db.Where("code = ?", category.TransferCode).Take(&found).Error
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		return found, fmt.Errorf("a payment uses the category %s, but it does not exist. Run 'finux reseed' to add it", category.TransferCode)
+		return found, fmt.Errorf("a payment uses the category %s, but it does not exist. Run 'finux ct add --name Transfer --code %s --color grey' to add it", category.TransferCode, category.TransferCode)
 	case err != nil:
 		return found, err
 	case found.Color != "grey":

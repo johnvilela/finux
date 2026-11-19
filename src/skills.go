@@ -24,11 +24,11 @@ var skillFolders = map[string]string{
 
 func skillsHelp() string {
 	return "Install the Finux skills for AI agents\n\n" +
-		green.Render("Usage:") + ` finux skills [list]
-       finux skills install <claude|codex|opencode>
-       finux skills install --dir <folder>
-       finux skills remove <claude|codex|opencode>
-       finux skills remove --dir <folder>
+		green.Render("Usage:") + ` finux config skills [list]
+       finux config skills install <claude|codex|opencode>
+       finux config skills install --dir <folder>
+       finux config skills remove <claude|codex|opencode>
+       finux config skills remove --dir <folder>
 
 ` + green.Render("Commands:") + `
   list, l                      List the skills (default)
@@ -52,7 +52,7 @@ are in the finux binary: install needs no other file.
 Install writes one folder for each skill. Run it again after you update
 Finux: it replaces the Finux skills and keeps all other skills. A skill
 folder that is a link stays as it is. The skills use the MCP server; see
-'finux mcp --help'.
+'finux config mcp --help'.
 `
 }
 
@@ -69,11 +69,11 @@ func runSkills(args []string, io streams) int {
 		}
 		known, ok := handlers[args[0]]
 		if !ok {
-			return exitStatus(io, "skills", usageError("unknown command: "+args[0]))
+			return exitStatus(io, "config skills", usageError("unknown command: "+args[0]))
 		}
 		handler, rest = known, args[1:]
 	}
-	return exitStatus(io, "skills", handler(rest, io))
+	return exitStatus(io, "config skills", handler(rest, io))
 }
 
 // skillList returns the names of the skills in the binary.
@@ -111,7 +111,7 @@ func listSkills(args []string, io streams) error {
 		summary, _, _ := strings.Cut(description, ". ")
 		fmt.Fprintf(&out, "%s\n  %s.\n", name, strings.TrimSuffix(summary, "."))
 	}
-	out.WriteString("\nRun 'finux skills install <claude|codex|opencode>' to install them.\n")
+	out.WriteString("\nRun 'finux config skills install <claude|codex|opencode>' to install them.\n")
 	_, err = fmt.Fprint(io.stdout, out.String())
 	return err
 }

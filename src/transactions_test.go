@@ -377,7 +377,7 @@ func TestDeleteCategoryWithTransactions(t *testing.T) {
 		succeed(t, home, "tx", "d", id, "--yes")
 	}
 	succeed(t, home, "ct", "d", "OTHER", "--yes")
-	fail(t, home, 1, "finux reseed", "ct", "d", "TRANS", "--yes")
-	succeed(t, home, "reseed")
+	fail(t, home, 1, "Run 'finux ct add --name Other --code OTHER --color grey' to add it", "ct", "d", "TRANS", "--yes")
+	succeed(t, home, "ct", "add", "--name", "Other", "--code", "OTHER", "--color", "grey")
 	succeed(t, home, "ct", "d", "TRANS", "--yes")
 }

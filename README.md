@@ -48,8 +48,7 @@ Usage: finux [command]
 
 Commands:
   init              Set up the database
-  doctor            Check the database
-  reseed            Add missing base data
+  config            Change the settings and set up AI agents
   accounts, ac      Manage accounts
   categories, ct    Manage categories
   transactions, tx  Manage transactions
@@ -58,8 +57,6 @@ Commands:
   budgets, bg       Manage budgets
   scheduled, sc     Manage scheduled transactions
   resume, rs        Show your financial resume
-  mcp               Run the MCP server for AI agents
-  skills            Install the skills for AI agents
   help              Show this help
 
 Options:
@@ -132,7 +129,7 @@ environment variable. Without `FINUX_DB`, the path is `~/.finux/finux.db`.
 The development build uses `finux-dev.db` in the project root instead; see
 [Build and run](#build-and-run).
 
-`finux doctor` reports if the database exists and if it has all the migrations.
+`finux config doctor` reports if the database exists and if it has all the migrations.
 It does not change the database. Its exit status is 1 when a check fails:
 
 ```text
@@ -141,15 +138,48 @@ It does not change the database. Its exit status is 1 when a check fails:
 ```
 
 `init` adds the base categories one time only. A base category that you delete
-does not come back on the next `init`. To add the base categories that are
-missing, run:
+does not come back on the next `init`. To get one back, add it again:
 
 ```sh
-./bin/finux reseed
+./bin/finux ct add --name Other --code OTHER --color grey
 ```
 
-`reseed` finds base categories by code and does not change the categories you
-have.
+The development build also has `reseed`, which adds all the base categories
+that are missing. It finds them by code and does not change the categories you
+have:
+
+```sh
+./bin/finux-dev reseed
+```
+
+## Settings
+
+`finux config` opens a screen where you change the settings of Finux: the up
+and down arrows move, the left and right arrows or the space bar change a
+value, Enter saves and Esc leaves without a change. The settings are in the
+database.
+
+| Setting | Values | Meaning |
+| --- | --- | --- |
+| `automatic-schedules` | `off` (default), `on` | On: a schedule with `--auto` creates its transactions on their dates, without your confirmation. Off: no schedule creates a transaction by itself |
+| `ai-provider` | `none` (default), `anthropic`, `openai`, `google`, `ollama` | The AI provider that Finux uses by default |
+
+```sh
+./bin/finux config                              # the settings screen
+./bin/finux config get                          # all settings
+./bin/finux config get ai-provider              # one value
+./bin/finux config set ai-provider anthropic
+./bin/finux config set automatic-schedules on
+```
+
+Without a terminal, `finux config` shows its help. `finux config` also has
+the commands that check Finux and connect it to AI agents:
+
+```text
+finux config doctor     Check the database
+finux config mcp        Run the MCP server for AI agents
+finux config skills     Install the skills for AI agents
+```
 
 ## Accounts
 
@@ -678,8 +708,11 @@ goal. `add` needs `--title`, `--value`, `--account` and `--category`.
   ones, for a bill that changes each month.
 - **Automatic**: with `--auto`, Finux creates the transaction of each due
   occurrence the next time you run a `finux` command, with the date of the
-  occurrence, and tells you. This is off by default: without `--auto` nothing
-  becomes a transaction by itself. `sc edit CODE --auto=false` stops it.
+  occurrence, and tells you. It needs two things: `--auto` on the schedule and
+  the setting `automatic-schedules` on (`finux config set automatic-schedules
+  on`). The two are off by default, so nothing becomes a transaction by
+  itself. `sc edit CODE --auto=false` stops one schedule; the setting stops
+  all of them.
 
 `finux tx` tells you when occurrences are due. `finux resume` lists what is
 due and what comes until the end of the month, and the balance after them.
@@ -714,21 +747,21 @@ These are always as they are today, also with `--month`.
 
 ## MCP server for AI agents
 
-`finux mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+`finux config mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
 server. It gives an AI agent, such as Claude Code, Codex or opencode, the
 features of the CLI as tools. The server uses only the Go standard library,
 and the same database as the CLI.
 
 ### Install
 
-`finux mcp config <agent>` shows the command or the configuration for an
+`finux config mcp config <agent>` shows the command or the configuration for an
 agent, with the path of the binary you ran. It does not change the files of
 the agent.
 
 ```sh
-./bin/finux mcp config claude    # prints a 'claude mcp add' command
-./bin/finux mcp config codex     # prints a block for ~/.codex/config.toml
-./bin/finux mcp config opencode  # prints a block for opencode.json
+./bin/finux config mcp config claude    # prints a 'claude mcp add' command
+./bin/finux config mcp config codex     # prints a block for ~/.codex/config.toml
+./bin/finux config mcp config opencode  # prints a block for opencode.json
 ```
 
 Add `--read-only` to give the agent only the tools that change nothing.
@@ -742,10 +775,10 @@ standard input and output. With `--http`, the server is one process that
 you start, and agents connect to its URL:
 
 ```sh
-./bin/finux mcp --http 127.0.0.1:8765
+./bin/finux config mcp --http 127.0.0.1:8765
 # Finux MCP server listens on http://127.0.0.1:8765/mcp (no token)
 
-./bin/finux mcp config claude --url http://127.0.0.1:8765/mcp
+./bin/finux config mcp config claude --url http://127.0.0.1:8765/mcp
 ```
 
 This is the Streamable HTTP transport of the protocol: the agent sends each
@@ -760,7 +793,7 @@ variable, not the token.
 
 ```sh
 export FINUX_MCP_TOKEN="$(openssl rand -hex 32)"
-./bin/finux mcp --http 0.0.0.0:8765
+./bin/finux config mcp --http 0.0.0.0:8765
 ```
 
 - An address that other computers can reach, such as `0.0.0.0:8765`, is
@@ -818,16 +851,16 @@ A skill that changes data shows a draft and waits for your approval. The
 skills use the MCP tools; without the MCP server they use the `finux`
 CLI. Install the [MCP server](#mcp-server-for-ai-agents) first.
 
-To install the skills, run `finux skills install` with your agent. The
+To install the skills, run `finux config skills install` with your agent. The
 skills are in the binary, so the command needs no other file:
 
 ```sh
-./bin/finux skills                    # list the skills
-./bin/finux skills install claude     # ~/.claude/skills
-./bin/finux skills install codex      # ~/.codex/skills
-./bin/finux skills install opencode   # ~/.config/opencode/skills
-./bin/finux skills install --dir .claude/skills   # a folder you choose
-./bin/finux skills remove claude      # remove them again
+./bin/finux config skills                    # list the skills
+./bin/finux config skills install claude     # ~/.claude/skills
+./bin/finux config skills install codex      # ~/.codex/skills
+./bin/finux config skills install opencode   # ~/.config/opencode/skills
+./bin/finux config skills install --dir .claude/skills   # a folder you choose
+./bin/finux config skills remove claude      # remove them again
 ```
 
 Run `install` again after you update Finux: it replaces the Finux skills

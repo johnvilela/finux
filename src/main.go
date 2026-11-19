@@ -41,15 +41,17 @@ func run(args []string, io streams) int {
 		switch args[0] {
 		case "init":
 			return runInit(args[1:], io)
-		case "doctor":
-			return runDoctor(args[1:], io)
-		case "reseed":
-			return runReseed(args[1:], io)
-		case "seed":
-			// Only a development build has the seed command.
-			if devDatabase != "" {
+		case "config":
+			return runConfig(args[1:], io)
+		case "seed", "reseed":
+			// Only a development build has the seed and reseed commands.
+			if devDatabase == "" {
+				break
+			}
+			if args[0] == "seed" {
 				return runSeed(args[1:], io)
 			}
+			return runReseed(args[1:], io)
 		case "accounts", "ac":
 			return runAccounts(args[1:], io)
 		case "categories", "ct":
@@ -66,10 +68,6 @@ func run(args []string, io streams) int {
 			return runScheduled(args[1:], io)
 		case "resume", "rs":
 			return runResume(args[1:], io)
-		case "mcp":
-			return runMCP(args[1:], io)
-		case "skills":
-			return runSkills(args[1:], io)
 		}
 	}
 	if len(args) > 1 || len(args) == 1 && !isHelp(args[0]) {
@@ -107,12 +105,12 @@ func welcome() string {
 	for i, line := range lines {
 		lines[i] = green.Render(line)
 	}
-	commands := "\n  init              Set up the database\n  doctor            Check the database\n  reseed            Add missing base data\n"
+	commands := "\n  init              Set up the database\n  config            Change the settings and set up AI agents\n"
 	if devDatabase != "" {
-		commands += "  seed              Add sample data to the development database\n"
+		commands += "  seed              Add sample data to the development database\n  reseed            Add missing base data\n"
 	}
 	return strings.Join(lines, "\n") + "\n\nYour personal finance manager\n\n" +
 		green.Render("Usage:") + " finux [command]\n\n" +
-		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  goals, gl         Manage goals\n  budgets, bg       Manage budgets\n  scheduled, sc     Manage scheduled transactions\n  resume, rs        Show your financial resume\n  mcp               Run the MCP server for AI agents\n  skills            Install the skills for AI agents\n  help              Show this help\n\n" +
+		green.Render("Commands:") + commands + "  accounts, ac      Manage accounts\n  categories, ct    Manage categories\n  transactions, tx  Manage transactions\n  credit-card, cc   Manage credit cards\n  goals, gl         Manage goals\n  budgets, bg       Manage budgets\n  scheduled, sc     Manage scheduled transactions\n  resume, rs        Show your financial resume\n  help              Show this help\n\n" +
 		green.Render("Options:") + "\n  -h, --help        Show this help\n"
 }

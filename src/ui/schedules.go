@@ -146,6 +146,9 @@ type ScheduleDetails struct {
 	Transactions []transaction.View
 	// Today is the current date as YYYY-MM-DD.
 	Today string
+	// AutomaticOff tells that the setting for automatic schedules is off:
+	// an automatic schedule then waits as a manual one.
+	AutomaticOff bool
 }
 
 // maxDueShown is the number of due dates that the details list.
@@ -189,7 +192,10 @@ func (d ScheduleDetails) status() string {
 
 // confirm tells how an occurrence becomes a transaction.
 func (d ScheduleDetails) confirm() string {
-	if d.View.Auto {
+	switch {
+	case d.View.Auto && d.AutomaticOff:
+		return "automatic (off in 'finux config')"
+	case d.View.Auto:
 		return "automatic"
 	}
 	return "manual"

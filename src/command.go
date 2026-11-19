@@ -127,7 +127,7 @@ func otherCategory(db *gorm.DB) (category.Category, error) {
 	other, err := category.NewStore(db).Find(category.OtherCode)
 	switch {
 	case errors.Is(err, category.ErrNotFound):
-		return other, fmt.Errorf("the category %s must receive them, but it does not exist. Run 'finux reseed' to add it", category.OtherCode)
+		return other, fmt.Errorf("the category %s must receive them, but it does not exist. Run 'finux ct add --name Other --code %s --color grey' to add it", category.OtherCode, category.OtherCode)
 	case err != nil:
 		return other, err
 	case other.Color != "grey":

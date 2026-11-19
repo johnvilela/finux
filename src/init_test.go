@@ -115,13 +115,34 @@ func TestSetupDatabaseUpgradesOldDatabase(t *testing.T) {
 }
 
 func TestReseedCommand(t *testing.T) {
+	// Only a development build has the reseed command.
 	home := filepath.Join(t.TempDir(), "data")
-	fail(t, home, 1, "Run 'finux init'", "reseed")
-	succeed(t, home, "init")
-	if got := succeed(t, home, "reseed"); got != "✓ Base data is complete\n" {
+	fail(t, home, 2, "unsupported arguments: reseed", "reseed")
+
+	database := filepath.Join(t.TempDir(), "finux-dev.db")
+	binary := devBinary(t, database)
+	reseed := func(args ...string) (stdout, stderr string, status int) {
+		t.Helper()
+		return runBinary(t, binary, nil, append([]string{"reseed"}, args...)...)
+	}
+	ok := func(args ...string) string {
+		t.Helper()
+		stdout, stderr, status := reseed(args...)
+		if status != 0 || stderr != "" {
+			t.Fatalf("finux-dev reseed %v: status %d, stderr %q, stdout %q", args, status, stderr, stdout)
+		}
+		return stdout
+	}
+	if _, stderr, status := reseed(); status != 1 || !strings.Contains(stderr, "Run 'finux init'") {
+		t.Fatalf("reseed without a database: status %d, stderr %q", status, stderr)
+	}
+	if _, stderr, status := runBinary(t, binary, nil, "init"); status != 0 || stderr != "" {
+		t.Fatalf("init: status %d, stderr %q", status, stderr)
+	}
+	if got := ok(); got != "✓ Base data is complete\n" {
 		t.Fatalf("reseed of complete database = %q", got)
 	}
-	db, err := storage.Open(filepath.Join(home, "finux.db"))
+	db, err := storage.Open(database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,23 +156,25 @@ func TestReseedCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := succeed(t, home, "reseed"); got != "✓ Base categories added: 2 (FOOD, TAX)\n" {
+	if got := ok(); got != "✓ Base categories added: 2 (FOOD, TAX)\n" {
 		t.Fatalf("reseed with missing categories = %q", got)
 	}
-	if got := succeed(t, home, "reseed"); got != "✓ Base data is complete\n" {
+	if got := ok(); got != "✓ Base data is complete\n" {
 		t.Fatalf("second reseed = %q", got)
 	}
 
-	want := succeed(t, home, "reseed", "help")
+	want := ok("help")
 	for _, text := range []string{"Usage: finux reseed", "base categories", "finux init"} {
 		if !strings.Contains(want, text) {
 			t.Errorf("reseed help lacks %q:\n%s", text, want)
 		}
 	}
 	for _, flag := range []string{"--help", "-h"} {
-		if got := succeed(t, home, "reseed", flag); got != want {
+		if got := ok(flag); got != want {
 			t.Errorf("finux reseed %s differs from 'finux reseed help'", flag)
 		}
 	}
-	fail(t, home, 2, "unexpected argument: extra", "reseed", "extra")
+	if _, stderr, status := reseed("extra"); status != 2 || !strings.Contains(stderr, "unexpected argument: extra") {
+		t.Fatalf("reseed extra: status %d, stderr %q", status, stderr)
+	}
 }

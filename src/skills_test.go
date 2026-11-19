@@ -9,11 +9,11 @@ import (
 
 func TestSkillsHelpAndList(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
-	if got := succeed(t, home, "skills", "--help"); !strings.Contains(got, "finux skills install") {
+	if got := succeed(t, home, "config", "skills", "--help"); !strings.Contains(got, "finux config skills install") {
 		t.Fatalf("help = %q", got)
 	}
 	// Without a command, skills shows the list.
-	for _, args := range [][]string{{"skills"}, {"skills", "list"}} {
+	for _, args := range [][]string{{"config", "skills"}, {"config", "skills", "list"}} {
 		got := succeed(t, home, args...)
 		for _, name := range skillNames {
 			if !strings.Contains(got, name) {
@@ -25,10 +25,10 @@ func TestSkillsHelpAndList(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{
-		{"skills", "install"}, {"skills", "install", "other"}, {"skills", "remove"}, {"skills", "unknown"},
-		{"skills", "install", "claude", "--dir", "x"}, {"skills", "install", "claude", "extra"},
+		{"config", "skills", "install"}, {"config", "skills", "install", "other"}, {"config", "skills", "remove"}, {"config", "skills", "unknown"},
+		{"config", "skills", "install", "claude", "--dir", "x"}, {"config", "skills", "install", "claude", "extra"},
 	} {
-		if stdout, stderr, status := finux(t, home, args...); status != 2 || stdout != "" || !strings.HasPrefix(stderr, "finux: skills: ") {
+		if stdout, stderr, status := finux(t, home, args...); status != 2 || stdout != "" || !strings.HasPrefix(stderr, "finux: config skills: ") {
 			t.Errorf("finux %v: status %d, stdout %q, stderr %q", args, status, stdout, stderr)
 		}
 	}
@@ -41,7 +41,7 @@ func TestSkillsInstall(t *testing.T) {
 		"codex":    filepath.Join(home, ".codex", "skills"),
 		"opencode": filepath.Join(home, ".config", "opencode", "skills"),
 	} {
-		got := succeed(t, home, "skills", "install", agent)
+		got := succeed(t, home, "config", "skills", "install", agent)
 		if strings.Count(got, " installed") != len(skillNames) || !strings.Contains(got, folder) {
 			t.Fatalf("install %s output:\n%s", agent, got)
 		}
@@ -67,7 +67,7 @@ func TestSkillsInstall(t *testing.T) {
 func TestSkillsUpdateAndRemove(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	folder := filepath.Join(t.TempDir(), "project", ".claude", "skills")
-	succeed(t, home, "skills", "install", "--dir", folder)
+	succeed(t, home, "config", "skills", "install", "--dir", folder)
 
 	// An update replaces changed files and removes old ones. It keeps the
 	// skills of other tools.
@@ -91,7 +91,7 @@ func TestSkillsUpdateAndRemove(t *testing.T) {
 	if err := os.Symlink(target, linked); err != nil {
 		t.Fatal(err)
 	}
-	got := succeed(t, home, "skills", "install", "--dir", folder)
+	got := succeed(t, home, "config", "skills", "install", "--dir", folder)
 	if strings.Count(got, " updated") != len(skillNames)-1 || !strings.Contains(got, "finux-period-review is a link: not changed") {
 		t.Fatalf("update output:\n%s", got)
 	}
@@ -105,7 +105,7 @@ func TestSkillsUpdateAndRemove(t *testing.T) {
 		t.Errorf("update wrote through the link: %v", entries)
 	}
 
-	got = succeed(t, home, "skills", "remove", "--dir", folder)
+	got = succeed(t, home, "config", "skills", "remove", "--dir", folder)
 	if strings.Count(got, " removed") != len(skillNames) {
 		t.Fatalf("remove output:\n%s", got)
 	}
@@ -116,7 +116,7 @@ func TestSkillsUpdateAndRemove(t *testing.T) {
 	if text, _ := os.ReadFile(other); string(text) != "mine" {
 		t.Errorf("remove changed the skill of another tool")
 	}
-	if got := succeed(t, home, "skills", "remove", "--dir", folder); !strings.Contains(got, "No Finux skills in") {
+	if got := succeed(t, home, "config", "skills", "remove", "--dir", folder); !strings.Contains(got, "No Finux skills in") {
 		t.Errorf("second remove = %q", got)
 	}
 }

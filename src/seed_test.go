@@ -65,7 +65,7 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	if got := must(nil, "seed"); got != created {
 		t.Fatalf("first seed = %q, want %q", got, created)
 	}
-	if got := must(nil, "doctor"); got != "✓ Database found: "+database+"\n✓ Migrations up to date\n" {
+	if got := must(nil, "config", "doctor"); got != "✓ Database found: "+database+"\n✓ Migrations up to date\n" {
 		t.Fatalf("doctor in dev build = %q", got)
 	}
 	first := must(nil, "ac", "--all")

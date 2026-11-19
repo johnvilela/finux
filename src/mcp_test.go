@@ -41,7 +41,7 @@ func (h mcpHome) path() string { return filepath.Join(h.home, "finux.db") }
 // serve starts 'finux mcp', sends the requests and returns the responses.
 func (h mcpHome) serve(flags []string, requests ...string) []map[string]any {
 	h.t.Helper()
-	command := exec.Command(finuxBinary(h.t), append([]string{"mcp"}, flags...)...)
+	command := exec.Command(finuxBinary(h.t), append([]string{"config", "mcp"}, flags...)...)
 	command.Env = []string{"FINUX_DB=" + h.path(), "HOME=" + h.home, "FINUX_TODAY=2026-11-17"}
 	command.Stdin = strings.NewReader(strings.Join(requests, "\n") + "\n")
 	var out, errOut bytes.Buffer
@@ -138,27 +138,27 @@ func (h mcpHome) want(result any, want string, path ...any) {
 
 func TestMCPCommand(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "data")
-	if got := succeed(t, home, "mcp", "--help"); !strings.Contains(got, "finux mcp") || !strings.Contains(got, "--read-only") {
+	if got := succeed(t, home, "config", "mcp", "--help"); !strings.Contains(got, "finux config mcp") || !strings.Contains(got, "--read-only") {
 		t.Fatalf("help = %q", got)
 	}
 	binary := finuxBinary(t)
 	for agent, wants := range map[string][]string{
-		"claude":   {"claude mcp add", "finux", binary + " mcp"},
-		"codex":    {"[mcp_servers.finux]", `command = "` + binary + `"`, `args = ["mcp"]`},
-		"opencode": {`"finux"`, `"type": "local"`, `"command": ["` + binary + `", "mcp"]`},
+		"claude":   {"claude mcp add", "finux", binary + " config mcp"},
+		"codex":    {"[mcp_servers.finux]", `command = "` + binary + `"`, `args = ["config", "mcp"]`},
+		"opencode": {`"finux"`, `"type": "local"`, `"command": ["` + binary + `", "config", "mcp"]`},
 	} {
-		got := succeed(t, home, "mcp", "config", agent)
+		got := succeed(t, home, "config", "mcp", "config", agent)
 		for _, want := range wants {
 			if !strings.Contains(got, want) {
 				t.Errorf("config %s lacks %q:\n%s", agent, want, got)
 			}
 		}
 	}
-	if got := succeed(t, home, "mcp", "config", "claude", "--read-only"); !strings.Contains(got, binary+" mcp --read-only") {
+	if got := succeed(t, home, "config", "mcp", "config", "claude", "--read-only"); !strings.Contains(got, binary+" config mcp --read-only") {
 		t.Errorf("read-only config = %q", got)
 	}
-	for _, args := range [][]string{{"mcp", "config", "other"}, {"mcp", "config"}, {"mcp", "extra"}, {"mcp", "--unknown"}} {
-		if stdout, stderr, status := finux(t, home, args...); status != 2 || stdout != "" || !strings.HasPrefix(stderr, "finux: mcp: ") {
+	for _, args := range [][]string{{"config", "mcp", "config", "other"}, {"config", "mcp", "config"}, {"config", "mcp", "extra"}, {"config", "mcp", "--unknown"}} {
+		if stdout, stderr, status := finux(t, home, args...); status != 2 || stdout != "" || !strings.HasPrefix(stderr, "finux: config mcp: ") {
 			t.Errorf("finux %v: status %d, stdout %q, stderr %q", args, status, stdout, stderr)
 		}
 	}
@@ -548,7 +548,7 @@ func TestMCPCreditCards(t *testing.T) {
 // of its endpoint. stop ends the server and returns its exit status.
 func (h mcpHome) startHTTP(env ...string) (endpoint string, stop func() int) {
 	h.t.Helper()
-	command := exec.Command(finuxBinary(h.t), "mcp", "--http", "127.0.0.1:0")
+	command := exec.Command(finuxBinary(h.t), "config", "mcp", "--http", "127.0.0.1:0")
 	command.Env = append([]string{"FINUX_DB=" + h.path(), "HOME=" + h.home, "FINUX_TODAY=2026-11-17"}, env...)
 	stderr, err := command.StderrPipe()
 	if err != nil {
@@ -641,15 +641,15 @@ func TestMCPHTTPOptions(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "data")
 	// An address that other computers reach needs a token.
 	for _, address := range []string{":0", "0.0.0.0:0", "192.168.0.10:8765"} {
-		stdout, stderr, status := finux(t, home, "mcp", "--http", address)
+		stdout, stderr, status := finux(t, home, "config", "mcp", "--http", address)
 		if status != 2 || stdout != "" || !strings.Contains(stderr, "FINUX_MCP_TOKEN") {
 			t.Errorf("--http %s: status %d, stdout %q, stderr %q", address, status, stdout, stderr)
 		}
 	}
-	if _, stderr, status := finux(t, home, "mcp", "--http", "nonsense"); status != 2 || !strings.Contains(stderr, "invalid address") {
+	if _, stderr, status := finux(t, home, "config", "mcp", "--http", "nonsense"); status != 2 || !strings.Contains(stderr, "invalid address") {
 		t.Errorf("--http nonsense: status %d, stderr %q", status, stderr)
 	}
-	if _, stderr, status := finux(t, home, "mcp", "config", "claude", "--http", "127.0.0.1:1"); status != 2 || !strings.Contains(stderr, "--url") {
+	if _, stderr, status := finux(t, home, "config", "mcp", "config", "claude", "--http", "127.0.0.1:1"); status != 2 || !strings.Contains(stderr, "--url") {
 		t.Errorf("config --http: status %d, stderr %q", status, stderr)
 	}
 
@@ -659,8 +659,8 @@ func TestMCPHTTPOptions(t *testing.T) {
 		"codex":    {"[mcp_servers.finux]", `url = "` + url + `"`},
 		"opencode": {`"type": "remote"`, `"url": "` + url + `"`},
 	} {
-		got := succeed(t, home, "mcp", "config", agent, "--url", url)
-		for _, want := range append(wants, "finux mcp --http") {
+		got := succeed(t, home, "config", "mcp", "config", agent, "--url", url)
+		for _, want := range append(wants, "finux config mcp --http") {
 			if !strings.Contains(got, want) {
 				t.Errorf("config %s --url lacks %q:\n%s", agent, want, got)
 			}
@@ -674,7 +674,7 @@ func TestMCPHTTPOptions(t *testing.T) {
 		"codex":    `bearer_token_env_var = "FINUX_MCP_TOKEN"`,
 		"opencode": `"Authorization": "Bearer {env:FINUX_MCP_TOKEN}"`,
 	} {
-		stdout, stderr, status := finuxEnv(t, []string{"HOME=" + home, "FINUX_MCP_TOKEN=secret-token"}, "mcp", "config", agent, "--url", url)
+		stdout, stderr, status := finuxEnv(t, []string{"HOME=" + home, "FINUX_MCP_TOKEN=secret-token"}, "config", "mcp", "config", agent, "--url", url)
 		if status != 0 || stderr != "" || !strings.Contains(stdout, want) || strings.Contains(stdout, "secret-token") {
 			t.Errorf("config %s with token: status %d, stderr %q, stdout:\n%s", agent, status, stderr, stdout)
 		}
@@ -1034,7 +1034,11 @@ func TestMCPSchedules(t *testing.T) {
 	h.fail("schedule not found: NONE", "schedule_show", map[string]any{"schedule": "NONE"})
 
 	// A server that can write creates the transactions of an automatic
-	// schedule that is due.
+	// schedule that is due, when the setting is on.
+	h.ok("schedule_add", map[string]any{"title": "Water", "value": "50", "account": "NU", "category": "BILLS", "every": "month", "date": "2026-11-10", "automatic": true, "code": "WATER"})
+	h.want(h.ok("transaction_list", map[string]any{"search": "Water"}), "0", "total")
+	h.ok("schedule_delete", map[string]any{"schedule": "WATER", "confirm": true})
+	succeed(t, h.home, "config", "set", "automatic-schedules", "on")
 	h.ok("schedule_add", map[string]any{"title": "Internet", "value": "100", "account": "NU", "category": "BILLS", "every": "month", "date": "2026-11-10", "automatic": true, "code": "NET"})
 	transactions := h.ok("transaction_list", map[string]any{"search": "Internet"})
 	h.want(transactions, "1", "total")
@@ -1042,7 +1046,7 @@ func TestMCPSchedules(t *testing.T) {
 
 	h.want(h.ok("schedule_archive", map[string]any{"schedule": "NET"}), "true", "schedule", "archived")
 	h.fail("it is archived", "schedule_pay", map[string]any{"schedule": "NET"})
-	h.want(h.ok("schedule_list", map[string]any{"include_archived": true}), "3", "schedules", 2, "id")
+	h.want(h.ok("schedule_list", map[string]any{"include_archived": true}), "4", "schedules", 2, "id")
 	h.want(h.ok("schedule_restore", map[string]any{"schedule": "NET"}), "false", "schedule", "archived")
 	h.want(h.ok("schedule_delete", map[string]any{"schedule": "NET"}), "true", "confirm_required")
 	h.want(h.ok("schedule_delete", map[string]any{"schedule": "NET", "confirm": true}), "true", "deleted")

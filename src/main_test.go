@@ -23,8 +23,7 @@ Usage: finux [command]
 
 Commands:
   init              Set up the database
-  doctor            Check the database
-  reseed            Add missing base data
+  config            Change the settings and set up AI agents
   accounts, ac      Manage accounts
   categories, ct    Manage categories
   transactions, tx  Manage transactions
@@ -33,8 +32,6 @@ Commands:
   budgets, bg       Manage budgets
   scheduled, sc     Manage scheduled transactions
   resume, rs        Show your financial resume
-  mcp               Run the MCP server for AI agents
-  skills            Install the skills for AI agents
   help              Show this help
 
 Options:
@@ -126,5 +123,63 @@ func TestFinuxCLI(t *testing.T) {
 				t.Fatalf("output = %q, want plain help", output)
 			}
 		})
+	}
+}
+
+func TestConfigCommand(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "data")
+	help := succeed(t, home, "config")
+	for _, want := range []string{"Usage: finux config [command]", "doctor", "Check the database", "mcp", "Run the MCP server for AI agents", "skills", "Install the skills for AI agents"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("config help lacks %q:\n%s", want, help)
+		}
+	}
+	for _, flag := range []string{"help", "--help", "-h"} {
+		if got := succeed(t, home, "config", flag); got != help {
+			t.Errorf("finux config %s differs from 'finux config'", flag)
+		}
+	}
+	fail(t, home, 2, "config: unknown command: other", "config", "other")
+	// The commands of config are not commands of finux any more.
+	for _, old := range []string{"doctor", "mcp", "skills"} {
+		fail(t, home, 2, "unsupported arguments: "+old, old)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("the commands created a database: %v", err)
+	}
+}
+
+func TestConfigSettings(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "data")
+	fail(t, home, 1, "Run 'finux init'", "config", "get")
+	succeed(t, home, "init")
+	// A setting that was never changed has its default value.
+	if got := succeed(t, home, "config", "get"); got != "automatic-schedules  off\nai-provider          none\n" {
+		t.Fatalf("config get = %q", got)
+	}
+	if got := succeed(t, home, "config", "set", "ai-provider", "Anthropic"); got != "✓ ai-provider set to anthropic\n" {
+		t.Fatalf("config set = %q", got)
+	}
+	if got := succeed(t, home, "config", "set", "automatic-schedules", "on"); got != "✓ automatic-schedules set to on\n" {
+		t.Fatalf("config set = %q", got)
+	}
+	if got := succeed(t, home, "config", "get"); got != "automatic-schedules  on\nai-provider          anthropic\n" {
+		t.Fatalf("config get = %q", got)
+	}
+	if got := succeed(t, home, "config", "get", "ai-provider"); got != "anthropic\n" {
+		t.Fatalf("config get ai-provider = %q", got)
+	}
+	fail(t, home, 2, `config: unknown value "skynet" for ai-provider: use one of none, anthropic, openai, google, ollama`, "config", "set", "ai-provider", "skynet")
+	fail(t, home, 2, `config: unknown setting "color": use one of automatic-schedules, ai-provider`, "config", "set", "color", "red")
+	fail(t, home, 2, `config: unknown setting "color"`, "config", "get", "color")
+	fail(t, home, 2, "config: set: give a setting and its value", "config", "set", "ai-provider")
+	fail(t, home, 2, "config: set: unexpected argument: extra", "config", "set", "ai-provider", "none", "extra")
+	fail(t, home, 2, "config: get: unexpected argument: extra", "config", "get", "ai-provider", "extra")
+	// Without a terminal, config shows the help; it names the settings.
+	help := succeed(t, home, "config")
+	for _, want := range []string{"get [setting]", "set <setting> <value>", "automatic-schedules", "off, on", "ai-provider", "none, anthropic, openai, google, ollama", "Without a command"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("config help lacks %q:\n%s", want, help)
+		}
 	}
 }

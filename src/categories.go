@@ -47,8 +47,7 @@ Without options, add and edit open a form.
 Without a code or id, edit and delete open a selector.
 A command name wins over a category code: use 'finux ct show L' for a
 category with the code L.
-'finux init' adds the base categories. 'finux reseed' adds the base
-categories that are missing.
+'finux init' adds the base categories on the first setup.
 The color gives the transactions a category can have: red is for expenses,
 green for incomes and grey for all types. A color that the transactions of
 the category do not accept is refused. When you delete a category, its
@@ -120,7 +119,7 @@ func (c *categoriesCommand) resolve(command, ref, title string) (category.Catego
 		return category.Category{}, err
 	}
 	if len(categories) == 0 {
-		return category.Category{}, notice("No categories yet. Run 'finux reseed' or 'finux ct add'.")
+		return category.Category{}, notice("No categories yet. Run 'finux ct add'.")
 	}
 	index, err := pick(title, "category", "categories", ui.CategoryEntries(categories))
 	if err != nil {
