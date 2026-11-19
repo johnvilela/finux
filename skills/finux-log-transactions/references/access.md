@@ -19,8 +19,8 @@ Without the MCP tools, run the `finux` binary in a shell. First run
 database.
 
 Tell the user one time that the MCP server gives better results, and how
-to install it: `finux config mcp config claude`, `finux config mcp config codex` or
-`finux config mcp config opencode` prints the steps.
+to install it: `finux config ai claude`, `finux config ai codex` or
+`finux config ai opencode` adds the server and the skills in one step.
 
 Rules for the CLI:
 

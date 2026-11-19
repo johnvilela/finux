@@ -111,7 +111,7 @@ func listSkills(args []string, io streams) error {
 		summary, _, _ := strings.Cut(description, ". ")
 		fmt.Fprintf(&out, "%s\n  %s.\n", name, strings.TrimSuffix(summary, "."))
 	}
-	out.WriteString("\nRun 'finux config skills install <claude|codex|opencode>' to install them.\n")
+	out.WriteString("\nRun 'finux config ai <claude|codex|opencode>' to install them and the MCP server.\n")
 	_, err = fmt.Fprint(io.stdout, out.String())
 	return err
 }
@@ -153,9 +153,20 @@ func installSkills(args []string, io streams) error {
 	if err != nil {
 		return err
 	}
-	names, err := skillList()
+	_, report, err := writeSkills(folder)
 	if err != nil {
 		return err
+	}
+	_, err = fmt.Fprint(io.stdout, report+"\nSkills folder: "+folder+"\nStart a new session of the agent to use them.\n")
+	return err
+}
+
+// writeSkills writes the skills of the binary to a skills folder. It
+// returns the number of skills it wrote and one line for each skill.
+func writeSkills(folder string) (written int, report string, err error) {
+	names, err := skillList()
+	if err != nil {
+		return 0, "", err
 	}
 	var out strings.Builder
 	for _, name := range names {
@@ -170,16 +181,15 @@ func installSkills(args []string, io streams) error {
 		}
 		// Start from an empty folder, so that an old file does not stay.
 		if err := os.RemoveAll(target); err != nil {
-			return fmt.Errorf("replace skill %s: %w", name, err)
+			return written, "", fmt.Errorf("replace skill %s: %w", name, err)
 		}
 		if err := copySkill(name, target); err != nil {
-			return fmt.Errorf("write skill %s: %w", name, err)
+			return written, "", fmt.Errorf("write skill %s: %w", name, err)
 		}
+		written++
 		out.WriteString(ui.Success(name+" "+action) + "\n")
 	}
-	out.WriteString("\nSkills folder: " + folder + "\nStart a new session of the agent to use them.\n")
-	_, err = fmt.Fprint(io.stdout, out.String())
-	return err
+	return written, out.String(), nil
 }
 
 // copySkill writes the files of one skill of the binary to target.

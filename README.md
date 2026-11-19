@@ -238,8 +238,9 @@ the commands that check Finux and connect it to AI agents:
 
 ```text
 finux config doctor     Check the database
+finux config ai         Connect Finux to an AI agent: its MCP server and its skills
 finux config mcp        Run the MCP server for AI agents
-finux config skills     Install the skills for AI agents
+finux config skills     List, install or remove the skills for AI agents
 ```
 
 ## Accounts
@@ -805,6 +806,34 @@ to today.
 It also shows the accounts with their balances and a total for each currency,
 the credit card bills to pay, the budgets with a period today and the goals.
 These are always as they are today, also with `--month`.
+
+## AI agents
+
+One command connects Finux to an AI agent:
+
+```sh
+finux config ai claude      # Claude Code
+finux config ai codex       # Codex
+finux config ai opencode    # opencode
+finux config ai             # choose the agent from a list
+```
+
+It does the two steps of the setup: it adds the Finux
+[MCP server](#mcp-server-for-ai-agents) to the agent, and it installs the
+[skills](#skills-for-ai-agents) in the skills folder of the agent. Then start
+a new session of the agent.
+
+- For Claude Code and Codex it runs their own command (`claude mcp add`,
+  `codex mcp add`), so the agent must be installed. For opencode it writes
+  `~/.config/opencode/opencode.json`; it keeps the other values of the file
+  and a copy of the file as it was, `opencode.json.backup`.
+- `--read-only` gives the agent the tools that read your data, not the ones
+  that change it.
+- Run it again after you update Finux or move its binary: it replaces the
+  server and the skills.
+
+The next two sections tell what the two parts are and how to set up each one
+by hand.
 
 ## MCP server for AI agents
 

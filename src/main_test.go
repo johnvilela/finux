@@ -132,7 +132,7 @@ func TestFinuxCLI(t *testing.T) {
 func TestConfigCommand(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "data")
 	help := succeed(t, home, "config")
-	for _, want := range []string{"Usage: finux config [command]", "doctor", "Check the database", "mcp", "Run the MCP server for AI agents", "skills", "Install the skills for AI agents"} {
+	for _, want := range []string{"Usage: finux config [command]", "doctor", "Check the database", "mcp", "Run the MCP server for AI agents", "skills", "List, install or remove the skills for AI agents", "ai [agent]"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("config help lacks %q:\n%s", want, help)
 		}

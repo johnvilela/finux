@@ -21,9 +21,10 @@ func configHelp() string {
 		green.Render("Commands:") + `
   get [setting]          Show the settings, or the value of one setting
   set <setting> <value>  Change a setting
+  ai [agent]             Connect Finux to an AI agent: its MCP server and its skills
   doctor                 Check the database
   mcp                    Run the MCP server for AI agents
-  skills                 Install the skills for AI agents
+  skills                 List, install or remove the skills for AI agents
   help, --help, -h       Show this help
 
 ` + green.Render("Settings:") + "\n" + settings + `
@@ -37,7 +38,7 @@ which is the default, no schedule creates a transaction by itself. See
 
 ai-provider: the AI provider that Finux uses by default.
 
-Run 'finux config <command> --help' for the options of doctor, mcp and skills.
+Run 'finux config <command> --help' for the options of ai, doctor, mcp and skills.
 `
 }
 
@@ -55,6 +56,8 @@ func runConfig(args []string, io streams) int {
 		return exitStatus(io, "config", getSettings(args[1:], io))
 	case "set":
 		return exitStatus(io, "config", setSetting(args[1:], io))
+	case "ai":
+		return runAI(args[1:], io)
 	case "doctor":
 		return runDoctor(args[1:], io)
 	case "mcp":
