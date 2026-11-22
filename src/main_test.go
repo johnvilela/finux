@@ -158,6 +158,7 @@ func TestConfigCommand(t *testing.T) {
 func settingsList(schedules, provider string) string {
 	return "automatic-schedules   " + schedules + "\n" +
 		"ai-provider           " + provider + "\n" +
+		"ai-model              \n" +
 		"telegram-token        (not set)\n" +
 		"telegram-reminders    off\n" +
 		"telegram-resume       off\n" +
@@ -210,7 +211,7 @@ func TestConfigSettings(t *testing.T) {
 		t.Fatalf("config get ai-provider = %q", got)
 	}
 	fail(t, home, 2, `config: unknown value "skynet" for ai-provider: use one of none, claude, codex, opencode`, "config", "set", "ai-provider", "skynet")
-	fail(t, home, 2, `config: unknown setting "color": use one of automatic-schedules, ai-provider, telegram-token`, "config", "set", "color", "red")
+	fail(t, home, 2, `config: unknown setting "color": use one of automatic-schedules, ai-provider, ai-model, telegram-token`, "config", "set", "color", "red")
 	fail(t, home, 2, `config: unknown setting "color"`, "config", "get", "color")
 	fail(t, home, 2, "config: set: give a setting and its value", "config", "set", "ai-provider")
 	fail(t, home, 2, "config: set: unexpected argument: extra", "config", "set", "ai-provider", "none", "extra")

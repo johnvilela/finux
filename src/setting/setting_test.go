@@ -22,7 +22,7 @@ func newStore(t *testing.T) *Store {
 	return NewStore(db)
 }
 
-const allKeys = "automatic-schedules ai-provider telegram-token telegram-reminders telegram-resume telegram-resume-time daemon-mcp"
+const allKeys = "automatic-schedules ai-provider ai-model telegram-token telegram-reminders telegram-resume telegram-resume-time daemon-mcp"
 
 func TestDefinitions(t *testing.T) {
 	definitions := Definitions()
@@ -64,7 +64,7 @@ func TestStore(t *testing.T) {
 		t.Fatal("automatic schedules are on by default")
 	}
 	all, err := store.All()
-	if err != nil || all[AutomaticSchedules] != Off || all[AIProvider] != "none" || len(all) != 7 {
+	if err != nil || all[AutomaticSchedules] != Off || all[AIProvider] != "none" || len(all) != 8 {
 		t.Fatalf("All = %v, %v", all, err)
 	}
 	for input, want := range map[string]string{"on": On, " ON ": On, "true": On, "yes": On, "off": Off, "false": Off, "no": Off} {
@@ -115,6 +115,15 @@ func TestTextSettings(t *testing.T) {
 		if err := store.Set(key, value); err == nil || !strings.HasPrefix(err.Error(), "unknown value") {
 			t.Errorf("Set(%s, %q) = %v, want an unknown value error", key, value, err)
 		}
+	}
+	if err := store.Set(AIModel, "Sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	if value, _ := store.Get(AIModel); value != "Sonnet" {
+		t.Fatalf("model = %q", value)
+	}
+	if err := store.Set(AIModel, "two words"); err == nil {
+		t.Fatal("a model with a space has no error")
 	}
 	// An empty value puts a text setting back to its default.
 	for key, want := range map[string]string{TelegramToken: "", TelegramResumeTime: "08:00", DaemonMCP: ""} {

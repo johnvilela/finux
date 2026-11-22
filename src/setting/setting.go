@@ -22,6 +22,9 @@ const (
 	AutomaticSchedules = "automatic-schedules"
 	// AIProvider is the AI provider that Finux uses by default.
 	AIProvider = "ai-provider"
+	// AIModel is the model that the AI agent uses, or empty for the
+	// model of the agent.
+	AIModel = "ai-model"
 	// TelegramToken is the token of the Telegram bot, from @BotFather.
 	TelegramToken = "telegram-token"
 	// TelegramReminders lets the daemon send reminders in Telegram.
@@ -89,6 +92,13 @@ func checkToken(text string) (string, error) {
 	return text, nil
 }
 
+func checkModel(text string) (string, error) {
+	if strings.ContainsAny(text, " \t\n") || strings.HasPrefix(text, "-") {
+		return "", errors.New("give the name of a model with no spaces, for example sonnet")
+	}
+	return text, nil
+}
+
 func checkTime(text string) (string, error) {
 	parsed, err := time.Parse("15:04", text)
 	if err != nil {
@@ -117,6 +127,10 @@ func Definitions() []Definition {
 		{
 			Key: AIProvider, Title: "AI provider", Values: []string{None, "claude", "codex", "opencode"}, Default: None,
 			Description: "The AI agent program that answers /ai in the Telegram bot. None: /ai is off. 'finux config ai' sets it up.",
+		},
+		{
+			Key: AIModel, Title: "AI model", Check: checkModel,
+			Description: "The model that the AI agent uses for /ai, for example sonnet. Empty: the model of the agent. A smaller model costs less.",
 		},
 		{
 			Key: TelegramToken, Title: "Telegram token", Check: checkToken, Secret: true,
