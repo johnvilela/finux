@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -134,6 +135,9 @@ func (f *fakeTelegram) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"file_id": body.FileID, "file_size": len(content), "file_path": body.FileID}})
+		return
+	case "getMe":
+		io.WriteString(w, `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"Finux","username":"finux_test_bot"}}`)
 		return
 	case "sendChatAction":
 		f.lock.Lock()
@@ -276,12 +280,22 @@ func botHome(t *testing.T) string {
 
 func pre(text string) string { return "<pre>" + text + "</pre>" }
 
+// finux runs a command that talks to Telegram: it uses the fake server.
+func (f *fakeTelegram) finux(home string, args ...string) (stdout, stderr string, status int) {
+	f.t.Helper()
+	return finuxEnv(f.t, []string{"FINUX_DB=" + filepath.Join(home, "finux.db"), "HOME=" + home, "FINUX_TELEGRAM_API=" + f.server.URL}, args...)
+}
+
+// pairingCode finds the code in the answer of the bot to a stranger.
+var pairingCode = regexp.MustCompile(`<code>finux config telegram pair (\d{3}-\d{3})</code>`)
+
 func TestBotRefusesPeopleWhoAreNotAllowed(t *testing.T) {
 	home, f := botHome(t), newFakeTelegram(t)
 	startDaemon(t, home, f)
-	const refusal = "You have no access to this bot. Your Telegram user ID is 7.\n\nThe owner can give you access with:\n<code>finux config telegram allow 7</code>"
-	if got := f.ask(7, "/ac"); got != refusal {
-		t.Fatalf("answer to a stranger = %q", got)
+	refusal := f.ask(7, "/ac")
+	found := pairingCode.FindStringSubmatch(refusal)
+	if found == nil || !strings.HasPrefix(refusal, "You have no access to this bot. Your Telegram user ID is 7.\n\n") || !strings.Contains(refusal, "10 minutes") {
+		t.Fatalf("answer to a stranger = %q", refusal)
 	}
 	// The bot tells it one time, and runs nothing for the person.
 	f.say(7, "/tx add --title Gift --value 10 --account INTER --category OTHER --type expense")
@@ -294,10 +308,61 @@ func TestBotRefusesPeopleWhoAreNotAllowed(t *testing.T) {
 	if got := succeed(t, home, "tx"); !strings.Contains(got, "No transactions yet") {
 		t.Fatalf("a stranger changed the data:\n%s", got)
 	}
-	// Access starts with no restart of the daemon.
-	succeed(t, home, "config", "telegram", "allow", "7")
+	// The owner types the code in the terminal. Access starts with no
+	// restart of the daemon, and the person gets a message.
+	if _, stderr, status := f.finux(home, "config", "telegram", "pair", "000-000"); status != 1 || stderr != "finux: the code is not correct, or it ended\n" {
+		t.Fatalf("pair of a wrong code = %d, %q", status, stderr)
+	}
+	if got, _, _ := f.finux(home, "config", "telegram", "pair", found[1]); got != "✓ 7 (Person) can use the bot\n" {
+		t.Fatalf("pair = %q", got)
+	}
+	if got := f.next(); got.chat != 7 || got.text != "You have access now. Send /help for the commands." {
+		t.Fatalf("message after pair = %+v", got)
+	}
 	if got := f.ask(7, "/version"); !strings.Contains(got, "finux") {
+		t.Fatalf("answer after pair = %q", got)
+	}
+	if _, _, status := f.finux(home, "config", "telegram", "pair", found[1]); status != 1 {
+		t.Fatalf("a code worked two times: status %d", status)
+	}
+	// 'allow' with the user ID works as before.
+	f.ask(8, "hello")
+	succeed(t, home, "config", "telegram", "allow", "8")
+	if got := f.ask(8, "/version"); !strings.Contains(got, "finux") {
 		t.Fatalf("answer after allow = %q", got)
+	}
+}
+
+func TestBotTakesAnInvite(t *testing.T) {
+	home, f := botHome(t), newFakeTelegram(t)
+	startDaemon(t, home, f)
+	invite, stderr, _ := f.finux(home, "config", "telegram", "invite", "My", "wife")
+	found := regexp.MustCompile(`https://t\.me/finux_test_bot\?start=([0-9a-f]+)\n`).FindStringSubmatch(invite)
+	if found == nil || !strings.Contains(invite, "10 minutes") || !strings.Contains(invite, "My wife") {
+		t.Fatalf("invite = %q, stderr %q", invite, stderr)
+	}
+	// A wrong code gives no access: the person is a stranger.
+	if got := f.ask(901, "/start "+found[1]+"0"); !strings.HasPrefix(got, "You have no access to this bot.") {
+		t.Fatalf("answer to a wrong invite = %q", got)
+	}
+	// Telegram sends '/start <code>' when the person opens the link.
+	if got := f.ask(900, "/start "+found[1]); got != "You have access now, My wife. Send /help for the commands." {
+		t.Fatalf("answer to an invite = %q", got)
+	}
+	if got := f.ask(900, "/version"); !strings.Contains(got, "finux") {
+		t.Fatalf("answer after the invite = %q", got)
+	}
+	if got := succeed(t, home, "config", "telegram"); !strings.Contains(got, "900  My wife\n") {
+		t.Fatalf("config telegram = %q", got)
+	}
+	// An invite works one time.
+	if got := f.ask(902, "/start "+found[1]); !strings.HasPrefix(got, "You have no access to this bot.") {
+		t.Fatalf("answer to a used invite = %q", got)
+	}
+	// An invite needs the token, to know the name of the bot.
+	succeed(t, home, "config", "telegram", "token", "")
+	if _, stderr, status := f.finux(home, "config", "telegram", "invite"); status != 1 || stderr != "finux: the token is not set. Run 'finux config telegram token <token>'\n" {
+		t.Fatalf("invite with no token = %d, %q", status, stderr)
 	}
 }
 

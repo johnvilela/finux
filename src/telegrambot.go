@@ -27,7 +27,8 @@ const (
 	// botRetry is the wait after a failed request for updates.
 	botRetry = 5 * time.Second
 
-	botSorry = "Sorry, I did not understand. Send /help for the commands."
+	botWelcome = "You have access now. Send /help for the commands."
+	botSorry   = "Sorry, I did not understand. Send /help for the commands."
 )
 
 // botCommands are the commands of the command line that the bot runs,
@@ -114,10 +115,8 @@ type bot struct {
 	client *telegram.Client
 	// lock is held while the bot uses the database: the jobs of the
 	// daemon use the same database.
-	lock *sync.Mutex
-	log  func(format string, values ...any)
-	// refused has the people who got the message of no access.
-	refused   map[int64]bool
+	lock      *sync.Mutex
+	log       func(format string, values ...any)
 	questions map[string]question
 	// wizards has the guide in progress of each chat.
 	wizards map[int64]*wizard
@@ -134,7 +133,7 @@ type bot struct {
 func newBot(token string, lock *sync.Mutex, log func(string, ...any)) *bot {
 	return &bot{
 		client: telegram.NewClient(token), lock: lock, log: log,
-		refused: map[int64]bool{}, questions: map[string]question{}, wizards: map[int64]*wizard{},
+		questions: map[string]question{}, wizards: map[int64]*wizard{},
 		kept: map[int64][]string{}, runs: map[int64]*aiRun{},
 	}
 }
@@ -196,6 +195,51 @@ func (b *bot) allowed(user int64) bool {
 	return store.Allowed(user)
 }
 
+// stranger answers a person who is not allowed. The link of an invite
+// lets the person in. Without it, the person gets a code for the owner
+// to type in the terminal: the bot tells it one time while it works.
+func (b *bot) stranger(ctx context.Context, message *telegram.Message) {
+	user, chat := message.From.ID, message.Chat.ID
+	command, code, _ := strings.Cut(strings.TrimSpace(message.Text), " ")
+	var (
+		joined telegram.User
+		fresh  bool
+		err    error
+	)
+	func() {
+		b.lock.Lock()
+		defer b.lock.Unlock()
+		db, store, failure := openTelegram()
+		if err = failure; err != nil {
+			return
+		}
+		defer closeDatabase(db)
+		// Telegram sends '/start <code>' when a person opens the link.
+		if command == "/start" && code != "" {
+			if joined, err = store.Accept(code, user, message.From.FirstName, time.Now()); err == nil || !errors.Is(err, telegram.ErrNoCode) {
+				return
+			}
+		}
+		code, fresh, err = store.Request(user, message.From.FirstName, time.Now())
+	}()
+	switch {
+	case err != nil:
+		b.log("Telegram: a message from %d, who is not allowed: %v", user, err)
+	case joined.ID != 0:
+		b.log("Telegram: %d got access with an invite", user)
+		welcome := "You have access now"
+		if joined.Name != "" {
+			welcome += ", " + html.EscapeString(joined.Name)
+		}
+		b.send(ctx, chat, welcome+". Send /help for the commands.")
+	case fresh:
+		b.log("Telegram: a message from %d, who is not allowed", user)
+		code = code[:3] + "-" + code[3:]
+		b.send(ctx, chat, fmt.Sprintf("You have no access to this bot. Your Telegram user ID is %d.\n\nThe owner can give you access in the terminal with this code, in the next %d minutes:\n<code>finux config telegram pair %s</code>",
+			user, int(telegram.PairingTime.Minutes()), code))
+	}
+}
+
 // send sends a text in the HTML of Telegram.
 func (b *bot) send(ctx context.Context, chat int64, text string, keyboard ...[]telegram.Button) {
 	if err := b.client.SendMessage(ctx, chat, text, keyboard); err != nil && !errors.Is(err, context.Canceled) {
@@ -233,14 +277,9 @@ func (b *bot) message(ctx context.Context, message *telegram.Message) {
 	}
 	user, chat := message.From.ID, message.Chat.ID
 	if !b.allowed(user) {
-		if !b.refused[user] {
-			b.refused[user] = true
-			b.log("Telegram: a message from %d, who is not allowed", user)
-			b.send(ctx, chat, fmt.Sprintf("You have no access to this bot. Your Telegram user ID is %d.\n\nThe owner can give you access with:\n<code>finux config telegram allow %d</code>", user, user))
-		}
+		b.stranger(ctx, message)
 		return
 	}
-	delete(b.refused, user)
 	text := strings.TrimSpace(message.Text)
 	if file, has := message.File(); has {
 		b.receive(ctx, message, file, strings.TrimSpace(message.Caption))

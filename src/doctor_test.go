@@ -27,7 +27,7 @@ func TestDoctor(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, stderr, status = finux(t, home, "config", "doctor")
-	want = "✓ Database found: " + database + "\n✗ Migrations pending: table accounts, table categories, table cards, table bills, table goals, table budgets, table budget_categories, table schedules, table transactions, table settings, table telegram_users, table telegram_notices, table telegram_sessions\n  Run 'finux init' to apply them.\n"
+	want = "✓ Database found: " + database + "\n✗ Migrations pending: table accounts, table categories, table cards, table bills, table goals, table budgets, table budget_categories, table schedules, table transactions, table settings, table telegram_users, table telegram_notices, table telegram_sessions, table telegram_pairings\n  Run 'finux init' to apply them.\n"
 	if status != 1 || stderr != "" || stdout != want {
 		t.Fatalf("doctor with old database: status %d, stderr %q, stdout %q; want %q", status, stderr, stdout, want)
 	}

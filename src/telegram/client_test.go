@@ -215,3 +215,14 @@ func TestSendTextAndAction(t *testing.T) {
 		t.Fatalf("SendAction = %+v", got[1])
 	}
 }
+
+func TestGetMe(t *testing.T) {
+	client, calls := fakeAPI(t, map[string]string{"getMe": `{"ok":true,"result":{"id":5,"is_bot":true,"first_name":"Finux","username":"my_finux_bot"}}`})
+	me, err := client.GetMe(context.Background())
+	if err != nil || me.Username != "my_finux_bot" || me.ID != 5 {
+		t.Fatalf("GetMe = %+v, %v", me, err)
+	}
+	if got := *calls; len(got) != 1 || got[0].method != "getMe" {
+		t.Fatalf("calls = %+v", got)
+	}
+}

@@ -13,7 +13,7 @@ func TestConfigTelegram(t *testing.T) {
 	fail(t, home, 1, "Run 'finux init'", "config", "telegram")
 	succeed(t, home, "init")
 	const empty = "Token    not set. Run 'finux config telegram token <token>'.\n" +
-		"Allowed  nobody. Run 'finux config telegram allow <user-id> [name]'.\n"
+		"Allowed  nobody. Run 'finux config telegram invite [name]'.\n"
 	if got := succeed(t, home, "config", "telegram"); got != empty {
 		t.Fatalf("config telegram = %q", got)
 	}
@@ -26,6 +26,8 @@ func TestConfigTelegram(t *testing.T) {
 	if got := succeed(t, home, "config", "telegram", "allow", "42"); got != "✓ 42 can use the bot\n" {
 		t.Fatalf("allow without name = %q", got)
 	}
+	// A code comes from the bot: see TestBotRefusesPeopleWhoAreNotAllowed.
+	fail(t, home, 2, "config telegram: pair: give the code that the bot showed", "config", "telegram", "pair")
 	const list = "Token    set\n" +
 		"Allowed  42\n" +
 		"         900  My wife\n"

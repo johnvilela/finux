@@ -11,7 +11,7 @@ import (
 func newStore(t *testing.T) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "finux.db")
-	if _, err := storage.Init(path, &User{}, &Notice{}, &Session{}); err != nil {
+	if _, err := storage.Init(path, &User{}, &Notice{}, &Session{}, &Pairing{}); err != nil {
 		t.Fatal(err)
 	}
 	db, err := storage.Open(path)

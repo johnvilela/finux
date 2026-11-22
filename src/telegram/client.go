@@ -221,6 +221,13 @@ func (c *Client) AnswerCallback(ctx context.Context, id string) error {
 	return c.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id}, nil)
 }
 
+// GetMe returns the account of the bot. Its Username makes the link to
+// the bot: https://t.me/<username>.
+func (c *Client) GetMe(ctx context.Context) (Person, error) {
+	var me Person
+	return me, c.call(ctx, "getMe", map[string]any{}, &me)
+}
+
 // SetCommands sets the menu of commands of the bot.
 func (c *Client) SetCommands(ctx context.Context, commands []Command) error {
 	return c.call(ctx, "setMyCommands", map[string]any{"commands": commands}, nil)

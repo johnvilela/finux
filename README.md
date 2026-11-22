@@ -848,15 +848,34 @@ the [daemon](#daemon). Telegram is the only service it talks to.
    finux daemon install        # or 'finux daemon run' in a terminal
    ```
 
-3. Send a message to your bot. It answers with your Telegram user ID, a
-   number. The bot does nothing more for a person who is not allowed.
-4. Allow each person with the user ID that the bot showed:
+3. Let each person in. The easy way is an invite:
 
    ```sh
-   finux config telegram allow 123456 Me
-   finux config telegram allow 654321 My wife
+   finux config telegram invite My wife
+   ```
+
+   It prints a link to your bot. Send the link to the person, or open it
+   yourself. The person presses Start in Telegram and has access.
+
+   The other way starts in Telegram: the person sends a message to the bot,
+   and the bot answers with a code. Type the code in the terminal:
+
+   ```sh
+   finux config telegram pair 482-177          # the name comes from Telegram
+   finux config telegram pair 482-177 My wife  # or give the name
+   ```
+
+   A link and a code work one time and for 10 minutes. The bot tells its
+   code one time while the code works. Each of the two ways needs a command
+   in the terminal, so a person who finds your bot cannot get access alone.
+   The bot does nothing more for a person who is not allowed.
+
+4. See and change the allowed people:
+
+   ```sh
    finux config telegram                  # the token state and the allowed people
    finux config telegram deny 654321
+   finux config telegram allow 123456 Me  # with the user ID, which the bot also shows
    ```
 
 The `FINUX_TELEGRAM_TOKEN` environment variable replaces the saved token. A
