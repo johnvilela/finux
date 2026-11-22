@@ -149,6 +149,7 @@ func runScheduled(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "scheduled", err)
 	}
+	defer closeDatabase(db)
 	command.db, command.store, command.tx = db, schedule.NewStore(db), newTransactionsCommand(db)
 	return exitStatus(io, "scheduled", handler(rest))
 }

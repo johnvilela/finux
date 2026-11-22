@@ -110,6 +110,7 @@ func runGoals(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "goals", err)
 	}
+	defer closeDatabase(db)
 	command.db, command.store = db, goal.NewStore(db)
 	return exitStatus(io, "goals", handler(rest))
 }

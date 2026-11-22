@@ -130,6 +130,7 @@ func runBudgets(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "budgets", err)
 	}
+	defer closeDatabase(db)
 	command.db, command.store = db, budget.NewStore(db)
 	return exitStatus(io, "budgets", handler(rest))
 }

@@ -91,6 +91,7 @@ func runCategories(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "categories", err)
 	}
+	defer closeDatabase(db)
 	announceAutomatic(db, io)
 	command.db, command.store = db, category.NewStore(db)
 	return exitStatus(io, "categories", handler(rest))

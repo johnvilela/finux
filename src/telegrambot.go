@@ -1,0 +1,291 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"html"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/charmbracelet/colorprofile"
+
+	"finux/src/telegram"
+)
+
+const (
+	// botChunk is the size limit of one message of the bot in characters,
+	// before the HTML marks. It leaves room below the limit of Telegram.
+	botChunk = 3500
+	// botMemory is how long the bot keeps a question without an answer.
+	botMemory = 10 * time.Minute
+	// botRetry is the wait after a failed request for updates.
+	botRetry = 5 * time.Second
+
+	botSorry = "Sorry, I did not understand. Send /help for the commands."
+)
+
+// botCommands are the commands of the command line that the bot runs,
+// by the name of the Telegram command. Telegram permits no dash in a
+// command, so credit_card is credit-card.
+var botCommands = map[string]string{
+	"accounts": "accounts", "ac": "accounts",
+	"categories": "categories", "ct": "categories",
+	"transactions": "transactions", "tx": "transactions",
+	"credit_card": "credit-card", "credit_cards": "credit-card", "cc": "credit-card",
+	"goals": "goals", "goal": "goals", "gl": "goals",
+	"budgets": "budgets", "budget": "budgets", "bg": "budgets",
+	"scheduled": "scheduled", "schedule": "scheduled", "sc": "scheduled",
+	"resume": "resume", "rs": "resume",
+	"version": "version",
+}
+
+// botRefused are the commands that only the terminal has.
+var botRefused = []string{"config", "init", "update", "daemon", "seed", "reseed"}
+
+// botMenu is the menu of commands that Telegram shows.
+var botMenu = []telegram.Command{
+	{Name: "rs", Description: "Resume of the month"},
+	{Name: "tx", Description: "Transactions"},
+	{Name: "ac", Description: "Accounts"},
+	{Name: "cc", Description: "Credit cards and bills"},
+	{Name: "sc", Description: "Scheduled transactions"},
+	{Name: "bg", Description: "Budgets"},
+	{Name: "gl", Description: "Goals"},
+	{Name: "ct", Description: "Categories"},
+	{Name: "help", Description: "Show the commands"},
+	{Name: "cancel", Description: "Stop the current question"},
+}
+
+func botHelp() string {
+	return `<b>Finux</b>
+
+/rs  Resume of the month
+/tx  Transactions
+/ac  Accounts
+/cc  Credit cards and bills
+/sc  Scheduled transactions
+/bg  Budgets
+/gl  Goals
+/ct  Categories
+/cancel  Stop the current question
+
+The commands are the same as in the terminal, without the word finux:
+
+<code>/tx add --title Lunch --value 45 --account NU --category FOOD</code>
+<code>/tx --date 11/2026</code>
+<code>/cc bills VISA</code>
+
+Send a command with <code>--help</code> for its options, for example <code>/tx --help</code>.
+Send <code>/tx add</code> with no options and I ask for each value.`
+}
+
+// question is a command that waits for the press of a button.
+type question struct {
+	user    int64
+	args    []string
+	text    string
+	expires time.Time
+}
+
+// bot answers the messages of the Telegram bot.
+type bot struct {
+	client *telegram.Client
+	// lock is held while the bot uses the database: the jobs of the
+	// daemon use the same database.
+	lock *sync.Mutex
+	log  func(format string, values ...any)
+	// refused has the people who got the message of no access.
+	refused   map[int64]bool
+	questions map[string]question
+	serial    int
+}
+
+func newBot(token string, lock *sync.Mutex, log func(string, ...any)) *bot {
+	return &bot{
+		client: telegram.NewClient(token), lock: lock, log: log,
+		refused: map[int64]bool{}, questions: map[string]question{},
+	}
+}
+
+// poll gets the updates of the bot and answers them, until ctx ends.
+func (b *bot) poll(ctx context.Context) {
+	if err := b.client.SetCommands(ctx, botMenu); err != nil && ctx.Err() == nil {
+		b.log("Telegram: set the menu of commands: %v", err)
+	}
+	var offset int64
+	last := ""
+	for ctx.Err() == nil {
+		updates, err := b.client.GetUpdates(ctx, offset)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			// The same error again and again is one line in the log.
+			if err.Error() != last {
+				last = err.Error()
+				b.log("Telegram: get updates: %v", err)
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(botRetry):
+			}
+			continue
+		}
+		last = ""
+		for _, update := range updates {
+			offset = update.ID + 1
+			switch {
+			case update.Message != nil:
+				b.message(ctx, update.Message)
+			case update.Callback != nil:
+				b.callback(ctx, update.Callback)
+			}
+		}
+	}
+}
+
+// allowed reports whether the person can use the bot. It reads the
+// database each time, so a change of the list needs no restart.
+func (b *bot) allowed(user int64) bool {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	db, store, err := openTelegram()
+	if err != nil {
+		b.log("Telegram: read the allowed people: %v", err)
+		return false
+	}
+	defer closeDatabase(db)
+	return store.Allowed(user)
+}
+
+// send sends a text in the HTML of Telegram.
+func (b *bot) send(ctx context.Context, chat int64, text string, keyboard ...[]telegram.Button) {
+	if err := b.client.SendMessage(ctx, chat, text, keyboard); err != nil && !errors.Is(err, context.Canceled) {
+		b.log("Telegram: send a message to %d: %v", chat, err)
+	}
+}
+
+// reply sends the output of a command, as text with a fixed width so
+// the columns of a table stay in line.
+func (b *bot) reply(ctx context.Context, chat int64, output string) {
+	parts := chunks(output, botChunk)
+	if len(parts) == 0 {
+		parts = []string{"Done."}
+	}
+	for _, part := range parts {
+		b.send(ctx, chat, "<pre>"+html.EscapeString(part)+"</pre>")
+	}
+}
+
+// execute runs a command of the command line and returns its output,
+// without colors, and its exit status.
+func (b *bot) execute(args []string) (string, int) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	var output bytes.Buffer
+	plain := &colorprofile.Writer{Forward: &output, Profile: colorprofile.NoTTY}
+	status := run(args, streams{stdout: plain, stderr: plain, plain: true})
+	// The command line tells about a terminal. A chat has none.
+	return strings.ReplaceAll(output.String(), " when input is not a terminal", ""), status
+}
+
+func (b *bot) message(ctx context.Context, message *telegram.Message) {
+	if message.From == nil || message.Chat.Type != "private" {
+		return
+	}
+	user, chat := message.From.ID, message.Chat.ID
+	if !b.allowed(user) {
+		if !b.refused[user] {
+			b.refused[user] = true
+			b.log("Telegram: a message from %d, who is not allowed", user)
+			b.send(ctx, chat, fmt.Sprintf("You have no access to this bot. Your Telegram user ID is %d.\n\nThe owner can give you access with:\n<code>finux config telegram allow %d</code>", user, user))
+		}
+		return
+	}
+	delete(b.refused, user)
+	text := strings.TrimSpace(message.Text)
+	if !strings.HasPrefix(text, "/") {
+		b.send(ctx, chat, botSorry)
+		return
+	}
+	args, err := splitArgs(text)
+	if err != nil {
+		b.send(ctx, chat, "A quote in the message has no end.")
+		return
+	}
+	// In a chat with more bots, Telegram adds the name: /tx@finux_bot.
+	name, _, _ := strings.Cut(strings.ToLower(strings.TrimPrefix(args[0], "/")), "@")
+	switch {
+	case name == "help" || name == "start":
+		b.send(ctx, chat, botHelp())
+	case name == "cancel":
+		b.send(ctx, chat, "There is nothing to cancel.")
+	case slices.Contains(botRefused, name):
+		b.send(ctx, chat, fmt.Sprintf("The command /%s is not available in Telegram. Use it in the terminal.", name))
+	case botCommands[name] != "":
+		b.command(ctx, user, chat, append([]string{botCommands[name]}, args[1:]...), text)
+	default:
+		b.send(ctx, chat, botSorry)
+	}
+}
+
+// command runs a command and sends its output. A command that deletes
+// data asks first, with buttons.
+func (b *bot) command(ctx context.Context, user, chat int64, args []string, text string) {
+	output, status := b.execute(args)
+	if status == 2 && strings.Contains(output, "--yes is necessary") {
+		key := b.ask(question{user: user, args: append(args, "--yes"), text: text})
+		b.send(ctx, chat, "This deletes data and you cannot get it back:\n<code>"+html.EscapeString(text)+"</code>",
+			[]telegram.Button{{Text: "Confirm", Data: "yes:" + key}, {Text: "Cancel", Data: "no:" + key}})
+		return
+	}
+	b.reply(ctx, chat, output)
+}
+
+// ask keeps a question and returns its key, for the data of the buttons.
+func (b *bot) ask(asked question) string {
+	now := time.Now()
+	for key, old := range b.questions {
+		if now.After(old.expires) {
+			delete(b.questions, key)
+		}
+	}
+	b.serial++
+	key := strconv.Itoa(b.serial)
+	asked.expires = now.Add(botMemory)
+	b.questions[key] = asked
+	return key
+}
+
+func (b *bot) callback(ctx context.Context, press *telegram.Callback) {
+	if err := b.client.AnswerCallback(ctx, press.ID); err != nil && !errors.Is(err, context.Canceled) {
+		b.log("Telegram: answer a button: %v", err)
+	}
+	if press.Message == nil || press.Message.Chat.Type != "private" || !b.allowed(press.From.ID) {
+		return
+	}
+	answer, key, _ := strings.Cut(press.Data, ":")
+	asked, known := b.questions[key]
+	if !known || asked.user != press.From.ID || time.Now().After(asked.expires) {
+		return
+	}
+	delete(b.questions, key)
+	chat, command := press.Message.Chat.ID, "<code>"+html.EscapeString(asked.text)+"</code>"
+	edit := func(text string) {
+		if err := b.client.EditMessage(ctx, chat, press.Message.ID, text, nil); err != nil && !errors.Is(err, context.Canceled) {
+			b.log("Telegram: change a message: %v", err)
+		}
+	}
+	if answer != "yes" {
+		edit("Cancelled:\n" + command)
+		return
+	}
+	edit("Confirmed:\n" + command)
+	output, _ := b.execute(asked.args)
+	b.reply(ctx, chat, output)
+}

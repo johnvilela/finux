@@ -132,6 +132,7 @@ func runCreditCards(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "credit-card", err)
 	}
+	defer closeDatabase(db)
 	command.db, command.store, command.transactions = db, card.NewStore(db), transaction.NewStore(db)
 	return exitStatus(io, "credit-card", handler(rest))
 }

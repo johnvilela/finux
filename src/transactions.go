@@ -170,6 +170,7 @@ func runTransactions(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "transactions", err)
 	}
+	defer closeDatabase(db)
 	command.store, command.accounts, command.categories = transaction.NewStore(db), account.NewStore(db), category.NewStore(db)
 	command.cards, command.goals, command.budgets = card.NewStore(db), goal.NewStore(db), budget.NewStore(db)
 	command.schedules = schedule.NewStore(db)

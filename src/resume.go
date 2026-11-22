@@ -63,6 +63,7 @@ func runResume(args []string, io streams) int {
 	}
 	db, err := openLedger(io)
 	if err == nil {
+		defer closeDatabase(db)
 		err = gatherResume(db, &resume)
 	}
 	if err != nil {

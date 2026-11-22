@@ -32,6 +32,7 @@ Commands:
   budgets, bg       Manage budgets
   scheduled, sc     Manage scheduled transactions
   resume, rs        Show your financial resume
+  daemon            Run the Telegram bot and the background jobs
   update            Update Finux to the newest version
   version           Show the version
   help              Show this help

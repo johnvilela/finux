@@ -98,6 +98,7 @@ func runAccounts(args []string, io streams) int {
 	if err != nil {
 		return command.fail(err)
 	}
+	defer closeDatabase(db)
 	announceAutomatic(db, io)
 	command.db, command.store = db, account.NewStore(db)
 	return command.fail(handler(rest))
