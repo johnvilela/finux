@@ -78,6 +78,13 @@ const mcpInstructions = `Finux is a personal finance manager. These tools read a
 - A tool that deletes data needs confirm: true. Without it, the tool returns confirm_required and a message, and changes nothing. Ask the user before you confirm.
 - If a tool reports that the database is not found or is out of date, call database_init.`
 
+// newMCPServer makes the MCP server. A server that can write also
+// creates the transactions of the automatic schedules.
+func newMCPServer(readOnly bool) *mcp.Server {
+	mcpAutomatic = !readOnly
+	return &mcp.Server{Name: "finux", Version: version, Instructions: mcpInstructions, Tools: mcpTools(readOnly)}
+}
+
 func runMCP(args []string, io streams) int {
 	if len(args) > 0 && isHelp(args[0]) {
 		return write(io, mcpHelp())
@@ -92,15 +99,12 @@ func runMCP(args []string, io streams) int {
 	if err != nil {
 		return exitStatus(io, "config mcp", err)
 	}
-	// A server that can write also creates the transactions of the
-	// automatic schedules.
-	mcpAutomatic = !readOnly
-	server := &mcp.Server{Name: "finux", Version: version, Instructions: mcpInstructions, Tools: mcpTools(readOnly)}
+	server := newMCPServer(readOnly)
 	switch {
 	case len(positional) == 0 && given["url"]:
 		err = usageError("--url is only for config")
 	case len(positional) == 0 && given["http"]:
-		err = serveHTTP(server, address, io)
+		err = serveHTTP(context.Background(), server, address, io)
 	case len(positional) == 0:
 		err = server.Serve(os.Stdin, io.stdout)
 	case positional[0] != "config":
@@ -123,8 +127,9 @@ func runMCP(args []string, io streams) int {
 }
 
 // serveHTTP serves the HTTP transport on the address until the process
-// gets an interrupt. It writes the URL of the endpoint to stderr.
-func serveHTTP(server *mcp.Server, address string, io streams) error {
+// gets an interrupt or ctx ends. It writes the URL of the endpoint to
+// stderr.
+func serveHTTP(ctx context.Context, server *mcp.Server, address string, io streams) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return usageError(fmt.Sprintf("invalid address %q: use host:port, for example 127.0.0.1:8765", address))
@@ -141,7 +146,7 @@ func serveHTTP(server *mcp.Server, address string, io streams) error {
 	routes.Handle(mcpPath, server.Handler(token))
 	web := &http.Server{Handler: routes, ReadHeaderTimeout: 10 * time.Second}
 
-	interrupt, release := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	interrupt, release := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer release()
 	stopped := make(chan error, 1)
 	go func() {

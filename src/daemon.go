@@ -8,6 +8,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"finux/src/setting"
 )
 
 // daemonTickVariable names the environment variable that replaces the
@@ -26,6 +28,19 @@ it does the work that needs a process that stays alive:
 
 - It runs the Telegram bot, when a token is set. See
   'finux config telegram --help'.
+- It keeps the status of the bills and the transactions current, and
+  creates the transactions of the automatic schedules on their dates.
+- With the setting telegram-reminders on, it tells the allowed people in
+  Telegram about a schedule that is due, a bill that closed, is due or is
+  late, and a budget near or over its limit. Each reminder comes one time.
+- With the setting telegram-resume on daily or monthly, it sends the
+  resume at the time in telegram-resume-time.
+- With an address in the setting daemon-mcp, it serves the MCP server for
+  AI agents there. See 'finux config mcp --help'.
+
+The daemon reads the token of the bot and the setting daemon-mcp when it
+starts: start it again after you change them. The other settings and the
+list of the allowed people need no restart.
 `
 }
 
@@ -63,6 +78,7 @@ func serveDaemon(io streams) error {
 		return err
 	}
 	token := telegramToken(db)
+	address, _ := setting.NewStore(db).Get(setting.DaemonMCP)
 	closeDatabase(db)
 
 	var logLock sync.Mutex
@@ -77,13 +93,31 @@ func serveDaemon(io streams) error {
 	var database sync.Mutex
 	var running sync.WaitGroup
 	log("Finux daemon started")
+	work := &jobs{lock: &database, log: log}
 	if token == "" {
 		log("Telegram bot is off: no token. Run 'finux config telegram token <token>' and start the daemon again.")
 	} else {
 		log("Telegram bot is on")
-		running.Go(func() { newBot(token, &database, log).poll(ctx) })
+		chat := newBot(token, &database, log)
+		work.client = chat.client
+		running.Go(func() { chat.poll(ctx) })
 	}
-	<-ctx.Done()
+	if address != "" {
+		running.Go(func() {
+			if err := serveHTTP(ctx, newMCPServer(false), address, io); err != nil {
+				log("MCP server: %v", err)
+			}
+		})
+	}
+	ticker := time.NewTicker(daemonTick())
+	defer ticker.Stop()
+	for work.tick(ctx); ctx.Err() == nil; {
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+			work.tick(ctx)
+		}
+	}
 	running.Wait()
 	log("Finux daemon stopped")
 	return nil

@@ -637,13 +637,17 @@ func budgetWarnings(store *budget.Store, view transaction.View) ([]budgetWarning
 		if !ok || usage.Level() == budget.LevelOK {
 			continue
 		}
-		message := fmt.Sprintf("Budget %s: %d%% spent, %s left", current.Code, usage.Percent(), money.Format(usage.Remaining(), current.Currency))
-		if usage.Level() == budget.LevelOver {
-			message = fmt.Sprintf("Budget %s: over the limit by %s", current.Code, money.Format(usage.Over(), current.Currency))
-		}
-		warnings = append(warnings, budgetWarning{
-			Budget: current.Code, Level: usage.Level(), Message: message + " until " + transaction.FormatDate(usage.To),
-		})
+		warnings = append(warnings, budgetWarning{Budget: current.Code, Level: usage.Level(), Message: budgetMessage(current, usage)})
 	}
 	return warnings, nil
+}
+
+// budgetMessage tells that a period of a budget is near or over its
+// limit.
+func budgetMessage(current budget.Budget, usage budget.Usage) string {
+	message := fmt.Sprintf("Budget %s: %d%% spent, %s left", current.Code, usage.Percent(), money.Format(usage.Remaining(), current.Currency))
+	if usage.Level() == budget.LevelOver {
+		message = fmt.Sprintf("Budget %s: over the limit by %s", current.Code, money.Format(usage.Over(), current.Currency))
+	}
+	return message + " until " + transaction.FormatDate(usage.To)
 }
