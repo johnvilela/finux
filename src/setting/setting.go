@@ -40,13 +40,17 @@ const (
 // None is the value of AIProvider for no AI.
 const None = "none"
 
-// defaultModels gives the model that each AI agent uses when AIModel is
-// empty: a model of the middle size, because each /ai message costs.
-var defaultModels = map[string]string{
-	"claude":   "sonnet",
-	"codex":    "gpt-6.2-sol",
-	"opencode": "opencode/claude-sonnet-4-6",
+// models lists the usual models of each AI agent. The first one is the
+// default, for when AIModel is empty: a model of the middle size, because
+// each /ai message costs. A user can also write the name of another model.
+var models = map[string][]string{
+	"claude":   {"sonnet", "haiku", "opus", "fable"},
+	"codex":    {"gpt-6.2-sol", "gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-astra"},
+	"opencode": {"opencode/claude-sonnet-4-6", "opencode/claude-haiku-4-5", "opencode/gpt-5.6-terra", "opencode/claude-opus-5"},
 }
+
+// Models lists the usual models of an AI agent, the default one first.
+func Models(agent string) []string { return slices.Clone(models[agent]) }
 
 // Model gives the model that an AI agent uses: the chosen one, or the
 // default model of the agent when no model is chosen.
@@ -54,7 +58,10 @@ func Model(agent, chosen string) string {
 	if chosen != "" {
 		return chosen
 	}
-	return defaultModels[agent]
+	if usual := models[agent]; len(usual) > 0 {
+		return usual[0]
+	}
+	return ""
 }
 
 // The values of TelegramResume, after Off.

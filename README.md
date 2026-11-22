@@ -217,7 +217,12 @@ have:
 
 `finux config` opens a screen where you change the settings of Finux: the up
 and down arrows move, the left and right arrows or the space bar change a
-value, Enter saves and Esc leaves without a change. The settings are in the
+value, Enter saves and Esc leaves without a change. A setting that is text,
+for example the Telegram token, has a field: type or paste its value, Ctrl+U
+clears it. The screen shows `(set)` for a saved token, never the token. In
+`AI model`, the left and right arrows go through the usual models of the AI
+provider on the screen; you can also type the name of another model. The
+screen does not save a value that is not correct. The settings are in the
 database.
 
 | Setting | Values | Meaning |
@@ -241,8 +246,7 @@ database.
 ./bin/finux config set daemon-mcp ""            # an empty text clears a text setting
 ```
 
-The settings screen shows the settings that have a list of values. A setting
-that is text changes only with `finux config set`.
+The settings screen shows all the settings.
 
 Without a terminal, `finux config` shows its help. `finux config` also has
 the commands that check Finux and connect it to AI agents:
@@ -840,7 +844,7 @@ the [daemon](#daemon). Telegram is the only service it talks to.
 2. Save the token and start the daemon:
 
    ```sh
-   finux config telegram token 123456789:AAH...
+   finux config telegram token 123456789:AAH...   # or paste it in the 'finux config' screen
    finux daemon install        # or 'finux daemon run' in a terminal
    ```
 

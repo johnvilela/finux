@@ -181,3 +181,16 @@ func TestModelOfAnAgent(t *testing.T) {
 		t.Errorf("Model with a chosen model = %q", got)
 	}
 }
+
+func TestModelsOfAnAgent(t *testing.T) {
+	// The first model of the list is the default one.
+	for _, agent := range []string{"claude", "codex", "opencode"} {
+		models := Models(agent)
+		if len(models) < 2 || models[0] != Model(agent, "") {
+			t.Errorf("Models(%q) = %v", agent, models)
+		}
+	}
+	if models := Models(None); len(models) != 0 {
+		t.Errorf("Models(none) = %v", models)
+	}
+}

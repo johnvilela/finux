@@ -169,6 +169,27 @@ func setSetting(args []string, io streams) error {
 	return err
 }
 
+// settingRows gives the rows of the settings screen: all the settings,
+// with their values.
+func settingRows(values map[string]string) []ui.SettingRow {
+	var rows []ui.SettingRow
+	for _, definition := range setting.Definitions() {
+		row := ui.SettingRow{
+			Key: definition.Key, Title: definition.Title, Description: definition.Description,
+			Values: definition.Values, Value: values[definition.Key],
+			Secret: definition.Secret, Check: definition.Check,
+		}
+		if definition.Key == setting.AIModel {
+			// The models are the ones of the agent on the screen.
+			row.Options = func(values map[string]string) []string {
+				return setting.Models(values[setting.AIProvider])
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 // editSettings opens the settings screen and saves what the user changed.
 func editSettings(io streams) error {
 	_, store, err := openSettings()
@@ -179,19 +200,7 @@ func editSettings(io streams) error {
 	if err != nil {
 		return err
 	}
-	// The screen changes a setting that has a list of values. A text
-	// setting changes only with 'config set'.
-	var rows []ui.SettingRow
-	for _, definition := range setting.Definitions() {
-		if definition.Text() {
-			continue
-		}
-		rows = append(rows, ui.SettingRow{
-			Key: definition.Key, Title: definition.Title, Description: definition.Description,
-			Values: definition.Values, Value: values[definition.Key],
-		})
-	}
-	screen, err := program(ui.NewSettings(rows))
+	screen, err := program(ui.NewSettings(settingRows(values)))
 	if err != nil {
 		return err
 	}
@@ -211,6 +220,10 @@ func editSettings(io streams) error {
 	if changed == 0 {
 		return notice("No setting changed.")
 	}
-	_, err = fmt.Fprintln(io.stdout, ui.Success("Settings saved"))
+	message := ui.Success("Settings saved")
+	if token := screen.Values()[setting.TelegramToken]; token != "" && token != values[setting.TelegramToken] {
+		message += "\nThe daemon starts the bot: run 'finux daemon install', or 'finux daemon restart' if it runs."
+	}
+	_, err = fmt.Fprintln(io.stdout, message)
 	return err
 }
