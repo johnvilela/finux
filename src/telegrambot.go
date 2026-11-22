@@ -86,9 +86,11 @@ Send <code>/tx add</code> with no options and I ask for each value.`
 
 // question is a command that waits for the press of a button.
 type question struct {
-	user    int64
-	args    []string
-	text    string
+	user int64
+	args []string
+	text string
+	// choices has the items of a question that asks which item.
+	choices []choice
 	expires time.Time
 }
 
@@ -102,13 +104,15 @@ type bot struct {
 	// refused has the people who got the message of no access.
 	refused   map[int64]bool
 	questions map[string]question
-	serial    int
+	// wizards has the guide in progress of each chat.
+	wizards map[int64]*wizard
+	serial  int
 }
 
 func newBot(token string, lock *sync.Mutex, log func(string, ...any)) *bot {
 	return &bot{
 		client: telegram.NewClient(token), lock: lock, log: log,
-		refused: map[int64]bool{}, questions: map[string]question{},
+		refused: map[int64]bool{}, questions: map[string]question{}, wizards: map[int64]*wizard{},
 	}
 }
 
@@ -209,10 +213,22 @@ func (b *bot) message(ctx context.Context, message *telegram.Message) {
 	}
 	delete(b.refused, user)
 	text := strings.TrimSpace(message.Text)
+	current := b.wizards[chat]
+	if current != nil && time.Now().After(current.expires) {
+		delete(b.wizards, chat)
+		current = nil
+	}
 	if !strings.HasPrefix(text, "/") {
+		// A text with no command is the answer to a question, or nothing.
+		if current != nil && text != "" {
+			b.answer(ctx, chat, current, text)
+			return
+		}
 		b.send(ctx, chat, botSorry)
 		return
 	}
+	// A command stops the questions of the command before it.
+	delete(b.wizards, chat)
 	args, err := splitArgs(text)
 	if err != nil {
 		b.send(ctx, chat, "A quote in the message has no end.")
@@ -223,6 +239,8 @@ func (b *bot) message(ctx context.Context, message *telegram.Message) {
 	switch {
 	case name == "help" || name == "start":
 		b.send(ctx, chat, botHelp())
+	case name == "cancel" && current != nil:
+		b.send(ctx, chat, "Cancelled.")
 	case name == "cancel":
 		b.send(ctx, chat, "There is nothing to cancel.")
 	case slices.Contains(botRefused, name):
@@ -237,14 +255,38 @@ func (b *bot) message(ctx context.Context, message *telegram.Message) {
 // command runs a command and sends its output. A command that deletes
 // data asks first, with buttons.
 func (b *bot) command(ctx context.Context, user, chat int64, args []string, text string) {
+	if found, given, ok := findGuide(args); ok {
+		started := &wizard{guide: found, user: user, args: args, text: text, answers: given}
+		b.wizards[chat] = started
+		b.advance(ctx, chat, started)
+		return
+	}
 	output, status := b.execute(args)
+	if status == 2 && missingReference(output) && b.pick(ctx, user, chat, args, text) {
+		return
+	}
 	if status == 2 && strings.Contains(output, "--yes is necessary") {
+		// A delete with no item asks the item first, then asks again.
+		if !hasReference(args) && b.pick(ctx, user, chat, args, text) {
+			return
+		}
 		key := b.ask(question{user: user, args: append(args, "--yes"), text: text})
 		b.send(ctx, chat, "This deletes data and you cannot get it back:\n<code>"+html.EscapeString(text)+"</code>",
 			[]telegram.Button{{Text: "Confirm", Data: "yes:" + key}, {Text: "Cancel", Data: "no:" + key}})
 		return
 	}
 	b.reply(ctx, chat, output)
+}
+
+// hasReference reports whether a command has an argument after its
+// name that is not an option: the code or the id of an item.
+func hasReference(args []string) bool {
+	for _, arg := range args[min(len(args), 2):] {
+		if !strings.HasPrefix(arg, "-") {
+			return true
+		}
+	}
+	return false
 }
 
 // ask keeps a question and returns its key, for the data of the buttons.
@@ -270,22 +312,44 @@ func (b *bot) callback(ctx context.Context, press *telegram.Callback) {
 		return
 	}
 	answer, key, _ := strings.Cut(press.Data, ":")
+	if answer == "w" {
+		b.pressed(ctx, press, key)
+		return
+	}
+	key, item, _ := strings.Cut(key, ":")
 	asked, known := b.questions[key]
 	if !known || asked.user != press.From.ID || time.Now().After(asked.expires) {
 		return
 	}
 	delete(b.questions, key)
 	chat, command := press.Message.Chat.ID, "<code>"+html.EscapeString(asked.text)+"</code>"
-	edit := func(text string) {
-		if err := b.client.EditMessage(ctx, chat, press.Message.ID, text, nil); err != nil && !errors.Is(err, context.Canceled) {
-			b.log("Telegram: change a message: %v", err)
+	edit := func(text string) { b.edit(ctx, chat, press.Message.ID, text) }
+	switch answer {
+	case "yes":
+		edit("Confirmed:\n" + command)
+		output, status := b.execute(asked.args)
+		if status == 2 && missingReference(output) && b.pick(ctx, asked.user, chat, asked.args, asked.text) {
+			return
 		}
-	}
-	if answer != "yes" {
+		b.reply(ctx, chat, output)
+	case "p":
+		// The item of the button becomes the reference of the command.
+		index, err := strconv.Atoi(item)
+		if err != nil || index < 0 || index >= len(asked.choices) {
+			return
+		}
+		value := asked.choices[index].value
+		text := asked.text + " " + value
+		edit("<code>" + html.EscapeString(text) + "</code>")
+		b.command(ctx, asked.user, chat, append(asked.args, value), text)
+	default:
 		edit("Cancelled:\n" + command)
-		return
 	}
-	edit("Confirmed:\n" + command)
-	output, _ := b.execute(asked.args)
-	b.reply(ctx, chat, output)
+}
+
+// edit replaces the text of a message of the bot and removes its buttons.
+func (b *bot) edit(ctx context.Context, chat, message int64, text string) {
+	if err := b.client.EditMessage(ctx, chat, message, text, nil); err != nil && !errors.Is(err, context.Canceled) {
+		b.log("Telegram: change a message: %v", err)
+	}
 }
