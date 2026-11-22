@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -122,5 +124,94 @@ func TestErrorsDoNotShowTheToken(t *testing.T) {
 	err = NewClient(token).SendMessage(context.Background(), 42, "hello", nil)
 	if err == nil || strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), "bot<token>") {
 		t.Fatalf("network error = %v", err)
+	}
+}
+
+func TestMessageWithAFile(t *testing.T) {
+	client, _ := fakeAPI(t, map[string]string{"getUpdates": `{"ok":true,"result":[
+		{"update_id":1,"message":{"message_id":3,"from":{"id":42},"chat":{"id":42,"type":"private"},"caption":"/ai import this",
+			"document":{"file_id":"DOC1","file_name":"bill.pdf","mime_type":"application/pdf","file_size":2048}}},
+		{"update_id":2,"message":{"message_id":4,"from":{"id":42},"chat":{"id":42,"type":"private"},
+			"photo":[{"file_id":"SMALL","file_size":100,"width":90,"height":60},{"file_id":"BIG","file_size":900,"width":900,"height":600}]}}
+	]}`})
+	updates, err := client.GetUpdates(context.Background(), 0)
+	if err != nil || len(updates) != 2 {
+		t.Fatalf("GetUpdates = %+v, %v", updates, err)
+	}
+	document := updates[0].Message
+	if file, ok := document.File(); !ok || file.ID != "DOC1" || file.Name != "bill.pdf" || file.Size != 2048 || document.Caption != "/ai import this" {
+		t.Fatalf("document = %+v", document)
+	}
+	// A photo comes in some sizes: the file is the largest one.
+	if file, ok := updates[1].Message.File(); !ok || file.ID != "BIG" || file.Name != "photo.jpg" || file.Size != 900 {
+		t.Fatalf("photo = %+v", updates[1].Message)
+	}
+	if _, ok := (&Message{Text: "hello"}).File(); ok {
+		t.Fatal("a text message has a file")
+	}
+}
+
+func TestDownload(t *testing.T) {
+	content := strings.Repeat("statement ", 1000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/bot"+token+"/getFile":
+			raw, _ := io.ReadAll(r.Body)
+			switch {
+			case strings.Contains(string(raw), `"GONE"`):
+				w.WriteHeader(http.StatusBadRequest)
+				io.WriteString(w, `{"ok":false,"error_code":400,"description":"Bad Request: file is too big"}`)
+			case strings.Contains(string(raw), `"HUGE"`):
+				io.WriteString(w, `{"ok":true,"result":{"file_id":"HUGE","file_size":30000000,"file_path":"documents/huge.pdf"}}`)
+			default:
+				io.WriteString(w, `{"ok":true,"result":{"file_id":"DOC1","file_size":10000,"file_path":"documents/file_7.pdf"}}`)
+			}
+		case r.Method == http.MethodGet && r.URL.Path == "/file/bot"+token+"/documents/file_7.pdf":
+			io.WriteString(w, content)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("FINUX_TELEGRAM_API", server.URL)
+	client := NewClient(token)
+	target := filepath.Join(t.TempDir(), "inbox", "bill.pdf")
+	if err := client.Download(context.Background(), "DOC1", target); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != content {
+		t.Fatalf("file has %d bytes, %v", len(got), err)
+	}
+	// The file has the data of the person: only the owner reads it.
+	if info, _ := os.Stat(target); info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v", info.Mode().Perm())
+	}
+	other := filepath.Join(t.TempDir(), "other.pdf")
+	if err := client.Download(context.Background(), "GONE", other); err == nil || !strings.Contains(err.Error(), "file is too big") {
+		t.Fatalf("Download of a file that Telegram refuses = %v", err)
+	}
+	if err := client.Download(context.Background(), "HUGE", other); err == nil || !strings.Contains(err.Error(), "20 MB") {
+		t.Fatalf("Download of a large file = %v", err)
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatal("a failed download left a file")
+	}
+}
+
+func TestSendTextAndAction(t *testing.T) {
+	client, calls := fakeAPI(t, nil)
+	if err := client.SendText(context.Background(), 42, "2 < 3 & <b>not bold</b>"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SendAction(context.Background(), 42, "typing"); err != nil {
+		t.Fatal(err)
+	}
+	got := *calls
+	if _, has := got[0].body["parse_mode"]; has || got[0].method != "sendMessage" || got[0].body["text"] != "2 < 3 & <b>not bold</b>" {
+		t.Fatalf("SendText body = %v", got[0].body)
+	}
+	if got[1].method != "sendChatAction" || got[1].body["action"] != "typing" || got[1].body["chat_id"] != float64(42) {
+		t.Fatalf("SendAction = %+v", got[1])
 	}
 }
