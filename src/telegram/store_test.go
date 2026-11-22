@@ -11,7 +11,7 @@ import (
 func newStore(t *testing.T) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "finux.db")
-	if _, err := storage.Init(path, &User{}, &Notice{}); err != nil {
+	if _, err := storage.Init(path, &User{}, &Notice{}, &Session{}); err != nil {
 		t.Fatal(err)
 	}
 	db, err := storage.Open(path)
@@ -67,5 +67,37 @@ func TestNoticeIsSentOnce(t *testing.T) {
 	}
 	if first, err := store.Once("bill:2:late"); err != nil || !first {
 		t.Fatalf("Once of another key = %v, %v", first, err)
+	}
+}
+
+func TestSessions(t *testing.T) {
+	store := newStore(t)
+	if got := store.Session(42, "claude"); got != "" {
+		t.Fatalf("session of a new person = %q", got)
+	}
+	if err := store.SaveSession(42, "claude", "abc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSession(900, "claude", "xyz"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSession(42, "claude", "def"); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Session(42, "claude"); got != "def" {
+		t.Fatalf("session = %q", got)
+	}
+	// A session belongs to one agent: another agent starts a new one.
+	if got := store.Session(42, "codex"); got != "" {
+		t.Fatalf("session for another agent = %q", got)
+	}
+	if err := store.ClearSession(42); err != nil {
+		t.Fatal(err)
+	}
+	if store.Session(42, "claude") != "" || store.Session(900, "claude") != "xyz" {
+		t.Fatal("ClearSession is wrong")
+	}
+	if err := store.ClearSession(42); err != nil {
+		t.Fatalf("ClearSession with no session = %v", err)
 	}
 }

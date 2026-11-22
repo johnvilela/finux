@@ -52,7 +52,7 @@ tell what the daemon sends by itself. See 'finux config --help'.
 // openTelegram opens a database that has the tables of the bot.
 func openTelegram() (*gorm.DB, *telegram.Store, error) {
 	db, err := openDatabase()
-	if err == nil && !(db.Migrator().HasTable(&telegram.User{}) && db.Migrator().HasTable(&telegram.Notice{}) && db.Migrator().HasTable(&setting.Setting{})) {
+	if err == nil && !(db.Migrator().HasTable(&telegram.User{}) && db.Migrator().HasTable(&telegram.Notice{}) && db.Migrator().HasTable(&telegram.Session{}) && db.Migrator().HasTable(&setting.Setting{})) {
 		closeDatabase(db)
 		err = errOutdated
 	}

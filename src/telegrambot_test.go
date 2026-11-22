@@ -19,10 +19,12 @@ import (
 
 // sent is a message that the bot sent or changed.
 type sent struct {
-	method  string
-	chat    int64
-	id      int64
-	text    string
+	method string
+	chat   int64
+	id     int64
+	text   string
+	// html tells that the message has the marks of Telegram.
+	html    bool
 	buttons []string
 	// data has the callback data of each button.
 	data []string
@@ -37,17 +39,32 @@ type fakeTelegram struct {
 	nextID  int64
 	sent    chan sent
 	other   []string
+	// files has the content of each file that a person sent, by its ID.
+	files map[string]string
+	// typing counts the times the bot showed that it writes.
+	typing int
 }
 
 func newFakeTelegram(t *testing.T) *fakeTelegram {
 	t.Helper()
-	f := &fakeTelegram{t: t, sent: make(chan sent, 100), nextID: 100}
+	f := &fakeTelegram{t: t, sent: make(chan sent, 100), nextID: 100, files: map[string]string{}}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
 	return f
 }
 
 func (f *fakeTelegram) serve(w http.ResponseWriter, r *http.Request) {
+	if path, isFile := strings.CutPrefix(r.URL.Path, "/file/bot"+testToken+"/"); isFile {
+		f.lock.Lock()
+		content, known := f.files[path]
+		f.lock.Unlock()
+		if !known {
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, content)
+		return
+	}
 	method, ok := strings.CutPrefix(r.URL.Path, "/bot"+testToken+"/")
 	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -58,6 +75,8 @@ func (f *fakeTelegram) serve(w http.ResponseWriter, r *http.Request) {
 		Chat   int64  `json:"chat_id"`
 		ID     int64  `json:"message_id"`
 		Text   string `json:"text"`
+		Mode   string `json:"parse_mode"`
+		FileID string `json:"file_id"`
 		Markup struct {
 			Keyboard [][]struct {
 				Text string `json:"text"`
@@ -90,7 +109,7 @@ func (f *fakeTelegram) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": updates})
 		return
 	case "sendMessage", "editMessageText":
-		message := sent{method: method, chat: body.Chat, id: body.ID, text: body.Text}
+		message := sent{method: method, chat: body.Chat, id: body.ID, text: body.Text, html: body.Mode == "HTML"}
 		if method == "sendMessage" {
 			f.lock.Lock()
 			f.nextID++
@@ -104,6 +123,22 @@ func (f *fakeTelegram) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		f.sent <- message
+	case "getFile":
+		// The path of a file on the server is its ID.
+		f.lock.Lock()
+		content, known := f.files[body.FileID]
+		f.lock.Unlock()
+		if !known {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"ok":false,"error_code":400,"description":"Bad Request: wrong file_id"}`)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"file_id": body.FileID, "file_size": len(content), "file_path": body.FileID}})
+		return
+	case "sendChatAction":
+		f.lock.Lock()
+		f.typing++
+		f.lock.Unlock()
 	default:
 		f.lock.Lock()
 		f.other = append(f.other, method)
@@ -125,6 +160,22 @@ func (f *fakeTelegram) say(user int64, text string) {
 	f.push(map[string]any{"message": map[string]any{
 		"message_id": 1, "from": map[string]any{"id": user, "first_name": "Person"},
 		"chat": map[string]any{"id": user, "type": "private"}, "text": text,
+	}})
+}
+
+// sendFile sends a document with a caption to the bot. content is what
+// the bot gets when it downloads the file; an empty content is a file
+// that Telegram does not have.
+func (f *fakeTelegram) sendFile(user int64, id, name, content, caption string) {
+	f.lock.Lock()
+	if content != "" {
+		f.files[id] = content
+	}
+	f.lock.Unlock()
+	f.push(map[string]any{"message": map[string]any{
+		"message_id": 1, "from": map[string]any{"id": user, "first_name": "Person"},
+		"chat": map[string]any{"id": user, "type": "private"}, "caption": caption,
+		"document": map[string]any{"file_id": id, "file_name": name, "file_size": len(content)},
 	}})
 }
 

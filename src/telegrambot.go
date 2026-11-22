@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/colorprofile"
 
+	"finux/src/setting"
 	"finux/src/telegram"
 )
 
@@ -61,8 +62,23 @@ var botMenu = []telegram.Command{
 	{Name: "cancel", Description: "Stop the current question"},
 }
 
-func botHelp() string {
-	return `<b>Finux</b>
+// botHelp returns the help of the bot. ai adds the command of the AI.
+func botHelp(ai bool) string {
+	help := botCommandsHelp
+	if ai {
+		help += `
+
+<b>AI</b>
+/ai with a question asks the AI, which sees your data:
+<code>/ai how was my month?</code>
+<code>/ai should I buy a new phone now or later?</code>
+Send a file with /ai in its caption, for example a bill: <code>/ai import this bill</code>
+<code>/ai new</code> starts a new conversation.`
+	}
+	return help
+}
+
+const botCommandsHelp = `<b>Finux</b>
 
 /rs  Resume of the month
 /tx  Transactions
@@ -82,7 +98,6 @@ The commands are the same as in the terminal, without the word finux:
 
 Send a command with <code>--help</code> for its options, for example <code>/tx --help</code>.
 Send <code>/tx add</code> with no options and I ask for each value.`
-}
 
 // question is a command that waits for the press of a button.
 type question struct {
@@ -107,18 +122,32 @@ type bot struct {
 	// wizards has the guide in progress of each chat.
 	wizards map[int64]*wizard
 	serial  int
+	// kept has the files of each person that wait for an /ai message.
+	kept map[int64][]string
+	// runs has the answer of the AI in progress of each person. The
+	// answers run apart from the bot, so aiLock guards the map.
+	runs    map[int64]*aiRun
+	aiLock  sync.Mutex
+	running sync.WaitGroup
 }
 
 func newBot(token string, lock *sync.Mutex, log func(string, ...any)) *bot {
 	return &bot{
 		client: telegram.NewClient(token), lock: lock, log: log,
 		refused: map[int64]bool{}, questions: map[string]question{}, wizards: map[int64]*wizard{},
+		kept: map[int64][]string{}, runs: map[int64]*aiRun{},
 	}
 }
 
 // poll gets the updates of the bot and answers them, until ctx ends.
 func (b *bot) poll(ctx context.Context) {
-	if err := b.client.SetCommands(ctx, botMenu); err != nil && ctx.Err() == nil {
+	// The answers of the AI end before the bot ends.
+	defer b.running.Wait()
+	menu := botMenu
+	if b.agentKey() != setting.None {
+		menu = append([]telegram.Command{{Name: "ai", Description: "Ask the AI about your finances"}}, botMenu...)
+	}
+	if err := b.client.SetCommands(ctx, menu); err != nil && ctx.Err() == nil {
 		b.log("Telegram: set the menu of commands: %v", err)
 	}
 	var offset int64
@@ -213,6 +242,10 @@ func (b *bot) message(ctx context.Context, message *telegram.Message) {
 	}
 	delete(b.refused, user)
 	text := strings.TrimSpace(message.Text)
+	if file, has := message.File(); has {
+		b.receive(ctx, message, file, strings.TrimSpace(message.Caption))
+		return
+	}
 	current := b.wizards[chat]
 	if current != nil && time.Now().After(current.expires) {
 		delete(b.wizards, chat)
@@ -238,7 +271,13 @@ func (b *bot) message(ctx context.Context, message *telegram.Message) {
 	name, _, _ := strings.Cut(strings.ToLower(strings.TrimPrefix(args[0], "/")), "@")
 	switch {
 	case name == "help" || name == "start":
-		b.send(ctx, chat, botHelp())
+		b.send(ctx, chat, botHelp(b.agentKey() != setting.None))
+	case name == "ai":
+		// The AI gets the text as the person wrote it.
+		_, rest, _ := strings.Cut(text, " ")
+		b.ai(ctx, user, chat, rest)
+	case name == "cancel" && b.stopAI(user):
+		b.send(ctx, chat, "Stopped.")
 	case name == "cancel" && current != nil:
 		b.send(ctx, chat, "Cancelled.")
 	case name == "cancel":

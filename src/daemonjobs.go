@@ -33,6 +33,9 @@ type jobs struct {
 	// client sends the messages. It is nil when the bot has no token.
 	client *telegram.Client
 	log    func(format string, values ...any)
+	// cleaned is the last time the jobs deleted the old files of the
+	// inbox of the AI.
+	cleaned time.Time
 }
 
 // uncolored takes the colors out of a text of the command line.
@@ -44,6 +47,12 @@ func uncolored(text string) string {
 
 // tick runs the jobs one time and sends their messages.
 func (j *jobs) tick(ctx context.Context) {
+	if time.Since(j.cleaned) > time.Hour {
+		j.cleaned = time.Now()
+		if err := cleanInbox(); err != nil {
+			j.log("Jobs: clean the inbox of the AI: %v", err)
+		}
+	}
 	var messages []string
 	var people []telegram.User
 	err := func() error {

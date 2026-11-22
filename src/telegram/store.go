@@ -94,3 +94,37 @@ func (s *Store) Once(key string) (bool, error) {
 	result := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&Notice{Key: key, SentAt: time.Now()})
 	return result.Error == nil && result.RowsAffected > 0, result.Error
 }
+
+// Session is the conversation of a person with an AI agent: the next
+// message of the person continues it.
+type Session struct {
+	UserID int64 `gorm:"primaryKey;autoIncrement:false"`
+	// Agent is the key of the agent that has the session.
+	Agent     string
+	SessionID string
+	UpdatedAt time.Time
+}
+
+// TableName keeps the table of the sessions with the Telegram tables.
+func (Session) TableName() string { return "telegram_sessions" }
+
+// Session returns the ID of the session of a person with an agent, or
+// "" when the person has none with that agent.
+func (s *Store) Session(user int64, agent string) string {
+	var found Session
+	if err := s.db.Where("user_id = ? AND agent = ?", user, agent).Take(&found).Error; err != nil {
+		return ""
+	}
+	return found.SessionID
+}
+
+// SaveSession keeps the session of a person. A person has one session.
+func (s *Store) SaveSession(user int64, agent, id string) error {
+	return s.db.Save(&Session{UserID: user, Agent: agent, SessionID: id}).Error
+}
+
+// ClearSession forgets the session of a person, so the next message
+// starts a new one.
+func (s *Store) ClearSession(user int64) error {
+	return s.db.Delete(&Session{}, "user_id = ?", user).Error
+}

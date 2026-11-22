@@ -21,7 +21,7 @@ import (
 )
 
 // models lists the tables that 'finux init' migrates.
-var models = []any{&account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &budget.Budget{}, &budget.Link{}, &schedule.Schedule{}, &transaction.Transaction{}, &setting.Setting{}, &telegram.User{}, &telegram.Notice{}}
+var models = []any{&account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &budget.Budget{}, &budget.Link{}, &schedule.Schedule{}, &transaction.Transaction{}, &setting.Setting{}, &telegram.User{}, &telegram.Notice{}, &telegram.Session{}}
 
 func initHelp() string {
 	return "Set up the Finux database\n\n" +
