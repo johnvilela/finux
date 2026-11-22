@@ -224,7 +224,7 @@ database.
 | --- | --- | --- |
 | `automatic-schedules` | `off` (default), `on` | On: a schedule with `--auto` creates its transactions on their dates, without your confirmation. Off: no schedule creates a transaction by itself |
 | `ai-provider` | `none` (default), `claude`, `codex`, `opencode` | The AI agent program that answers `/ai` in the Telegram bot. `finux config ai <agent>` sets it. None: `/ai` is off |
-| `ai-model` | text (default empty) | The model that the agent uses for `/ai`, for example `sonnet`. Empty: the model of the agent |
+| `ai-model` | text (default empty) | The model that the agent uses for `/ai`, for example `opus`. Empty: the default model of the agent, which is `sonnet` for `claude`, `gpt-6.2-sol` for `codex` and `opencode/claude-sonnet-4-6` for `opencode` |
 | `telegram-token` | text | The token of your Telegram bot. Finux never shows it: `config get` prints `(set)` or `(not set)` |
 | `telegram-reminders` | `off` (default), `on` | On: the daemon sends reminders to the allowed people in Telegram |
 | `telegram-resume` | `off` (default), `daily`, `monthly` | The daemon sends the resume in Telegram each day, or on day 1 of each month |
@@ -933,7 +933,7 @@ Set it up in the terminal:
 
 ```sh
 finux config ai claude            # the MCP server, the skills, ai-memory and ai-provider
-finux config set ai-model sonnet  # optional: a smaller model costs less
+finux config set ai-model opus    # optional: the default for claude is sonnet
 finux daemon install              # again, so the service finds the agent and shows /ai
 ```
 
@@ -953,7 +953,8 @@ finux daemon install              # again, so the service finds the agent and sh
   `/ai` conversations are one ai-memory project, `finux-finances`.
 - A new conversation loads all that your agent has: its tools, its skills
   and its plugins. That can be many tokens for each new conversation. To pay
-  less, set `ai-model` and do not use `/ai new` without a reason.
+  less, keep a small model in `ai-model` and do not use `/ai new` without a
+  reason. Without `ai-model`, Claude Code uses `sonnet`.
 - `/ai` uses the login of the agent program on your machine. All the allowed
   people use it.
 

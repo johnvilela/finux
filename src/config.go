@@ -44,7 +44,9 @@ which is the default, no schedule creates a transaction by itself. See
 ai-provider: the AI agent program that answers /ai in the Telegram bot:
 claude, codex or opencode. 'finux config ai <agent>' sets it. With none,
 which is the default, /ai is off. ai-model is the model that the agent
-uses for /ai, for example sonnet; empty is the model of the agent.
+uses for /ai, for example opus. Empty is the default model of the agent:
+sonnet for claude, gpt-6.2-sol for codex, opencode/claude-sonnet-4-6 for
+opencode.
 
 telegram-token, telegram-reminders, telegram-resume, telegram-resume-time
 and daemon-mcp are for the Telegram bot and the daemon. See

@@ -166,3 +166,18 @@ func TestOldValueGivesTheDefault(t *testing.T) {
 		t.Fatalf("Get of an old value = %q, %v", value, err)
 	}
 }
+
+func TestModelOfAnAgent(t *testing.T) {
+	// Each agent has a default model, for when the setting is empty.
+	for agent, want := range map[string]string{
+		"claude": "sonnet", "codex": "gpt-6.2-sol", "opencode": "opencode/claude-sonnet-4-6",
+		None: "", "other": "",
+	} {
+		if got := Model(agent, ""); got != want {
+			t.Errorf("Model(%q, empty) = %q, want %q", agent, got, want)
+		}
+	}
+	if got := Model("claude", "opus"); got != "opus" {
+		t.Errorf("Model with a chosen model = %q", got)
+	}
+}

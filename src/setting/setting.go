@@ -23,7 +23,7 @@ const (
 	// AIProvider is the AI provider that Finux uses by default.
 	AIProvider = "ai-provider"
 	// AIModel is the model that the AI agent uses, or empty for the
-	// model of the agent.
+	// default model of the agent: see Model.
 	AIModel = "ai-model"
 	// TelegramToken is the token of the Telegram bot, from @BotFather.
 	TelegramToken = "telegram-token"
@@ -39,6 +39,23 @@ const (
 
 // None is the value of AIProvider for no AI.
 const None = "none"
+
+// defaultModels gives the model that each AI agent uses when AIModel is
+// empty: a model of the middle size, because each /ai message costs.
+var defaultModels = map[string]string{
+	"claude":   "sonnet",
+	"codex":    "gpt-6.2-sol",
+	"opencode": "opencode/claude-sonnet-4-6",
+}
+
+// Model gives the model that an AI agent uses: the chosen one, or the
+// default model of the agent when no model is chosen.
+func Model(agent, chosen string) string {
+	if chosen != "" {
+		return chosen
+	}
+	return defaultModels[agent]
+}
 
 // The values of TelegramResume, after Off.
 const (
@@ -130,7 +147,7 @@ func Definitions() []Definition {
 		},
 		{
 			Key: AIModel, Title: "AI model", Check: checkModel,
-			Description: "The model that the AI agent uses for /ai, for example sonnet. Empty: the model of the agent. A smaller model costs less.",
+			Description: "The model that the AI agent uses for /ai, for example opus. Empty: the default model of the agent, which is sonnet for claude, gpt-6.2-sol for codex and opencode/claude-sonnet-4-6 for opencode. A smaller model costs less.",
 		},
 		{
 			Key: TelegramToken, Title: "Telegram token", Check: checkToken, Secret: true,

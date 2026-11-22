@@ -73,7 +73,7 @@ func (b *bot) aiSetup(user int64, fresh bool) (aiSetup, error) {
 	if err != nil {
 		return aiSetup{}, err
 	}
-	setup := aiSetup{agent: values[setting.AIProvider], model: values[setting.AIModel]}
+	setup := aiSetup{agent: values[setting.AIProvider], model: setting.Model(values[setting.AIProvider], values[setting.AIModel])}
 	if user == 0 {
 		return setup, nil
 	}

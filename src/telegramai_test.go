@@ -67,7 +67,8 @@ func TestBotAIAnswers(t *testing.T) {
 			t.Errorf("the call has no %q:\n%s", want, log)
 		}
 	}
-	if strings.Contains(log, "--resume") {
+	// With no model in the settings, the agent gets the default one.
+	if strings.Contains(log, "--resume") || !strings.Contains(log, "[--model] [sonnet]") {
 		t.Fatalf("first call:\n%s", log)
 	}
 	f.lock.Lock()
@@ -92,11 +93,11 @@ func TestBotAIAnswers(t *testing.T) {
 		t.Fatalf("call of another person:\n%s", log)
 	}
 	// '/ai new' starts again, and the model comes from the setting.
-	succeed(t, home, "config", "set", "ai-model", "sonnet")
+	succeed(t, home, "config", "set", "ai-model", "opus")
 	if got := f.ask(42, "/ai new What do I owe?"); got != "You said: What do I owe?" {
 		t.Fatalf("/ai new = %q", got)
 	}
-	if log = calls(); strings.Contains(log, "--resume") || !strings.Contains(log, "[--model] [sonnet]") {
+	if log = calls(); strings.Contains(log, "--resume") || !strings.Contains(log, "[--model] [opus]") {
 		t.Fatalf("call after /ai new:\n%s", log)
 	}
 	if got := f.ask(42, "/ai new"); got != "New conversation started." {
