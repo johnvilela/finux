@@ -144,6 +144,20 @@ func TestConfigAISavesTheAgent(t *testing.T) {
 	if got, _, _ := h.run("config", "get", "ai-provider"); got != "codex\n" {
 		t.Fatalf("ai-provider = %q", got)
 	}
+	if strings.Contains(stdout, "finux daemon install") {
+		t.Fatalf("config ai tells about a daemon that is not installed: %q", stdout)
+	}
+	// The service keeps the PATH of its install, which must have the agent.
+	unit := filepath.Join(h.home, ".config", "systemd", "user", "finux.service")
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unit, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if stdout, _, _ = h.run("config", "ai", "codex", "--no-memory"); !strings.Contains(stdout, "Run 'finux daemon install' again from this terminal") {
+		t.Fatalf("config ai with the daemon installed: %q", stdout)
+	}
 	// A failed setup does not change the setting.
 	h.agent("claude", "No permission")
 	h.run("config", "ai", "claude", "--no-memory")

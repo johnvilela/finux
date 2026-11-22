@@ -58,6 +58,11 @@ func unitText(binary string) string {
 		}
 		environment = "Environment=" + quote(databaseVariable+"="+database) + "\n"
 	}
+	// A service has a short PATH. The AI agent of /ai is often in a
+	// folder of the user, so the service gets the PATH of this command.
+	if path := os.Getenv("PATH"); path != "" {
+		environment += "Environment=" + quote("PATH="+path) + "\n"
+	}
 	return "[Unit]\n" +
 		"Description=Finux daemon: Telegram bot and background jobs\n" +
 		"After=network-online.target\n" +

@@ -66,6 +66,7 @@ func TestDaemonService(t *testing.T) {
 		"[Service]\n" +
 		"ExecStart=\"" + binary + "\" daemon run\n" +
 		"Environment=\"FINUX_DB=" + database + "\"\n" +
+		"Environment=\"PATH=" + path + "\"\n" +
 		"Restart=on-failure\n" +
 		"RestartSec=10\n\n" +
 		"[Install]\n" +

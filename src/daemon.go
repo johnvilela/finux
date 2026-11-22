@@ -34,6 +34,8 @@ it does the work that needs a process that stays alive:
 
 - It runs the Telegram bot, when a token is set. See
   'finux config telegram --help'.
+- The bot answers /ai with the AI agent of the setting ai-provider, and
+  deletes the files that people sent to the AI after 7 days.
 - It keeps the status of the bills and the transactions current, and
   creates the transactions of the automatic schedules on their dates.
 - With the setting telegram-reminders on, it tells the allowed people in

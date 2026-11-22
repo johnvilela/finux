@@ -181,7 +181,11 @@ func saveAgent(agent aiAgent) string {
 	if err := store.Set(setting.AIProvider, agent.key); err != nil {
 		return later
 	}
-	return ui.Success(fmt.Sprintf("%s set to %s: /ai in Telegram uses %s", setting.AIProvider, agent.key, agent.name)) + "\n"
+	saved := ui.Success(fmt.Sprintf("%s set to %s: /ai in Telegram uses %s", setting.AIProvider, agent.key, agent.name)) + "\n"
+	if _, err := installed(); err == nil {
+		saved += "Run 'finux daemon install' again from this terminal: the service then has the PATH that finds " + agent.name + ", and the bot shows /ai.\n"
+	}
+	return saved
 }
 
 // addServer adds the MCP server to an agent. server is the command that

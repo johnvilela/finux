@@ -44,6 +44,10 @@ All the allowed people use the same database: yours. They can use the
 commands of Finux that read and change data, but not config, init,
 update and daemon. Send /help to the bot for the list.
 
+With an AI agent set up, /ai in the bot sends a message, and the files
+you send, to the AI. 'finux config ai <agent>' sets it up. See
+'finux config ai --help'.
+
 The settings telegram-reminders, telegram-resume and telegram-resume-time
 tell what the daemon sends by itself. See 'finux config --help'.
 `

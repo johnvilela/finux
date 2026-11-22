@@ -223,7 +223,8 @@ database.
 | Setting | Values | Meaning |
 | --- | --- | --- |
 | `automatic-schedules` | `off` (default), `on` | On: a schedule with `--auto` creates its transactions on their dates, without your confirmation. Off: no schedule creates a transaction by itself |
-| `ai-provider` | `none` (default), `anthropic`, `openai`, `google`, `ollama` | The AI provider that Finux uses by default |
+| `ai-provider` | `none` (default), `claude`, `codex`, `opencode` | The AI agent program that answers `/ai` in the Telegram bot. `finux config ai <agent>` sets it. None: `/ai` is off |
+| `ai-model` | text (default empty) | The model that the agent uses for `/ai`, for example `sonnet`. Empty: the model of the agent |
 | `telegram-token` | text | The token of your Telegram bot. Finux never shows it: `config get` prints `(set)` or `(not set)` |
 | `telegram-reminders` | `off` (default), `on` | On: the daemon sends reminders to the allowed people in Telegram |
 | `telegram-resume` | `off` (default), `daily`, `monthly` | The daemon sends the resume in Telegram each day, or on day 1 of each month |
@@ -234,7 +235,7 @@ database.
 ./bin/finux config                              # the settings screen
 ./bin/finux config get                          # all settings
 ./bin/finux config get ai-provider              # one value
-./bin/finux config set ai-provider anthropic
+./bin/finux config set ai-provider claude
 ./bin/finux config set automatic-schedules on
 ./bin/finux config set telegram-resume-time 07:30
 ./bin/finux config set daemon-mcp ""            # an empty text clears a text setting
@@ -875,6 +876,7 @@ options as in the terminal and without the word `finux`:
 /bg                    Budgets
 /gl                    Goals
 /ct                    Categories
+/ai                    Ask the AI; see below
 /help                  Show the commands
 /cancel                Stop the current question
 ```
@@ -909,6 +911,51 @@ The bot helps when a command comes without its values:
 
 A text that is not a command and not an answer gets: "Sorry, I did not
 understand."
+
+### AI
+
+With an AI agent set up, `/ai` sends your message to the AI. The AI has the
+Finux tools and skills, so it sees your data and can change it:
+
+```text
+/ai how was my month?
+/ai should I buy a 3000 phone now or next month?
+/ai new what do I owe on my cards?        Start a new conversation
+```
+
+Send a file, for example the PDF of a credit card bill or the photo of a
+receipt, with `/ai` at the start of its caption: `/ai import this bill`. A
+file with no caption waits: the bot keeps it for your next `/ai` message.
+The AI asks before it changes data, so answer with one more `/ai` message:
+`/ai yes, import it`.
+
+Set it up in the terminal:
+
+```sh
+finux config ai claude            # the MCP server, the skills, ai-memory and ai-provider
+finux config set ai-model sonnet  # optional: a smaller model costs less
+finux daemon install              # again, so the service finds the agent and shows /ai
+```
+
+- Each person has one conversation: a message continues the one before.
+  `/ai new` starts again. `/cancel` stops an answer in progress. An answer
+  has 10 minutes.
+- Finux starts the agent program for each message, with no screen, in the
+  folder `~/.finux/ai`. The agent gets the Finux tools, the ai-memory tools,
+  the skills and read access to the files you sent. It has no shell and it
+  writes no file. Only Claude Code has these limits now: with `codex` or
+  `opencode` as `ai-provider`, `/ai` tells that it cannot answer.
+- The files are in `~/.finux/ai/inbox/<user id>`, and only your user can
+  read them. The daemon deletes a file after 7 days. Telegram gives a bot
+  files of 20 MB or less.
+- With [ai-memory](https://github.com/akitaonrails/ai-memory) connected, the
+  AI saves what you decide and reads it in later conversations. All the
+  `/ai` conversations are one ai-memory project, `finux-finances`.
+- A new conversation loads all that your agent has: its tools, its skills
+  and its plugins. That can be many tokens for each new conversation. To pay
+  less, set `ai-model` and do not use `/ai new` without a reason.
+- `/ai` uses the login of the agent program on your machine. All the allowed
+  people use it.
 
 ## Daemon
 
@@ -977,10 +1024,18 @@ finux config ai opencode    # opencode
 finux config ai             # choose the agent from a list
 ```
 
-It does the two steps of the setup: it adds the Finux
-[MCP server](#mcp-server-for-ai-agents) to the agent, and it installs the
-[skills](#skills-for-ai-agents) in the skills folder of the agent. Then start
-a new session of the agent.
+It does the steps of the setup:
+
+1. It adds the Finux [MCP server](#mcp-server-for-ai-agents) to the agent.
+2. It installs the [skills](#skills-for-ai-agents) in the skills folder of
+   the agent.
+3. It connects [ai-memory](https://github.com/akitaonrails/ai-memory) to the
+   agent with `ai-memory setup`, so the AI keeps what it learns and what you
+   decide between sessions.
+4. It saves the agent in the setting `ai-provider`: the agent then answers
+   [`/ai` in the Telegram bot](#ai).
+
+Then start a new session of the agent.
 
 - For Claude Code and Codex it runs their own command (`claude mcp add`,
   `codex mcp add`), so the agent must be installed. For opencode it writes
@@ -988,11 +1043,15 @@ a new session of the agent.
   and a copy of the file as it was, `opencode.json.backup`.
 - `--read-only` gives the agent the tools that read your data, not the ones
   that change it.
+- When the ai-memory program is not installed, the command asks before it
+  runs the install script of the ai-memory project, which checks the release
+  against its checksum. Without a terminal it installs only with `--yes`.
+  `--no-memory` skips ai-memory.
 - Run it again after you update Finux or move its binary: it replaces the
   server and the skills.
 
-The next two sections tell what the two parts are and how to set up each one
-by hand.
+The next two sections tell what the first two parts are and how to set up
+each one by hand.
 
 ## MCP server for AI agents
 
