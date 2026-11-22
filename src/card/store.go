@@ -279,3 +279,37 @@ func (s *Store) Bills(cardID uint) ([]Bill, error) {
 	}
 	return bills, s.spent(bills)
 }
+
+// Change is a bill that got another status.
+type Change struct {
+	Bill Bill
+	// From is the status before and To is the status now.
+	From, To string
+}
+
+// SyncStatuses writes the status that each bill has on the YYYY-MM-DD
+// date today. It returns the bills that had another status before. A
+// bill that had no status, from an older Finux, is not in the result.
+func (s *Store) SyncStatuses(today string) ([]Change, error) {
+	var bills []Bill
+	if err := s.db.Order("id").Find(&bills).Error; err != nil {
+		return nil, err
+	}
+	if err := s.spent(bills); err != nil {
+		return nil, err
+	}
+	var changes []Change
+	for _, bill := range bills {
+		before, now := bill.Status, bill.StatusOn(today)
+		if before == now {
+			continue
+		}
+		if err := s.db.Model(&Bill{}).Where("id = ?", bill.ID).UpdateColumn("status", now).Error; err != nil {
+			return nil, err
+		}
+		if bill.Status = now; before != "" {
+			changes = append(changes, Change{Bill: bill, From: before, To: now})
+		}
+	}
+	return changes, nil
+}

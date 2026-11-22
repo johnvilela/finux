@@ -128,7 +128,7 @@ type billJSON struct {
 
 func billResult(owner card.Card, bill card.Bill) billJSON {
 	result := billJSON{
-		Period: bill.Period, ClosesOn: bill.ClosesOn, DueOn: bill.DueOn, Status: bill.Status(today()),
+		Period: bill.Period, ClosesOn: bill.ClosesOn, DueOn: bill.DueOn, Status: bill.StatusOn(today()),
 		Carried: cash(bill.Carried, owner.Currency), Spent: cash(bill.Spent, owner.Currency), Total: cash(bill.Total(), owner.Currency),
 	}
 	if bill.IsPaid() {
@@ -146,8 +146,10 @@ type transactionJSON struct {
 	Amount      cashJSON `json:"amount"`
 	Currency    string   `json:"currency"`
 	Date        string   `json:"date"`
-	Tags        []string `json:"tags"`
-	Category    string   `json:"category"`
+	// Status is pending for a date after today and cleared for the others.
+	Status   string   `json:"status"`
+	Tags     []string `json:"tags"`
+	Category string   `json:"category"`
 	// Account is the code of the account. A purchase of a credit card has
 	// credit_card and bill in its place. A payment has the three.
 	Account    string `json:"account,omitempty"`
@@ -250,7 +252,7 @@ type budgetJSON struct {
 func transactionResult(view transaction.View) transactionJSON {
 	result := transactionJSON{
 		ID: view.ID, Title: view.Title, Description: view.Description, Type: view.Type,
-		Amount: cash(view.Amount, view.Account.Currency), Currency: view.Account.Currency, Date: view.Date,
+		Amount: cash(view.Amount, view.Account.Currency), Currency: view.Account.Currency, Date: view.Date, Status: view.Status,
 		Tags: append([]string{}, view.TagList()...), Category: view.Category.Code, PairID: view.PairID,
 		Installment: view.Part, Installments: view.Parts, InstallmentID: view.InstallmentID,
 	}
@@ -330,6 +332,7 @@ func tool[A any](name, description string, call func(*gorm.DB, A) (any, error)) 
 			return nil, err
 		}
 		defer closeDatabase(db)
+		syncStatuses(db)
 		if mcpAutomatic {
 			runAutomatic(db)
 		}

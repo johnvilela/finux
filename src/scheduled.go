@@ -818,9 +818,19 @@ func announceAutomatic(db *gorm.DB, io streams) {
 	if !transactionsReady(db) {
 		return
 	}
+	syncStatuses(db)
 	for _, line := range runAutomatic(db) {
 		fmt.Fprintln(io.stdout, line)
 	}
+}
+
+// syncStatuses makes the stored statuses of the transactions and the
+// bills current for the date of today. It returns the bills that got
+// another status. Each command does it, so the statuses are right
+// without the daemon.
+func syncStatuses(db *gorm.DB) []card.Change {
+	changes, _ := transaction.NewStore(db).SyncStatuses(today())
+	return changes
 }
 
 // dueNotice returns one line that tells how many occurrences of the

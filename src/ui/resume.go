@@ -228,7 +228,7 @@ func ResumeView(resume Resume, plain bool) string {
 		rows := make([][]string, len(resume.Bills))
 		for i, pending := range resume.Bills {
 			rows[i] = []string{
-				pending.Card.Code, card.FormatPeriod(pending.Bill.Period), pending.Bill.Status(resume.Today),
+				pending.Card.Code, card.FormatPeriod(pending.Bill.Period), pending.Bill.StatusOn(resume.Today),
 				transaction.FormatDate(pending.Bill.DueOn), money.Format(pending.Bill.Total(), pending.Card.Currency),
 			}
 		}
@@ -361,7 +361,7 @@ func styledResume(resume Resume) string {
 	if len(resume.Bills) > 0 {
 		section("BILLS TO PAY")
 		for _, pending := range resume.Bills {
-			status := pending.Bill.Status(resume.Today)
+			status := pending.Bill.StatusOn(resume.Today)
 			left := swatch(pending.Card.Color, "●") + " " + pad(pending.Card.Code, codeWidth) + "  " + card.FormatPeriod(pending.Bill.Period) + "  " +
 				statusStyle(status).Render(pad(status, statusWidth)) + styleDim.Render("due "+transaction.FormatDate(pending.Bill.DueOn))
 			out += indent + spread(left, money.Format(pending.Bill.Total(), pending.Card.Currency)) + "\n"

@@ -216,7 +216,11 @@ func (s *Store) UpdateParts(id uint, scope Scope, draft Draft, changed Changed) 
 	if err != nil {
 		return nil, err
 	}
-	return updated, nil
+	stamped := make([]*Transaction, len(updated))
+	for i := range updated {
+		stamped[i] = &updated[i]
+	}
+	return updated, s.stamp(nil, stamped...)
 }
 
 // DeleteParts removes the parts of the scope for the transaction id
@@ -239,5 +243,5 @@ func (s *Store) DeleteParts(id uint, scope Scope) ([]uint, error) {
 		}
 		ids[i] = part.ID
 	}
-	return ids, s.db.Delete(&Transaction{}, ids).Error
+	return ids, s.stamp(s.db.Delete(&Transaction{}, ids).Error)
 }

@@ -178,6 +178,11 @@ func signed(kind string, value int64) int64 {
 // transaction in installments it inserts the parts and returns the
 // first one it created.
 func (s *Store) Create(draft Draft) (Transaction, error) {
+	created, err := s.create(draft)
+	return created, s.stamp(err, &created)
+}
+
+func (s *Store) create(draft Draft) (Transaction, error) {
 	if err := draft.clean(); err != nil {
 		return Transaction{}, err
 	}
@@ -281,7 +286,8 @@ var shared = []string{"Title", "Description", "CategoryID", "Date", "Tags", "Goa
 // other side, except a new value between two currencies. A transaction
 // of a credit card keeps its bill when its date and its card stay.
 func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
-	return s.update(id, draft, "")
+	updated, err := s.update(id, draft, "")
+	return updated, s.stamp(err, &updated)
 }
 
 // update is Update for a transaction that goes to the bill of the given
@@ -405,12 +411,16 @@ func (s *Store) update(id uint, draft Draft, period string) (Transaction, error)
 // Delete removes a transaction permanently. For a transfer it removes
 // the two sides. For a payment it opens the bill again.
 func (s *Store) Delete(id uint) error {
+	return s.stamp(s.remove(id))
+}
+
+func (s *Store) remove(id uint) error {
 	current, err := s.take(id)
 	if err != nil {
 		return err
 	}
 	if current.Type == Payment {
-		return s.Unpay(current.BillID)
+		return s.unpay(current.BillID)
 	}
 	if current.CardID != 0 {
 		if err := s.unlocked(current.BillID); err != nil {
@@ -723,6 +733,11 @@ func (s *Store) transferCategory() (category.Category, error) {
 // returns the payment transaction. A bill that owes nothing gets no
 // transaction: its credit goes to the next bill.
 func (s *Store) PayBill(billID, accountID uint, value int64, date string) (Transaction, error) {
+	payment, err := s.payBill(billID, accountID, value, date)
+	return payment, s.stamp(err, &payment)
+}
+
+func (s *Store) payBill(billID, accountID uint, value int64, date string) (Transaction, error) {
 	cards := card.NewStore(s.db)
 	bill, err := cards.Bill(billID)
 	if err != nil {
@@ -804,6 +819,10 @@ func (s *Store) PayBill(billID, accountID uint, value int64, date string) (Trans
 // Unpay deletes the payment of a bill: the bill is not paid again and
 // the value it sent to the next bill comes back.
 func (s *Store) Unpay(billID uint) error {
+	return s.stamp(s.unpay(billID))
+}
+
+func (s *Store) unpay(billID uint) error {
 	cards := card.NewStore(s.db)
 	bill, err := cards.Bill(billID)
 	if err != nil {
@@ -889,4 +908,35 @@ func withNote(description, note string) string {
 		text = append(text[:max(room-1, 0)], '…')
 	}
 	return string(text) + note
+}
+
+// SyncStatuses writes the status that each transaction and each bill
+// has on the YYYY-MM-DD date today. It returns the bills that had
+// another status before.
+func (s *Store) SyncStatuses(today string) ([]card.Change, error) {
+	for status, dates := range map[string]string{StatusCleared: "date <= ?", StatusPending: "date > ?"} {
+		err := s.db.Model(&Transaction{}).Where(dates, today).Where("status IS NULL OR status <> ?", status).
+			UpdateColumn("status", status).Error
+		if err != nil {
+			return nil, err
+		}
+	}
+	return card.NewStore(s.db).SyncStatuses(today)
+}
+
+// stamp ends a change to the transactions: it gives each transaction
+// that changed its status and makes the stored statuses current. It
+// does nothing when the change failed with err.
+func (s *Store) stamp(err error, changed ...*Transaction) error {
+	if err != nil {
+		return err
+	}
+	today := Today()
+	for _, current := range changed {
+		if current.ID != 0 {
+			current.Status = StatusOn(current.Date, today)
+		}
+	}
+	_, err = s.SyncStatuses(today)
+	return err
 }

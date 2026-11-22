@@ -191,6 +191,9 @@ type Bill struct {
 	CarriedTo uint
 	// PaymentID is the payment transaction, or 0.
 	PaymentID uint
+	// Status is the status of the bill on the last date the store looked
+	// at it: the result of StatusOn. SyncStatuses of the store writes it.
+	Status    string `gorm:"size:6"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	// Spent is the sum of the transactions of the bill: purchases less
@@ -204,10 +207,10 @@ func (b Bill) Total() int64 { return b.Carried + b.Spent }
 // IsPaid reports whether the bill has a payment.
 func (b Bill) IsPaid() bool { return b.PaidOn != "" }
 
-// Status returns the status of the bill on the YYYY-MM-DD date today.
+// StatusOn returns the status of the bill on the YYYY-MM-DD date today.
 // A bill is open until its closing date, then closed until its due
 // date, then late. A bill that owes nothing is never late.
-func (b Bill) Status(today string) string {
+func (b Bill) StatusOn(today string) string {
 	switch {
 	case b.IsPaid():
 		return StatusPaid

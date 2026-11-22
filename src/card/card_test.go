@@ -100,18 +100,18 @@ func TestBillTotalAndStatus(t *testing.T) {
 		"2026-12-05": StatusClosed,
 		"2026-12-06": StatusLate,
 	} {
-		if got := bill.Status(today); got != want {
+		if got := bill.StatusOn(today); got != want {
 			t.Errorf("Status(%s) = %s, want %s", today, got, want)
 		}
 	}
 	paid := bill
 	paid.PaidOn = "2026-12-01"
-	if got := paid.Status("2027-01-01"); got != StatusPaid {
+	if got := paid.StatusOn("2027-01-01"); got != StatusPaid {
 		t.Errorf("paid bill: Status = %s", got)
 	}
 	// A bill that owes nothing is never late.
 	empty := Bill{ClosesOn: "2026-11-25", DueOn: "2026-12-05", Spent: -500}
-	if got := empty.Status("2027-01-01"); got != StatusClosed {
+	if got := empty.StatusOn("2027-01-01"); got != StatusClosed {
 		t.Errorf("bill without debt: Status = %s, want %s", got, StatusClosed)
 	}
 }

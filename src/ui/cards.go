@@ -117,7 +117,7 @@ func BillTable(owner card.Card, bills []card.Bill, today string, plain bool) str
 	rows := make([][]string, len(bills))
 	statuses := make([]string, len(bills))
 	for i, bill := range bills {
-		statuses[i] = bill.Status(today)
+		statuses[i] = bill.StatusOn(today)
 		paid := "-"
 		if bill.IsPaid() {
 			paid = money.Format(bill.Paid, owner.Currency)
@@ -172,7 +172,7 @@ type CardDetails struct {
 
 // pendingLine describes a bill that waits for its payment.
 func pendingLine(owner card.Card, bill card.Bill, today string) (status, text string) {
-	status = bill.Status(today)
+	status = bill.StatusOn(today)
 	return status, fmt.Sprintf("Bill %s is %s: %s, due %s", card.FormatPeriod(bill.Period), status,
 		money.Format(bill.Total(), owner.Currency), transaction.FormatDate(bill.DueOn))
 }

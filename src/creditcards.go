@@ -216,7 +216,7 @@ func (c *creditCardsCommand) gather(current card.Card) (ui.CardDetails, error) {
 	// The oldest bill comes first: it is the most urgent.
 	slices.Reverse(bills)
 	for _, bill := range bills {
-		if status := bill.Status(details.Today); bill.ID != details.Bill.ID && (status == card.StatusClosed || status == card.StatusLate) && bill.Total() != 0 {
+		if status := bill.StatusOn(details.Today); bill.ID != details.Bill.ID && (status == card.StatusClosed || status == card.StatusLate) && bill.Total() != 0 {
 			details.Pending = append(details.Pending, bill)
 		}
 	}
@@ -489,7 +489,7 @@ func (c *creditCardsCommand) waiting(owner card.Card, date string) (card.Bill, e
 	}
 	slices.Reverse(bills)
 	index := slices.IndexFunc(bills, func(current card.Bill) bool {
-		status := current.Status(date)
+		status := current.StatusOn(date)
 		return status == card.StatusClosed || status == card.StatusLate
 	})
 	if index < 0 {

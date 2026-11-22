@@ -168,7 +168,7 @@ func TestPayBill(t *testing.T) {
 		t.Fatalf("payment = %+v", payment)
 	}
 	paid := f.bill(t, market.BillID)
-	if paid.Status("2027-01-01") != card.StatusPaid || paid.PaidOn != "2026-12-01" || paid.Paid != 15000 || paid.Remaining != 0 || paid.PaymentID != payment.ID || paid.CarriedTo != 0 {
+	if paid.StatusOn("2027-01-01") != card.StatusPaid || paid.PaidOn != "2026-12-01" || paid.Paid != 15000 || paid.Remaining != 0 || paid.PaymentID != payment.ID || paid.CarriedTo != 0 {
 		t.Fatalf("paid bill = %+v", paid)
 	}
 	if got := f.balance(t, "INTER"); got != before-15000 {

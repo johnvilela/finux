@@ -5,6 +5,7 @@ package transaction
 import (
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -111,8 +112,11 @@ type Transaction struct {
 	Parts         int
 	// ScheduleID is the schedule that created the transaction, or 0.
 	ScheduleID uint `gorm:"index"`
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// Status tells if the date of the transaction came: StatusOn of its
+	// date. SyncStatuses of the store writes it.
+	Status    string `gorm:"size:7"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Value returns the amount without its sign.
@@ -317,8 +321,31 @@ func FormatDate(date string) string {
 	return parsed.Format(displayDate)
 }
 
-// Today returns the current local date as YYYY-MM-DD.
-func Today() string { return time.Now().Format(isoDate) }
+// The statuses of a transaction.
+const (
+	// StatusPending is a transaction with a date after today: it is not
+	// in the balance yet.
+	StatusPending = "pending"
+	StatusCleared = "cleared"
+)
+
+// StatusOn returns the status that a transaction with the YYYY-MM-DD
+// date has on the date today.
+func StatusOn(date, today string) string {
+	if date > today {
+		return StatusPending
+	}
+	return StatusCleared
+}
+
+// Today returns the current local date as YYYY-MM-DD. The FINUX_TODAY
+// environment variable replaces it, for tests and demonstrations.
+func Today() string {
+	if date, err := ParseDate(os.Getenv("FINUX_TODAY")); err == nil {
+		return date
+	}
+	return time.Now().Format(isoDate)
+}
 
 var yearPattern = regexp.MustCompile(`^\d{4}$`)
 

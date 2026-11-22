@@ -355,6 +355,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 			{"Category", view.Category.Code + "  " + view.Category.Name},
 			{"Date", date},
 		}
+		if view.Status != "" {
+			fields = append(fields, [2]string{"Status", view.Status})
+		}
 		if part != "" {
 			fields = append(fields, [2]string{"Part", part})
 		}
@@ -442,6 +445,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 		row("Category", paint(categoryColor.Hex, "●")+" "+styleBold.Render(view.Category.Code)+"  "+view.Category.Name),
 		row("Date", date),
 	)
+	if view.Status != "" {
+		lines = append(lines, row("Status", view.Status))
+	}
 	if part != "" {
 		lines = append(lines, row("Part", part))
 	}
