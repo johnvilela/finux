@@ -14,7 +14,11 @@ import (
 func configHelp() string {
 	settings := ""
 	for _, definition := range setting.Definitions() {
-		settings += fmt.Sprintf("  %-20s  %s\n", definition.Key, strings.Join(definition.Values, ", "))
+		values := strings.Join(definition.Values, ", ")
+		if definition.Text() {
+			values = "text"
+		}
+		settings += fmt.Sprintf("  %-20s  %s\n", definition.Key, values)
 	}
 	return "Change the settings, check the database and set up AI agents\n\n" +
 		green.Render("Usage:") + " finux config [command] [arguments]\n\n" +
@@ -37,6 +41,11 @@ which is the default, no schedule creates a transaction by itself. See
 'finux sc --help'.
 
 ai-provider: the AI provider that Finux uses by default.
+
+telegram-token, telegram-reminders, telegram-resume, telegram-resume-time
+and daemon-mcp are for the Telegram bot and the daemon. See
+'finux config telegram --help' and 'finux daemon --help'. A setting that
+is text changes only with 'finux config set': give "" to clear it.
 
 Run 'finux config <command> --help' for the options of ai, doctor, mcp and skills.
 `
@@ -92,6 +101,16 @@ func settingError(err error) error {
 	return err
 }
 
+// settingDefinition returns the definition of a setting that exists.
+func settingDefinition(key string) setting.Definition {
+	for _, definition := range setting.Definitions() {
+		if definition.Key == key {
+			return definition
+		}
+	}
+	return setting.Definition{}
+}
+
 func getSettings(args []string, io streams) error {
 	if len(args) > 1 {
 		return usageError("get: unexpected argument: " + args[1])
@@ -105,7 +124,7 @@ func getSettings(args []string, io streams) error {
 		if err != nil {
 			return settingError(err)
 		}
-		_, err = fmt.Fprintln(io.stdout, value)
+		_, err = fmt.Fprintln(io.stdout, settingDefinition(args[0]).Show(value))
 		return err
 	}
 	values, err := store.All()
@@ -114,7 +133,7 @@ func getSettings(args []string, io streams) error {
 	}
 	out := ""
 	for _, definition := range setting.Definitions() {
-		out += fmt.Sprintf("%-19s  %s\n", definition.Key, values[definition.Key])
+		out += fmt.Sprintf("%-20s  %s\n", definition.Key, definition.Show(values[definition.Key]))
 	}
 	_, err = fmt.Fprint(io.stdout, out)
 	return err
@@ -138,7 +157,7 @@ func setSetting(args []string, io streams) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(io.stdout, ui.Success(args[0]+" set to "+value))
+	_, err = fmt.Fprintln(io.stdout, ui.Success(args[0]+" set to "+settingDefinition(args[0]).Show(value)))
 	return err
 }
 
@@ -152,13 +171,17 @@ func editSettings(io streams) error {
 	if err != nil {
 		return err
 	}
-	definitions := setting.Definitions()
-	rows := make([]ui.SettingRow, len(definitions))
-	for i, definition := range definitions {
-		rows[i] = ui.SettingRow{
+	// The screen changes a setting that has a list of values. A text
+	// setting changes only with 'config set'.
+	var rows []ui.SettingRow
+	for _, definition := range setting.Definitions() {
+		if definition.Text() {
+			continue
+		}
+		rows = append(rows, ui.SettingRow{
 			Key: definition.Key, Title: definition.Title, Description: definition.Description,
 			Values: definition.Values, Value: values[definition.Key],
-		}
+		})
 	}
 	screen, err := program(ui.NewSettings(rows))
 	if err != nil {

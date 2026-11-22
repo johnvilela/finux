@@ -152,12 +152,48 @@ func TestConfigCommand(t *testing.T) {
 	}
 }
 
+// settingsList is the output of 'config get' with the two first
+// settings changed and the others at their defaults.
+func settingsList(schedules, provider string) string {
+	return "automatic-schedules   " + schedules + "\n" +
+		"ai-provider           " + provider + "\n" +
+		"telegram-token        (not set)\n" +
+		"telegram-reminders    off\n" +
+		"telegram-resume       off\n" +
+		"telegram-resume-time  08:00\n" +
+		"daemon-mcp            \n"
+}
+
+func TestConfigTextSettings(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "data")
+	succeed(t, home, "init")
+	const token = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw_"
+	// A secret never shows on the output.
+	if got := succeed(t, home, "config", "set", "telegram-token", token); got != "✓ telegram-token set to (set)\n" {
+		t.Fatalf("config set telegram-token = %q", got)
+	}
+	if got := succeed(t, home, "config", "get", "telegram-token"); got != "(set)\n" {
+		t.Fatalf("config get telegram-token = %q", got)
+	}
+	if got := succeed(t, home, "config", "get"); strings.Contains(got, token) || !strings.Contains(got, "telegram-token        (set)\n") {
+		t.Fatalf("config get = %q", got)
+	}
+	if got := succeed(t, home, "config", "set", "telegram-resume-time", "7:30"); got != "✓ telegram-resume-time set to 07:30\n" {
+		t.Fatalf("config set telegram-resume-time = %q", got)
+	}
+	fail(t, home, 2, "config: unknown value for telegram-resume-time: give a time as HH:MM, for example 08:00", "config", "set", "telegram-resume-time", "noon")
+	fail(t, home, 2, "config: unknown value for daemon-mcp: give an address as host:port, for example 127.0.0.1:8765", "config", "set", "daemon-mcp", "here")
+	if got := succeed(t, home, "config", "set", "telegram-token", ""); got != "✓ telegram-token set to (not set)\n" {
+		t.Fatalf("config set of an empty token = %q", got)
+	}
+}
+
 func TestConfigSettings(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "data")
 	fail(t, home, 1, "Run 'finux init'", "config", "get")
 	succeed(t, home, "init")
 	// A setting that was never changed has its default value.
-	if got := succeed(t, home, "config", "get"); got != "automatic-schedules  off\nai-provider          none\n" {
+	if got := succeed(t, home, "config", "get"); got != settingsList("off", "none") {
 		t.Fatalf("config get = %q", got)
 	}
 	if got := succeed(t, home, "config", "set", "ai-provider", "Anthropic"); got != "✓ ai-provider set to anthropic\n" {
@@ -166,14 +202,14 @@ func TestConfigSettings(t *testing.T) {
 	if got := succeed(t, home, "config", "set", "automatic-schedules", "on"); got != "✓ automatic-schedules set to on\n" {
 		t.Fatalf("config set = %q", got)
 	}
-	if got := succeed(t, home, "config", "get"); got != "automatic-schedules  on\nai-provider          anthropic\n" {
+	if got := succeed(t, home, "config", "get"); got != settingsList("on", "anthropic") {
 		t.Fatalf("config get = %q", got)
 	}
 	if got := succeed(t, home, "config", "get", "ai-provider"); got != "anthropic\n" {
 		t.Fatalf("config get ai-provider = %q", got)
 	}
 	fail(t, home, 2, `config: unknown value "skynet" for ai-provider: use one of none, anthropic, openai, google, ollama`, "config", "set", "ai-provider", "skynet")
-	fail(t, home, 2, `config: unknown setting "color": use one of automatic-schedules, ai-provider`, "config", "set", "color", "red")
+	fail(t, home, 2, `config: unknown setting "color": use one of automatic-schedules, ai-provider, telegram-token`, "config", "set", "color", "red")
 	fail(t, home, 2, `config: unknown setting "color"`, "config", "get", "color")
 	fail(t, home, 2, "config: set: give a setting and its value", "config", "set", "ai-provider")
 	fail(t, home, 2, "config: set: unexpected argument: extra", "config", "set", "ai-provider", "none", "extra")
