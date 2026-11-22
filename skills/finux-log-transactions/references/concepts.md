@@ -362,8 +362,9 @@ Money fields are money objects, as in [Money](#money).
 **Category:** `id`, `code`, `name`, `description`, `color`, `accepts`.
 
 **Transaction:** `id`, `title`, `description`, `type`, `amount` (signed),
-`currency`, `date`, `tags` (list, each with `#`), `category` (code), and
-its place:
+`currency`, `date`, `status` (`pending` for a date after today: the
+transaction is not in the balance yet; `cleared` for the others), `tags`
+(list, each with `#`), `category` (code), and its place:
 
 - in an account: `account` (code);
 - a purchase on a credit card: `credit_card` (code) and `bill` (`YYYY-MM`),

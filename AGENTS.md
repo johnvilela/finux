@@ -15,6 +15,7 @@ Finux is a personal finance manager written in Go, starting with a CLI.
 - Run `go test ./...` and `go vet ./...`.
 - Build development mode with `make dev` and run `./bin/finux-dev`.
 - Build production mode with `make prod` and run `./bin/finux`.
+- Test the daemon and the Telegram bot with `./bin/finux-dev daemon run`. The tests use a fake Telegram server: set `FINUX_TELEGRAM_API` to its address.
 
 <!-- ai-memory:start -->
 ## Long-term memory (ai-memory)

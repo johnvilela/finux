@@ -224,6 +224,11 @@ database.
 | --- | --- | --- |
 | `automatic-schedules` | `off` (default), `on` | On: a schedule with `--auto` creates its transactions on their dates, without your confirmation. Off: no schedule creates a transaction by itself |
 | `ai-provider` | `none` (default), `anthropic`, `openai`, `google`, `ollama` | The AI provider that Finux uses by default |
+| `telegram-token` | text | The token of your Telegram bot. Finux never shows it: `config get` prints `(set)` or `(not set)` |
+| `telegram-reminders` | `off` (default), `on` | On: the daemon sends reminders to the allowed people in Telegram |
+| `telegram-resume` | `off` (default), `daily`, `monthly` | The daemon sends the resume in Telegram each day, or on day 1 of each month |
+| `telegram-resume-time` | text, `HH:MM` (default `08:00`) | The time when the daemon sends the resume |
+| `daemon-mcp` | text, `host:port` (default empty) | The daemon serves the MCP server on this address. Empty: it does not |
 
 ```sh
 ./bin/finux config                              # the settings screen
@@ -231,7 +236,12 @@ database.
 ./bin/finux config get ai-provider              # one value
 ./bin/finux config set ai-provider anthropic
 ./bin/finux config set automatic-schedules on
+./bin/finux config set telegram-resume-time 07:30
+./bin/finux config set daemon-mcp ""            # an empty text clears a text setting
 ```
+
+The settings screen shows the settings that have a list of values. A setting
+that is text changes only with `finux config set`.
 
 Without a terminal, `finux config` shows its help. `finux config` also has
 the commands that check Finux and connect it to AI agents:
@@ -239,6 +249,7 @@ the commands that check Finux and connect it to AI agents:
 ```text
 finux config doctor     Check the database
 finux config ai         Connect Finux to an AI agent: its MCP server and its skills
+finux config telegram   Set up the Telegram bot and its allowed people
 finux config mcp        Run the MCP server for AI agents
 finux config skills     List, install or remove the skills for AI agents
 ```
@@ -370,6 +381,11 @@ finux tx edit [id] [options]     Change a transaction
 finux tx delete [id]             Delete a transaction permanently
 finux tx help                    Show all commands and options
 ```
+
+A transaction has a status. It is `pending` while its date is after today:
+the transaction is not in the balance of its account yet. On its date it
+becomes `cleared`. Finux keeps the status in the database and changes it when
+the date comes. `finux tx <id>` shows it.
 
 Short forms: `l` for `list`, `a` for `add`, `e` for `edit` and `d` for `delete`.
 
@@ -559,6 +575,10 @@ A bill has one of four statuses:
 - `closed`: the closing date passed; the bill waits for its payment.
 - `late`: the due date passed without a payment.
 - `paid`: the bill has a payment.
+
+Finux keeps the status in the database and changes it when a date passes:
+each command does this before it runs, and the [daemon](#daemon) does it also
+while no command runs.
 
 `finux cc <code>` shows the transactions of the open bill, and one line for
 each bill that is closed or late. `finux cc bills <code>` lists all the bills.
@@ -806,6 +826,145 @@ to today.
 It also shows the accounts with their balances and a total for each currency,
 the credit card bills to pay, the budgets with a period today and the goals.
 These are always as they are today, also with `--month`.
+
+## Telegram
+
+Finux has a bot for Telegram, so you and the people you choose use Finux from
+a phone. It is your own bot: you create it, and it runs on your machine in
+the [daemon](#daemon). Telegram is the only service it talks to.
+
+### Set up
+
+1. In Telegram, talk to `@BotFather` and send `/newbot`. It gives a token.
+2. Save the token and start the daemon:
+
+   ```sh
+   finux config telegram token 123456789:AAH...
+   finux daemon install        # or 'finux daemon run' in a terminal
+   ```
+
+3. Send a message to your bot. It answers with your Telegram user ID, a
+   number. The bot does nothing more for a person who is not allowed.
+4. Allow each person with the user ID that the bot showed:
+
+   ```sh
+   finux config telegram allow 123456 Me
+   finux config telegram allow 654321 My wife
+   finux config telegram                  # the token state and the allowed people
+   finux config telegram deny 654321
+   ```
+
+The `FINUX_TELEGRAM_TOKEN` environment variable replaces the saved token. A
+change of the allowed people needs no restart of the daemon; a new token
+does. The bot answers only in a private chat, not in a group.
+
+All the allowed people use the same database: yours. Allow only people who
+can see and change all your data.
+
+### Commands
+
+The bot has the commands of Finux that read and change data, with the same
+options as in the terminal and without the word `finux`:
+
+```text
+/rs                    Resume of the month
+/tx                    Transactions
+/ac                    Accounts
+/cc                    Credit cards and bills
+/sc                    Scheduled transactions
+/bg                    Budgets
+/gl                    Goals
+/ct                    Categories
+/help                  Show the commands
+/cancel                Stop the current question
+```
+
+```text
+/tx add --title "Weekly market" --value 50,25 --account NU --category FOOD
+/tx --date 11/2026
+/cc bills VISA
+/sc pay RENT
+/tx --help
+```
+
+The long names work too: `/transactions`, `/accounts`, `/credit_card` (Telegram
+permits no dash in a command). `config`, `init`, `update` and `daemon` are
+only in the terminal. A phone often changes `--` to a long dash and quotes
+to curly quotes: the bot reads them as the plain ones.
+
+The bot helps when a command comes without its values:
+
+- An `add` command with no options asks for each value, one question at a
+  time, with buttons for the accounts, the categories and the other values
+  that have a list. This works for `/tx add`, `/ac add`, `/ct add`,
+  `/cc add`, `/gl add`, `/bg add` and `/sc add`. `/cc pay` asks for the
+  card, the account and the value. Write an answer or press a button;
+  `/cancel` stops the questions. For a transfer, installments or an option
+  the questions do not have, give the options in the command.
+- A command with no code or id, for example `/tx delete` or `/ac edit`, shows
+  the items as buttons.
+- A command that deletes data asks first, with the buttons Confirm and
+  Cancel. With `--yes` it does not ask.
+- `edit` takes its changes as options: `/tx edit 12 --value 60`.
+
+A text that is not a command and not an answer gets: "Sorry, I did not
+understand."
+
+## Daemon
+
+The daemon is a Finux process that stays alive. It is optional: all the
+commands work without it.
+
+```text
+finux daemon run          Run the daemon in this terminal, until Ctrl+C
+finux daemon install      Make the daemon a service: it starts now and at each login
+finux daemon uninstall    Stop the service and remove it
+finux daemon start        Start the service
+finux daemon stop         Stop the service
+finux daemon restart      Start the service again
+finux daemon status       Show if the service runs
+finux daemon logs         Show the last lines of the log; --follow keeps it open
+```
+
+While the daemon runs, it does this:
+
+- It runs the [Telegram bot](#telegram), when a token is set.
+- It keeps the status of the bills and the transactions current.
+- It creates the transactions of the automatic schedules on their dates,
+  when the setting `automatic-schedules` is on. Without the daemon, this
+  happens the next time you run a command.
+- With `telegram-reminders` on, it tells the allowed people in Telegram about
+  a schedule that is due, a bill that closed, a bill that is due today or
+  tomorrow, a late bill, a budget near or over its limit, and a transaction
+  that an automatic schedule created. Each reminder comes one time.
+- With `telegram-resume` on `daily` or `monthly`, it sends the output of
+  `finux resume` at the time in `telegram-resume-time`. Monthly is on day 1.
+- With an address in `daemon-mcp`, it serves the
+  [MCP server](#http) there, with all its tools. For an address that other
+  computers can reach, set the `FINUX_MCP_TOKEN` environment variable.
+
+```sh
+finux config set telegram-reminders on
+finux config set telegram-resume daily
+finux config set daemon-mcp 127.0.0.1:8765
+finux daemon restart
+```
+
+The daemon reads the token of the bot and `daemon-mcp` when it starts, so
+start it again after you change them. The other settings need no restart.
+
+The service is a systemd user unit, `~/.config/systemd/user/finux.service`.
+`finux daemon install` writes it for the binary that runs the command, and
+for the database in `FINUX_DB` when that variable is set. Run it again after
+you move the binary. `finux update` starts the service again by itself. The
+service runs while you are logged in; to keep it running after you log out:
+
+```sh
+loginctl enable-linger
+```
+
+Without systemd, run `finux daemon run` with the tool that starts your
+programs. A development build has no service: use `./bin/finux-dev daemon run`.
 
 ## AI agents
 
