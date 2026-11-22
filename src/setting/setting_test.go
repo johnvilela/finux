@@ -49,7 +49,7 @@ func TestDefinitions(t *testing.T) {
 			t.Errorf("definition %s: the first value must be the default", definition.Key)
 		}
 	}
-	if got := strings.Join(definitions[1].Values, " "); got != "none anthropic openai google ollama" {
+	if got := strings.Join(definitions[1].Values, " "); got != "none claude codex opencode" {
 		t.Errorf("providers = %q", got)
 	}
 }
@@ -75,13 +75,13 @@ func TestStore(t *testing.T) {
 			t.Fatalf("after Set(%q): %q", input, value)
 		}
 	}
-	if err := store.Set(AIProvider, "Anthropic"); err != nil {
+	if err := store.Set(AIProvider, "Claude"); err != nil {
 		t.Fatal(err)
 	}
-	if value, _ := store.Get(AIProvider); value != "anthropic" {
+	if value, _ := store.Get(AIProvider); value != "claude" {
 		t.Fatalf("provider = %q", value)
 	}
-	if err := store.Set(AIProvider, "skynet"); err == nil || !strings.Contains(err.Error(), `unknown value "skynet" for ai-provider: use one of none, anthropic, openai, google, ollama`) {
+	if err := store.Set(AIProvider, "skynet"); err == nil || !strings.Contains(err.Error(), `unknown value "skynet" for ai-provider: use one of none, claude, codex, opencode`) {
 		t.Fatalf("Set of an unknown value = %v", err)
 	}
 	if err := store.Set("color", "red"); !errors.Is(err, ErrUnknown) || !strings.Contains(err.Error(), strings.ReplaceAll(allKeys, " ", ", ")) {
@@ -90,7 +90,7 @@ func TestStore(t *testing.T) {
 	if _, err := store.Get("color"); !errors.Is(err, ErrUnknown) {
 		t.Fatalf("Get of an unknown setting = %v", err)
 	}
-	if value, _ := store.Get(AIProvider); value != "anthropic" {
+	if value, _ := store.Get(AIProvider); value != "claude" {
 		t.Fatalf("provider after refused changes = %q", value)
 	}
 }
@@ -142,7 +142,18 @@ func TestSecretSettingsAreNotShown(t *testing.T) {
 		t.Errorf("Show of no token = %q", got)
 	}
 	provider, _ := find(AIProvider)
-	if got := provider.Show("anthropic"); got != "anthropic" {
+	if got := provider.Show("claude"); got != "claude" {
 		t.Errorf("Show of a provider = %q", got)
+	}
+}
+
+func TestOldValueGivesTheDefault(t *testing.T) {
+	store := newStore(t)
+	// An older Finux saved the name of a provider that is not a value now.
+	if err := store.db.Save(&Setting{Key: AIProvider, Value: "anthropic"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if value, err := store.Get(AIProvider); err != nil || value != "none" {
+		t.Fatalf("Get of an old value = %q, %v", value, err)
 	}
 }

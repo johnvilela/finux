@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"finux/src/setting"
 	"finux/src/ui"
 )
 
@@ -22,6 +23,14 @@ type aiAgent struct {
 }
 
 var aiAgents = []aiAgent{{"claude", "Claude Code"}, {"codex", "Codex"}, {"opencode", "opencode"}}
+
+// aiOptions are the options of 'finux config ai'.
+type aiOptions struct {
+	// readOnly gives the agent the tools that read data only.
+	readOnly bool
+	// noMemory skips ai-memory. yes installs ai-memory without a question.
+	noMemory, yes bool
+}
 
 func aiHelp() string {
 	return "Connect Finux to an AI agent\n\n" +
@@ -59,10 +68,14 @@ func runAI(args []string, io streams) int {
 			return write(io, aiHelp())
 		}
 	}
-	var readOnly bool
-	positional, _, err := parse("ai", args, func(f *flag.FlagSet) { f.BoolVar(&readOnly, "read-only", false, "") }, 1)
+	var options aiOptions
+	positional, _, err := parse("ai", args, func(f *flag.FlagSet) {
+		f.BoolVar(&options.readOnly, "read-only", false, "")
+		f.BoolVar(&options.noMemory, "no-memory", false, "")
+		f.BoolVar(&options.yes, "yes", false, "")
+	}, 1)
 	if err == nil {
-		err = setupAgent(reference(positional), readOnly, io)
+		err = setupAgent(reference(positional), options, io)
 	}
 	// The module name is in the message of a usage error already.
 	var usage usageError
@@ -99,7 +112,8 @@ func chooseAgent(key string, io streams) (aiAgent, error) {
 }
 
 // setupAgent adds the MCP server to an agent and installs the skills.
-func setupAgent(key string, readOnly bool, io streams) error {
+func setupAgent(key string, options aiOptions, io streams) error {
+	readOnly := options.readOnly
 	agent, err := chooseAgent(key, io)
 	if err != nil {
 		return err
@@ -130,8 +144,25 @@ func setupAgent(key string, readOnly bool, io streams) error {
 	}
 	_, err = fmt.Fprint(io.stdout, ui.Success(added)+"\n"+
 		ui.Success(fmt.Sprintf("%s installed in %s", plural(int64(written), "skill"), folder))+"\n"+
+		saveAgent(agent)+
 		"Start a new session of "+agent.name+" to use Finux.\n")
 	return err
+}
+
+// saveAgent makes the agent the one that answers /ai in the Telegram
+// bot. It returns the line that tells it. Without a database it tells
+// how to do it later: the setup of an agent needs no database.
+func saveAgent(agent aiAgent) string {
+	later := fmt.Sprintf("No database yet: run 'finux init', then 'finux config set %s %s' to use /ai in Telegram.\n", setting.AIProvider, agent.key)
+	db, store, err := openSettings()
+	if err != nil {
+		return later
+	}
+	defer closeDatabase(db)
+	if err := store.Set(setting.AIProvider, agent.key); err != nil {
+		return later
+	}
+	return ui.Success(fmt.Sprintf("%s set to %s: /ai in Telegram uses %s", setting.AIProvider, agent.key, agent.name)) + "\n"
 }
 
 // addServer adds the MCP server to an agent. server is the command that

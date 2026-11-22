@@ -34,6 +34,9 @@ const (
 	DaemonMCP = "daemon-mcp"
 )
 
+// None is the value of AIProvider for no AI.
+const None = "none"
+
 // The values of TelegramResume, after Off.
 const (
 	Daily   = "daily"
@@ -112,8 +115,8 @@ func Definitions() []Definition {
 			Description: "On: a schedule with --auto creates its transactions on their dates, without your confirmation. Off: no schedule creates a transaction by itself.",
 		},
 		{
-			Key: AIProvider, Title: "AI provider", Values: []string{"none", "anthropic", "openai", "google", "ollama"}, Default: "none",
-			Description: "The AI provider that Finux uses by default.",
+			Key: AIProvider, Title: "AI provider", Values: []string{None, "claude", "codex", "opencode"}, Default: None,
+			Description: "The AI agent program that answers /ai in the Telegram bot. None: /ai is off. 'finux config ai' sets it up.",
 		},
 		{
 			Key: TelegramToken, Title: "Telegram token", Check: checkToken, Secret: true,
@@ -182,9 +185,13 @@ func (s *Store) All() (map[string]string, error) {
 		return nil, err
 	}
 	for _, current := range saved {
-		if _, known := values[current.Key]; known {
-			values[current.Key] = current.Value
+		definition, err := find(current.Key)
+		// A value that an older Finux saved and that is not in the list
+		// now gives the default.
+		if err != nil || !definition.Text() && !slices.Contains(definition.Values, current.Value) {
+			continue
 		}
+		values[current.Key] = current.Value
 	}
 	return values, nil
 }

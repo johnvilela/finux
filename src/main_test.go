@@ -197,19 +197,19 @@ func TestConfigSettings(t *testing.T) {
 	if got := succeed(t, home, "config", "get"); got != settingsList("off", "none") {
 		t.Fatalf("config get = %q", got)
 	}
-	if got := succeed(t, home, "config", "set", "ai-provider", "Anthropic"); got != "✓ ai-provider set to anthropic\n" {
+	if got := succeed(t, home, "config", "set", "ai-provider", "Claude"); got != "✓ ai-provider set to claude\n" {
 		t.Fatalf("config set = %q", got)
 	}
 	if got := succeed(t, home, "config", "set", "automatic-schedules", "on"); got != "✓ automatic-schedules set to on\n" {
 		t.Fatalf("config set = %q", got)
 	}
-	if got := succeed(t, home, "config", "get"); got != settingsList("on", "anthropic") {
+	if got := succeed(t, home, "config", "get"); got != settingsList("on", "claude") {
 		t.Fatalf("config get = %q", got)
 	}
-	if got := succeed(t, home, "config", "get", "ai-provider"); got != "anthropic\n" {
+	if got := succeed(t, home, "config", "get", "ai-provider"); got != "claude\n" {
 		t.Fatalf("config get ai-provider = %q", got)
 	}
-	fail(t, home, 2, `config: unknown value "skynet" for ai-provider: use one of none, anthropic, openai, google, ollama`, "config", "set", "ai-provider", "skynet")
+	fail(t, home, 2, `config: unknown value "skynet" for ai-provider: use one of none, claude, codex, opencode`, "config", "set", "ai-provider", "skynet")
 	fail(t, home, 2, `config: unknown setting "color": use one of automatic-schedules, ai-provider, telegram-token`, "config", "set", "color", "red")
 	fail(t, home, 2, `config: unknown setting "color"`, "config", "get", "color")
 	fail(t, home, 2, "config: set: give a setting and its value", "config", "set", "ai-provider")
@@ -217,7 +217,7 @@ func TestConfigSettings(t *testing.T) {
 	fail(t, home, 2, "config: get: unexpected argument: extra", "config", "get", "ai-provider", "extra")
 	// Without a terminal, config shows the help; it names the settings.
 	help := succeed(t, home, "config")
-	for _, want := range []string{"get [setting]", "set <setting> <value>", "automatic-schedules", "off, on", "ai-provider", "none, anthropic, openai, google, ollama", "Without a command"} {
+	for _, want := range []string{"get [setting]", "set <setting> <value>", "automatic-schedules", "off, on", "ai-provider", "none, claude, codex, opencode", "Without a command"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("config help lacks %q:\n%s", want, help)
 		}

@@ -64,7 +64,9 @@ func TestConfigAI(t *testing.T) {
 	binary := finuxBinary(t)
 
 	stdout, stderr, status := h.run("config", "ai", "claude")
-	want := "✓ MCP server added to Claude Code\n✓ 5 skills installed in " + filepath.Join(h.home, ".claude", "skills") + "\nStart a new session of Claude Code to use Finux.\n"
+	want := "✓ MCP server added to Claude Code\n✓ 5 skills installed in " + filepath.Join(h.home, ".claude", "skills") + "\n" +
+		"No database yet: run 'finux init', then 'finux config set ai-provider claude' to use /ai in Telegram.\n" +
+		"Start a new session of Claude Code to use Finux.\n"
 	if status != 0 || stderr != "" || stdout != want {
 		t.Fatalf("config ai claude: status %d, stderr %q, stdout %q", status, stderr, stdout)
 	}
@@ -120,6 +122,26 @@ func TestConfigAI(t *testing.T) {
 	}
 	if general, _, _ := h.run("config", "--help"); !strings.Contains(general, "ai [agent]") {
 		t.Errorf("config help lacks ai:\n%s", general)
+	}
+}
+
+func TestConfigAISavesTheAgent(t *testing.T) {
+	h := newAIHome(t)
+	if _, stderr, status := h.run("init"); status != 0 || stderr != "" {
+		t.Fatalf("init: status %d, stderr %q", status, stderr)
+	}
+	stdout, stderr, status := h.run("config", "ai", "codex", "--no-memory")
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "✓ ai-provider set to codex: /ai in Telegram uses Codex\n") {
+		t.Fatalf("config ai codex: status %d, stderr %q, stdout %q", status, stderr, stdout)
+	}
+	if got, _, _ := h.run("config", "get", "ai-provider"); got != "codex\n" {
+		t.Fatalf("ai-provider = %q", got)
+	}
+	// A failed setup does not change the setting.
+	h.agent("claude", "No permission")
+	h.run("config", "ai", "claude", "--no-memory")
+	if got, _, _ := h.run("config", "get", "ai-provider"); got != "codex\n" {
+		t.Fatalf("ai-provider after a failed setup = %q", got)
 	}
 }
 
