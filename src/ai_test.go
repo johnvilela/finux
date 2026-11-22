@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,6 +29,9 @@ func newAIHome(t *testing.T) aiHome {
 	}
 	h.agent("claude", "")
 	h.agent("codex", "")
+	// A fake ai-memory hides the real one of the machine: a test must
+	// never set up the real program.
+	h.agent("ai-memory", "")
 	return h
 }
 
@@ -35,7 +41,7 @@ func (h aiHome) agent(name, failure string) {
 	h.t.Helper()
 	script := "#!/bin/sh\necho \"" + name + " $*\" >> '" + h.log + "'\n"
 	if failure != "" {
-		script += "if [ \"$2\" = add ]; then echo '" + failure + "' >&2; exit 1; fi\n"
+		script += "if [ \"$2\" = add ] || [ \"$1\" = setup ]; then echo '" + failure + "' >&2; exit 1; fi\n"
 	}
 	if err := os.WriteFile(filepath.Join(h.bin, name), []byte(script), 0o755); err != nil {
 		h.t.Fatal(err)
@@ -65,13 +71,14 @@ func TestConfigAI(t *testing.T) {
 
 	stdout, stderr, status := h.run("config", "ai", "claude")
 	want := "✓ MCP server added to Claude Code\n✓ 5 skills installed in " + filepath.Join(h.home, ".claude", "skills") + "\n" +
+		"✓ ai-memory connected to Claude Code\n" +
 		"No database yet: run 'finux init', then 'finux config set ai-provider claude' to use /ai in Telegram.\n" +
 		"Start a new session of Claude Code to use Finux.\n"
 	if status != 0 || stderr != "" || stdout != want {
 		t.Fatalf("config ai claude: status %d, stderr %q, stdout %q", status, stderr, stdout)
 	}
 	// It replaces a server that is there, so a second run works.
-	if got, want := h.calls(), "claude mcp remove --scope user finux\nclaude mcp add --scope user finux -- "+binary+" config mcp\n"; got != want {
+	if got, want := h.calls(), "claude mcp remove --scope user finux\nclaude mcp add --scope user finux -- "+binary+" config mcp\nai-memory setup --yes --agent claude-code\n"; got != want {
 		t.Fatalf("claude calls = %q, want %q", got, want)
 	}
 	if got := h.skills(".claude", "skills"); got != 5 {
@@ -80,14 +87,14 @@ func TestConfigAI(t *testing.T) {
 	if stdout, _, status = h.run("config", "ai", "claude", "--read-only"); status != 0 || !strings.Contains(stdout, "✓ MCP server added to Claude Code (read-only)\n") {
 		t.Fatalf("config ai claude --read-only: status %d, stdout %q", status, stdout)
 	}
-	if got := h.calls(); !strings.HasSuffix(got, " config mcp --read-only\n") {
+	if got := h.calls(); !strings.Contains(got, " config mcp --read-only\n") {
 		t.Fatalf("read-only call = %q", got)
 	}
 
 	if stdout, stderr, status = h.run("config", "ai", "codex"); status != 0 || stderr != "" || !strings.HasPrefix(stdout, "✓ MCP server added to Codex\n✓ 5 skills installed in ") {
 		t.Fatalf("config ai codex: status %d, stderr %q, stdout %q", status, stderr, stdout)
 	}
-	if got, want := h.calls(), "codex mcp remove finux\ncodex mcp add finux -- "+binary+" config mcp\n"; got != want {
+	if got, want := h.calls(), "codex mcp remove finux\ncodex mcp add finux -- "+binary+" config mcp\nai-memory setup --yes --agent codex\n"; got != want {
 		t.Fatalf("codex calls = %q, want %q", got, want)
 	}
 	if got := h.skills(".codex", "skills"); got != 5 {
@@ -142,6 +149,87 @@ func TestConfigAISavesTheAgent(t *testing.T) {
 	h.run("config", "ai", "claude", "--no-memory")
 	if got, _, _ := h.run("config", "get", "ai-provider"); got != "codex\n" {
 		t.Fatalf("ai-provider after a failed setup = %q", got)
+	}
+}
+
+// bare returns a PATH that has a shell and the tools of a script, but
+// no ai-memory.
+func (h aiHome) bare() string {
+	h.t.Helper()
+	folder := filepath.Join(filepath.Dir(h.bin), "bare")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	for _, tool := range []string{"sh", "mkdir", "chmod", "cat"} {
+		found, err := exec.LookPath(tool)
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		os.Symlink(found, filepath.Join(folder, tool))
+	}
+	os.Symlink(filepath.Join(h.bin, "claude"), filepath.Join(folder, "claude"))
+	return folder
+}
+
+func TestConfigAIConnectsMemory(t *testing.T) {
+	h := newAIHome(t)
+	project := filepath.Join(h.home, ".finux", "ai", ".ai-memory.toml")
+	if _, stderr, status := h.run("config", "ai", "claude"); status != 0 || stderr != "" {
+		t.Fatalf("config ai claude: status %d, stderr %q", status, stderr)
+	}
+	// All the /ai sessions run in one folder, which is one memory project.
+	if got, err := os.ReadFile(project); err != nil || string(got) != "workspace = \"default\"\nproject = \"finux-finances\"\n" {
+		t.Fatalf(".ai-memory.toml = %q, %v", got, err)
+	}
+	h.calls()
+	// A file that is there stays as it is.
+	if err := os.WriteFile(project, []byte("project = \"mine\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, status := h.run("config", "ai", "claude", "--no-memory")
+	if status != 0 || strings.Contains(stdout, "ai-memory") || strings.Contains(h.calls(), "ai-memory") {
+		t.Fatalf("config ai --no-memory: status %d, stdout %q", status, stdout)
+	}
+	if got, _ := os.ReadFile(project); string(got) != "project = \"mine\"\n" {
+		t.Fatalf(".ai-memory.toml changed: %q", got)
+	}
+
+	h.agent("ai-memory", "the service did not start")
+	if _, stderr, status := h.run("config", "ai", "claude"); status != 1 || !strings.Contains(stderr, "the service did not start") || !strings.Contains(stderr, "--no-memory") {
+		t.Fatalf("config ai with a failed ai-memory: status %d, stderr %q", status, stderr)
+	}
+}
+
+func TestConfigAIInstallsMemory(t *testing.T) {
+	h := newAIHome(t)
+	installed := filepath.Join(h.home, ".local", "bin", "ai-memory")
+	script := "#!/bin/sh\nmkdir -p \"$HOME/.local/bin\"\ncat '" + filepath.Join(h.bin, "ai-memory") + "' > '" + installed + "'\nchmod +x '" + installed + "'\necho installed by the script\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(script)) }))
+	t.Cleanup(server.Close)
+	run := func(source string, args ...string) (string, string, int) {
+		t.Helper()
+		return finuxEnv(t, []string{"HOME=" + h.home, "PATH=" + h.bare(), "FINUX_AI_MEMORY_SOURCE=" + source}, append([]string{"config", "ai", "claude"}, args...)...)
+	}
+
+	// Without a terminal, Finux installs nothing by itself.
+	stdout, stderr, status := run(server.URL)
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "ai-memory is not installed, so the AI keeps no memory between sessions.") || !strings.Contains(stdout, "finux config ai claude --yes") {
+		t.Fatalf("config ai without ai-memory: status %d, stderr %q, stdout %q", status, stderr, stdout)
+	}
+	if _, err := os.Stat(installed); !os.IsNotExist(err) || strings.Contains(h.calls(), "ai-memory") {
+		t.Fatal("config ai installed ai-memory with no --yes")
+	}
+	if _, stderr, status = run("http://127.0.0.1:1", "--yes"); status != 1 || !strings.Contains(stderr, "get the install script of ai-memory") {
+		t.Fatalf("install without a network: status %d, stderr %q", status, stderr)
+	}
+
+	// --yes runs the install script of ai-memory, then its setup.
+	stdout, stderr, status = run(server.URL, "--yes")
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "installed by the script\n") || !strings.Contains(stdout, "✓ ai-memory connected to Claude Code\n") {
+		t.Fatalf("config ai --yes: status %d, stderr %q, stdout %q", status, stderr, stdout)
+	}
+	if got := h.calls(); !strings.HasSuffix(got, "ai-memory setup --yes --agent claude-code\n") {
+		t.Fatalf("calls = %q", got)
 	}
 }
 

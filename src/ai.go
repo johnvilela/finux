@@ -42,17 +42,26 @@ func aiHelp() string {
 
 ` + green.Render("Options:") + `
   --read-only       The agent can read your data but not change it
+  --no-memory       Do not connect ai-memory to the agent
+  --yes             Install ai-memory without a question, when it is missing
   -h, --help        Show this help
 
 Without an agent, a selector opens.
 
-The command does the two steps of the setup:
+The command does the steps of the setup:
 
 1. It adds the Finux MCP server to the agent, so the agent has the tools
    that read and change your data. For Claude Code and Codex it runs their
    own command ('claude mcp add', 'codex mcp add'). For opencode it writes
    ~/.config/opencode/opencode.json and keeps a copy of the file as it was.
 2. It installs the Finux skills in the skills folder of the agent.
+3. It connects ai-memory to the agent, so the AI keeps what it learns and
+   what you decide between sessions. It runs 'ai-memory setup' for the
+   agent. When the ai-memory program is not installed, it asks before it
+   runs the install script of the ai-memory project; without a terminal
+   it installs only with --yes.
+4. It makes the agent the one that answers /ai in the Telegram bot: the
+   setting ai-provider. See 'finux config telegram --help'.
 
 Run it again after you update Finux or move its binary: it replaces the
 server and the skills. Then start a new session of the agent.
@@ -142,8 +151,18 @@ func setupAgent(key string, options aiOptions, io streams) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprint(io.stdout, ui.Success(added)+"\n"+
-		ui.Success(fmt.Sprintf("%s installed in %s", plural(int64(written), "skill"), folder))+"\n"+
+	if _, err := fmt.Fprint(io.stdout, ui.Success(added)+"\n"+
+		ui.Success(fmt.Sprintf("%s installed in %s", plural(int64(written), "skill"), folder))+"\n"); err != nil {
+		return err
+	}
+	memory, err := setupMemory(agent, options, io)
+	if err != nil {
+		return err
+	}
+	if _, err := aiFolder(); err != nil {
+		return err
+	}
+	_, err = fmt.Fprint(io.stdout, memory+
 		saveAgent(agent)+
 		"Start a new session of "+agent.name+" to use Finux.\n")
 	return err
