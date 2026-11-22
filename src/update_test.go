@@ -128,6 +128,28 @@ func TestUpdateCommand(t *testing.T) {
 		t.Fatalf("script got %q, %v", got, err)
 	}
 
+	// With the daemon installed, an update starts the daemon again, so
+	// it runs the new version.
+	home := t.TempDir()
+	path, calls := fakeSystemd(t)
+	server := updateServer(t, "v0.11.0", log)
+	if _, stderr, status := runBinary(t, binary, []string{"FINUX_UPDATE_SOURCE=" + server.URL, "PATH=" + path, "HOME=" + home}, "update"); status != 0 || stderr != "" || calls() != "" {
+		t.Fatalf("update without the daemon: status %d, stderr %q", status, stderr)
+	}
+	unit := filepath.Join(home, ".config", "systemd", "user", "finux.service")
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unit, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, status := runBinary(t, binary, []string{"FINUX_UPDATE_SOURCE=" + server.URL, "PATH=" + path, "HOME=" + home}, "update"); status != 0 || stderr != "" {
+		t.Fatalf("update with the daemon: status %d, stderr %q", status, stderr)
+	}
+	if got := calls(); got != "systemctl --user try-restart finux.service\n" {
+		t.Fatalf("calls of update = %q", got)
+	}
+
 	if _, stderr, status := run(""); status != 1 || !strings.Contains(stderr, "finux: update: no release found") {
 		t.Fatalf("update without a release: status %d, stderr %q", status, stderr)
 	}

@@ -21,6 +21,12 @@ func daemonHelp() string {
 		green.Render("Usage:") + " finux daemon <command>\n\n" +
 		green.Render("Commands:") + `
   run                 Run the daemon in this terminal, until Ctrl+C
+  install             Make the daemon a service: it starts now and at each login
+  uninstall           Stop the service and remove it
+  start, stop         Start or stop the service
+  restart             Start the service again
+  status              Show if the service runs
+  logs [--follow]     Show the last lines of the log of the service
   help, --help, -h    Show this help
 
 The daemon is optional: all the commands work without it. While it runs,
@@ -38,6 +44,13 @@ it does the work that needs a process that stays alive:
 - With an address in the setting daemon-mcp, it serves the MCP server for
   AI agents there. See 'finux config mcp --help'.
 
+The service is a systemd user unit: ~/.config/systemd/user/finux.service.
+'finux daemon install' writes it for this binary and for the database in
+the FINUX_DB environment variable, when it is set. Run it again after you
+move the binary. 'finux update' starts the service again by itself. The
+service runs while you are logged in; 'loginctl enable-linger' keeps it
+running after you log out. Without systemd, use 'finux daemon run'.
+
 The daemon reads the token of the bot and the setting daemon-mcp when it
 starts: start it again after you change them. The other settings and the
 list of the allowed people need no restart.
@@ -54,6 +67,8 @@ func runDaemon(args []string, io streams) int {
 			return exitStatus(io, "daemon", usageError("run: unexpected argument: "+args[1]))
 		}
 		return exitStatus(io, "daemon", serveDaemon(io))
+	case "install", "uninstall", "start", "stop", "restart", "status", "logs":
+		return exitStatus(io, "daemon", serviceCommand(args[0], args[1:], io))
 	}
 	return exitStatus(io, "daemon", usageError("unknown command: "+args[0]))
 }

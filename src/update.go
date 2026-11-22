@@ -208,5 +208,6 @@ func update(check bool, io streams) error {
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("the install script failed: %w", err)
 	}
+	restartDaemon()
 	return nil
 }
