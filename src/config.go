@@ -26,6 +26,7 @@ func configHelp() string {
   get [setting]          Show the settings, or the value of one setting
   set <setting> <value>  Change a setting
   ai [agent]             Connect Finux to an AI agent: its MCP server and its skills
+  telegram               Set up the Telegram bot and its allowed people
   doctor                 Check the database
   mcp                    Run the MCP server for AI agents
   skills                 List, install or remove the skills for AI agents
@@ -47,7 +48,7 @@ and daemon-mcp are for the Telegram bot and the daemon. See
 'finux config telegram --help' and 'finux daemon --help'. A setting that
 is text changes only with 'finux config set': give "" to clear it.
 
-Run 'finux config <command> --help' for the options of ai, doctor, mcp and skills.
+Run 'finux config <command> --help' for the options of ai, telegram, doctor, mcp and skills.
 `
 }
 
@@ -67,6 +68,8 @@ func runConfig(args []string, io streams) int {
 		return exitStatus(io, "config", setSetting(args[1:], io))
 	case "ai":
 		return runAI(args[1:], io)
+	case "telegram":
+		return runTelegram(args[1:], io)
 	case "doctor":
 		return runDoctor(args[1:], io)
 	case "mcp":
