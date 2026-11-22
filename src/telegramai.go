@@ -150,8 +150,16 @@ func agentRules(name, inbox string) string {
 // waits for the next /ai message.
 func (b *bot) receive(ctx context.Context, message *telegram.Message, file telegram.File, text string) {
 	user, chat := message.From.ID, message.Chat.ID
+	command, rest, _ := strings.Cut(text, " ")
+	forAI := strings.EqualFold(command, "/ai") || strings.HasPrefix(strings.ToLower(command), "/ai@")
 	if b.agentKey() == setting.None {
-		b.send(ctx, chat, botSorry)
+		// A caption for /ai shows that the person wants the AI: tell why
+		// it does not answer.
+		if forAI {
+			b.send(ctx, chat, aiOff)
+		} else {
+			b.send(ctx, chat, botSorry)
+		}
 		return
 	}
 	_, inbox, err := inboxOf(user)
@@ -164,7 +172,7 @@ func (b *bot) receive(ctx context.Context, message *telegram.Message, file teleg
 		return
 	}
 	b.kept[user] = append(b.kept[user], target)
-	if command, rest, _ := strings.Cut(text, " "); strings.EqualFold(strings.TrimSpace(command), "/ai") || strings.HasPrefix(strings.ToLower(command), "/ai@") {
+	if forAI {
 		b.ai(ctx, user, chat, rest)
 		return
 	}

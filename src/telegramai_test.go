@@ -35,6 +35,10 @@ func TestBotAIIsOffWithoutAnAgent(t *testing.T) {
 	if got := f.next().text; got != botSorry {
 		t.Fatalf("answer to a file with no agent = %q", got)
 	}
+	f.sendFile(42, "DOC2", "bill.pdf", "content", "/ai import this bill")
+	if got := f.next().text; got != off {
+		t.Fatalf("answer to a file for /ai with no agent = %q", got)
+	}
 	// Only claude runs with the limits that /ai needs.
 	succeed(t, home, "config", "set", "ai-provider", "codex")
 	if got := f.ask(42, "/ai hello"); !strings.Contains(got, "the agent codex cannot answer /ai yet") {
