@@ -39,10 +39,10 @@ func TestBotAIIsOffWithoutAnAgent(t *testing.T) {
 	if got := f.next().text; got != off {
 		t.Fatalf("answer to a file for /ai with no agent = %q", got)
 	}
-	// Only claude runs with the limits that /ai needs.
-	succeed(t, home, "config", "set", "ai-provider", "codex")
-	if got := f.ask(42, "/ai hello"); !strings.Contains(got, "the agent codex cannot answer /ai yet") {
-		t.Fatalf("/ai with codex = %q", got)
+	// opencode has no limits that /ai can use.
+	succeed(t, home, "config", "set", "ai-provider", "opencode")
+	if got := f.ask(42, "/ai hello"); !strings.Contains(got, "the agent opencode cannot answer /ai yet") {
+		t.Fatalf("/ai with opencode = %q", got)
 	}
 	if got := calls(); got != "" {
 		t.Fatalf("the agent ran:\n%s", got)

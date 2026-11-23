@@ -965,9 +965,14 @@ finux daemon install              # again, so the service finds the agent and sh
   has 10 minutes.
 - Finux starts the agent program for each message, with no screen, in the
   folder `~/.finux/ai`. The agent gets the Finux tools, the ai-memory tools,
-  the skills and read access to the files you sent. It has no shell and it
-  writes no file. Only Claude Code has these limits now: with `codex` or
-  `opencode` as `ai-provider`, `/ai` tells that it cannot answer.
+  the skills and read access to the files you sent. It writes no file.
+- The limits are different for each agent. Claude Code has no shell and
+  reads only the files you sent. Codex has a shell in a sandbox with no
+  write and no network, so it can read all the files of your user: think
+  about this before you let other people use `/ai`. Codex runs without
+  your `~/.codex/config.toml`: it gets only the `finux` and `ai-memory`
+  servers, with no plugins, no hooks and no web search. With `opencode` as
+  `ai-provider`, `/ai` tells that it cannot answer.
 - The files are in `~/.finux/ai/inbox/<user id>`, and only your user can
   read them. The daemon deletes a file after 7 days. Telegram gives a bot
   files of 20 MB or less.
