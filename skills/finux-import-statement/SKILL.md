@@ -160,6 +160,9 @@ match each one against a different Finux transaction.
   `category_list`. For a row you cannot place, use `OTHER`.
 - Type: expense or income from the direction. A grey category needs it.
 - Tags: only the tags the same title had before.
+- Virtual card: in a credit card statement that marks the purchases of a
+  virtual card (a section or a label such as "cartão virtual"), send
+  `virtual: true` for these rows. Do not guess it from the merchant.
 
 ### 6. Show the draft and wait
 

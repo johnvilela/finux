@@ -179,6 +179,9 @@ func pendingLine(owner card.Card, bill card.Bill, today string) (status, text st
 
 const carriedLabel = "Carried from the bill before"
 
+// virtualLabel names the total of the transactions of a virtual card.
+const virtualLabel = "Virtual card"
+
 // CardDetailsView renders the details of one credit card and the
 // transactions of its open bill. Plain output has no colors and no
 // borders, for pipes and files.
@@ -227,11 +230,14 @@ func CardDetailsView(details CardDetails, plain bool) string {
 		rows := make([][]string, len(details.Transactions))
 		for i, view := range details.Transactions {
 			rows[i] = []string{
-				strconv.FormatUint(uint64(view.ID), 10), transaction.FormatDate(view.Date), view.Title, view.Category.Code,
+				strconv.FormatUint(uint64(view.ID), 10), transaction.FormatDate(view.Date), marked(view.Title, view), view.Category.Code,
 				money.Format(view.Amount, current.Currency),
 			}
 		}
 		out += plainTable([]string{"ID", "DATE", "TITLE", "CATEGORY", "VALUE"}, rows, 4)
+	}
+	if virtual := virtualTotal(details.Transactions, current.Currency); virtual != "" {
+		out += virtualLabel + "  " + virtual + "\n"
 	}
 	if bill.Carried != 0 {
 		out += carriedLabel + "  " + money.Format(bill.Carried, current.Currency) + "\n"
@@ -331,7 +337,11 @@ func styledCardDetails(details CardDetails) string {
 		}
 		title := cut(view.Title, textWidth)
 		text := title
-		if room := textWidth - lipgloss.Width(title) - 2; view.Tags != "" && room > 3 {
+		// The mark of a virtual card comes before the tags.
+		if room := textWidth - lipgloss.Width(text) - 1; view.Virtual && room >= len("virtual") {
+			text += " " + styleDim.Render("virtual")
+		}
+		if room := textWidth - lipgloss.Width(text) - 2; view.Tags != "" && room > 3 {
 			text += "  " + styleDim.Render(cut(view.Tags, room))
 		}
 		text += strings.Repeat(" ", max(0, textWidth-lipgloss.Width(text)))
@@ -342,6 +352,9 @@ func styledCardDetails(details CardDetails) string {
 		value = strings.Repeat(" ", max(0, amountWidth-lipgloss.Width(value))) + typeStyle(view.Type).Render(value)
 		date := transaction.FormatDate(view.Date)
 		out += indent + styleDim.Render(date[:min(dateWidth, len(date))]) + "  " + sign + " " + text + "  " + group + "  " + value + "\n"
+	}
+	if virtual := virtualTotal(details.Transactions, current.Currency); virtual != "" {
+		out += indent + spread(styleDim.Render(virtualLabel), styleDim.Render(virtual)) + "\n"
 	}
 	if bill.Carried != 0 {
 		out += indent + spread(styleDim.Render(carriedLabel), money.Format(bill.Carried, current.Currency)) + "\n"

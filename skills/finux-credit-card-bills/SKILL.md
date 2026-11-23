@@ -34,6 +34,12 @@ Report in the order of urgency:
 Show the transactions of a bill only when the user asks for them or asks
 about one bill.
 
+A purchase made with a virtual card has `virtual: true`. The open bill of
+`credit_card_show` has `virtual_total` when it has such purchases: report
+it when the user asks what the virtual card spent. For another bill, call
+`transaction_list` with `account` and `virtual: true`, and keep the
+transactions whose `bill` is that period.
+
 A purchase in installments has one transaction in each bill, with
 `installment` and `installments` (part 3 of 10). Its future parts are in
 future bills, which `credit_card_bills` lists with the status `open`.

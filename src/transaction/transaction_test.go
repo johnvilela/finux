@@ -150,6 +150,9 @@ func TestFilterMatch(t *testing.T) {
 		"day":                   {Filter{Period: "2026-11-17"}, true},
 		"all together":          {Filter{Title: "market", Category: "FOOD", Account: "INTER", Type: Expense, Tags: []string{"#market"}, Period: "2026-11"}, true},
 		"all but one":           {Filter{Title: "market", Category: "FOOD", Account: "WISE"}, false},
+		"not virtual":           {Filter{Virtual: "no"}, true},
+		"virtual":               {Filter{Virtual: "yes"}, false},
+		"virtual part":          {Filter{Virtual: "N", Prefix: true}, true},
 	} {
 		if got := tc.filter.Match(market); got != tc.want {
 			t.Errorf("%s: Match = %v, want %v", name, got, tc.want)
@@ -177,6 +180,16 @@ func TestParseSearch(t *testing.T) {
 	// A bare sign filters nothing, so typing a token does not empty the list.
 	if got := ParseSearch("# @ cat: type:"); len(got.Tags) != 0 || got.Account != "" || got.Category != "" || got.Type != "" || got.Title != "" {
 		t.Fatalf("empty tokens = %+v", got)
+	}
+	if got := ParseSearch("virtual:yes shop"); got.Virtual != "yes" || got.Title != "shop" {
+		t.Fatalf("virtual token = %+v", got)
+	}
+	online := View{Transaction: Transaction{Title: "Shop", Virtual: true}}
+	if !ParseSearch("virtual:y").Match(online) || ParseSearch("virtual:no").Match(online) || !ParseSearch("virtual:").Match(online) {
+		t.Fatal("the virtual token does not select a virtual transaction")
+	}
+	if got := (Filter{Virtual: "yes", Period: "2026"}).String(); got != "virtual:yes 2026" {
+		t.Fatalf("String with virtual = %q", got)
 	}
 	if got := ParseSearch("50 abc"); got.Title != "50 abc" || got.Period != "" {
 		t.Fatalf("plain words = %+v", got)

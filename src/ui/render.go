@@ -262,13 +262,40 @@ func CategoryCard(current category.Category, plain bool) string {
 	return styleBox.BorderForeground(tint).Width(width+6).Render(strings.Join(lines, "\n")) + "\n"
 }
 
+// virtualMark shows that a transaction was made with a virtual card.
+const virtualMark = "[virtual]"
+
 // titled returns the title of a transaction with its part, such as
-// "Notebook 3/10", for a transaction in installments.
+// "Notebook 3/10", for a transaction in installments, and the mark of
+// a virtual card.
 func titled(view transaction.View) string {
+	title := view.Title
 	if part := view.Installment(); part != "" {
-		return view.Title + " " + part
+		title += " " + part
 	}
-	return view.Title
+	return marked(title, view)
+}
+
+// marked adds the mark of a virtual card to a title.
+func marked(title string, view transaction.View) string {
+	if view.Virtual {
+		return title + " " + virtualMark
+	}
+	return title
+}
+
+// virtualTotal returns the sum and the number of the transactions made
+// with a virtual card, as text such as "R$ 40,00 (1 transaction)". It
+// is "" when there are none.
+func virtualTotal(views []transaction.View, currency string) string {
+	total, count := transaction.VirtualTotal(views)
+	switch count {
+	case 0:
+		return ""
+	case 1:
+		return money.Format(total, currency) + " (1 transaction)"
+	}
+	return fmt.Sprintf("%s (%d transactions)", money.Format(total, currency), count)
 }
 
 // TransactionTable renders a list of transactions. Plain output has no
@@ -364,6 +391,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 		if purchase {
 			fields = append(fields, [2]string{"Bill", period})
 		}
+		if view.Virtual {
+			fields = append(fields, [2]string{"Virtual", "yes"})
+		}
 		if view.Tags != "" {
 			fields = append(fields, [2]string{"Tags", view.Tags})
 		}
@@ -445,6 +475,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 		row("Category", paint(categoryColor.Hex, "●")+" "+styleBold.Render(view.Category.Code)+"  "+view.Category.Name),
 		row("Date", date),
 	)
+	if view.Virtual {
+		lines = append(lines, row("Virtual", "yes"))
+	}
 	if view.Status != "" {
 		lines = append(lines, row("Status", view.Status))
 	}

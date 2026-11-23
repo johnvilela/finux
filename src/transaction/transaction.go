@@ -96,6 +96,9 @@ type Transaction struct {
 	// GoalID is the goal the transaction counts toward, or 0. The two
 	// sides of a transfer have the same goal. A payment has no goal.
 	GoalID uint `gorm:"index"`
+	// Virtual tells that the person paid with a virtual card of the
+	// credit card. Only a transaction of a credit card can have it.
+	Virtual bool
 	// Date is the day of the transaction as YYYY-MM-DD.
 	Date string `gorm:"size:10;index"`
 	// Tags holds the tags separated by one space, for example
@@ -178,6 +181,9 @@ type Draft struct {
 	CardID uint
 	// GoalID is the goal the transaction counts toward, or 0.
 	GoalID uint
+	// Virtual tells that the person paid with a virtual card of the
+	// credit card.
+	Virtual bool
 	// ToAccountID is the account that receives a transfer.
 	ToAccountID uint
 	// Received is the amount the other account receives, for a transfer
@@ -194,11 +200,25 @@ type Draft struct {
 	ScheduleID uint
 }
 
+// VirtualTotal returns the sum and the number of the transactions made
+// with a virtual card. The sum is positive for money spent, as the
+// total of a bill is.
+func VirtualTotal(views []View) (total int64, count int) {
+	for _, view := range views {
+		if view.Virtual {
+			total -= view.Amount
+			count++
+		}
+	}
+	return total, count
+}
+
 // DraftOf returns the draft that describes a transaction as it is.
 func DraftOf(t Transaction) Draft {
 	return Draft{
 		Title: t.Title, Description: t.Description, Type: t.Type, Value: t.Value(),
 		AccountID: t.AccountID, CardID: t.CardID, CategoryID: t.CategoryID, Date: t.Date, Tags: t.Tags, GoalID: t.GoalID,
+		Virtual: t.Virtual,
 	}
 }
 

@@ -77,6 +77,8 @@ type seedEntry struct {
 	// installments is the number of monthly parts of a purchase; value
 	// is then the total.
 	installments int
+	// virtual tells that a purchase was made with a virtual card.
+	virtual bool
 }
 
 // seedTransactions is the base data of a new development database. It
@@ -141,12 +143,12 @@ var seedCards = []card.Card{
 // installments is on AMEX, in USD, so it does not change the budgets and
 // the bills of VISA.
 var seedPurchases = []seedEntry{
-	{title: "Streaming", account: "VISA", category: "FUN", tags: "#fixed", value: 5590, daysAgo: 2},
+	{title: "Streaming", account: "VISA", category: "FUN", tags: "#fixed", value: 5590, daysAgo: 2, virtual: true},
 	{title: "Restaurant", account: "VISA", category: "FOOD", tags: "#weekend", value: 17990, daysAgo: 6},
 	{title: "Pharmacy", account: "VISA", category: "HEALT", value: 4200, daysAgo: 12},
 	{title: "Running shoes", account: "VISA", category: "SHOP", value: 45990, daysAgo: 36},
 	{title: "Flight tickets", account: "VISA", category: "TRANS", tags: "#travel", value: 50000, daysAgo: 66},
-	{title: "Hotel", account: "AMEX", category: "FUN", tags: "#travel", value: 18000, daysAgo: 2},
+	{title: "Hotel", account: "AMEX", category: "FUN", tags: "#travel", value: 18000, daysAgo: 2, virtual: true},
 	{title: "Laptop", account: "AMEX", category: "SHOP", tags: "#work", value: 120000, daysAgo: 2, installments: 6},
 }
 
@@ -376,6 +378,7 @@ func seedBaseCards(db *gorm.DB) (int, error) {
 		created, err := store.Create(transaction.Draft{
 			Title: entry.title, Type: transaction.Expense, Value: entry.value, CardID: owners[entry.account].ID,
 			CategoryID: group.ID, Date: daysAgo(entry.daysAgo), Tags: entry.tags, Installments: entry.installments,
+			Virtual: entry.virtual,
 		})
 		if err != nil {
 			return added, fmt.Errorf("create transaction %s: %w", entry.title, err)

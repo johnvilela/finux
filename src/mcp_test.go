@@ -1054,3 +1054,40 @@ func TestMCPSchedules(t *testing.T) {
 		t.Fatalf("transaction keeps a deleted schedule: %v", fields)
 	}
 }
+
+func TestMCPVirtualCard(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "1000"})
+	h.ok("credit_card_add", map[string]any{"name": "Visa Gold", "currency": "BRL", "limit": "5000", "closing_day": 25, "due_day": 5, "code": "visa"})
+
+	market := h.ok("transaction_add", map[string]any{"title": "Market", "value": "100", "account": "VISA", "category": "FOOD"})
+	if _, has := market["transaction"].(map[string]any)["virtual"]; has {
+		t.Fatalf("a transaction with no mark has virtual: %v", market)
+	}
+	stream := h.ok("transaction_add", map[string]any{"title": "Streaming", "value": "40", "account": "VISA", "category": "FOOD", "virtual": true})
+	h.want(stream, "true", "transaction", "virtual")
+	h.fail("only a credit card transaction", "transaction_add", map[string]any{"title": "Bread", "value": "5", "account": "NU", "category": "FOOD", "virtual": true})
+
+	// The filter gives the transactions with the mark, or the other ones.
+	list := h.ok("transaction_list", map[string]any{"virtual": true})
+	h.want(list, "1", "total")
+	h.want(list, "Streaming", "transactions", 0, "title")
+	list = h.ok("transaction_list", map[string]any{"virtual": false})
+	h.want(list, "1", "total")
+	h.want(list, "Market", "transactions", 0, "title")
+
+	// The open bill has the total of the virtual card.
+	card := h.ok("credit_card_show", map[string]any{"credit_card": "VISA"})
+	h.want(card, "4000", "open_bill", "virtual_total", "minor")
+	h.want(card, "true", "open_bill", "transactions", 0, "virtual")
+
+	edited := h.ok("transaction_edit", map[string]any{"id": 2, "virtual": false})
+	if _, has := edited["transaction"].(map[string]any)["virtual"]; has {
+		t.Fatalf("the edit did not take the mark away: %v", edited)
+	}
+	card = h.ok("credit_card_show", map[string]any{"credit_card": "VISA"})
+	if _, has := card["open_bill"].(map[string]any)["virtual_total"]; has {
+		t.Fatalf("a bill with no virtual transaction has virtual_total: %v", card)
+	}
+	h.want(h.ok("transaction_edit", map[string]any{"id": 1, "virtual": true}), "true", "transaction", "virtual")
+}

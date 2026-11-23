@@ -161,6 +161,7 @@ No arguments.
 | `search` | string | no | Only the transactions whose title contains this text |
 | `tags` | string | no | Only the transactions that have all these tags, for example "market weekly" |
 | `type` | string | no | Only the transactions of this type. One of: `expense`, `income`, `transfer`, `payment` |
+| `virtual` | boolean | no | true: only the transactions made with a virtual card of a credit card. false: only the other ones |
 
 ### `transaction_show`
 
@@ -172,7 +173,7 @@ No arguments.
 
 ### `transaction_add`
 
-*Change.* Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.
+*Change.* Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give virtual for a purchase made with a virtual card of a credit card. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -190,6 +191,7 @@ No arguments.
 | `to` | string | no | For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer |
 | `type` | string | no | Default: expense for a red category, income for a green one, transfer when 'to' is given. Necessary for a grey category. One of: `expense`, `income`, `transfer` |
 | `value` | string | no | Positive amount in the currency of the account, as a decimal string, for example "1234.56". The type gives the sign. With installments it is the total of all the parts. Necessary, but when installment_value is given |
+| `virtual` | boolean | no | true when the person paid with a virtual card of the credit card. Only for a transaction of a credit card. Default: false |
 
 ### `transaction_edit`
 
@@ -209,6 +211,7 @@ No arguments.
 | `title` | string | no | New title, at most 60 characters |
 | `type` | string | no | New type. A transfer keeps its type. One of: `expense`, `income`, `transfer` |
 | `value` | string | no | New positive amount as a decimal string |
+| `virtual` | boolean | no | true when the person paid with a virtual card of the credit card; false takes the mark away. Only for a transaction of a credit card |
 
 ### `transaction_delete`
 

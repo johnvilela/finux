@@ -495,6 +495,7 @@ and create a new one.
 ./bin/finux tx --date 17/11/2026      # a date
 ./bin/finux tx --account INTER
 ./bin/finux tx --type expense
+./bin/finux tx --virtual              # made with a virtual card; --virtual=false gives the others
 ```
 
 The interactive list reads like a bank statement: one line for each transaction
@@ -564,6 +565,21 @@ the card to `--account`:
 
 A credit card has expenses (purchases) and incomes (refunds). It has no
 transfers. Its transactions do not change the balance of an account.
+
+When you pay with a virtual card of the credit card, add `--virtual`:
+
+```sh
+./bin/finux tx add --title Streaming --value 40 --account VISA --category FUN --virtual
+./bin/finux tx edit 7 --virtual=false     # take the mark away
+./bin/finux tx --virtual                  # only these transactions
+```
+
+The lists show `[virtual]` after the title, and `finux cc VISA` shows the
+total of these transactions in the open bill. The form of `tx add` has the
+field `Virtual card` when the account is a credit card, and the search of the
+interactive list reads `virtual:yes` and `virtual:no`. Only a transaction of
+a credit card can have the mark: one that goes to an account loses it. With
+installments, all the parts have the mark.
 
 ### Bills
 

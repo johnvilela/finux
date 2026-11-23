@@ -205,3 +205,54 @@ func TestAccountDeleteKeepsBillsPaid(t *testing.T) {
 	}
 	h.has(h.ok("cc", "b", "VISA"), "11/2026", "paid")
 }
+
+func TestVirtualCardTransactions(t *testing.T) {
+	h := newCardsHome(t)
+	h.purchase("Market", "100", "17/11/2026")
+	if got := h.ok("tx", "a", "--title", "Streaming", "--value", "40", "--account", "VISA", "--category", "FOOD", "--date", "16/11/2026", "--virtual"); got != "✓ Transaction 2 created\n" {
+		t.Fatalf("add output = %q", got)
+	}
+	// Only a credit card has virtual cards.
+	h.fail(1, "only a credit card transaction can be made with a virtual card",
+		"tx", "a", "--title", "Bread", "--value", "5", "--account", "NU", "--category", "FOOD", "--virtual")
+
+	h.has(h.ok("tx", "2"), "Card      VISA  Visa Gold\n", "Virtual   yes\n")
+	if got := h.ok("tx", "1"); strings.Contains(got, "Virtual") {
+		t.Fatalf("card of a transaction with no mark:\n%s", got)
+	}
+	const marked = "2   16/11/2026  Streaming [virtual]  FOOD      VISA      -R$ 40,00\n"
+	h.has(h.ok("tx"), marked, "Market     ")
+	if got := h.ok("tx", "l", "--virtual"); !strings.Contains(got, "Streaming [virtual]") || strings.Contains(got, "Market") || !strings.Contains(got, "1 transaction\n") {
+		t.Fatalf("list --virtual =\n%s", got)
+	}
+	if got := h.ok("tx", "l", "--virtual=false"); strings.Contains(got, "Streaming") || !strings.Contains(got, "Market") {
+		t.Fatalf("list --virtual=false =\n%s", got)
+	}
+
+	// The open bill marks the transaction and gives the total of the virtual card.
+	h.has(h.ok("cc", "VISA"), "Streaming [virtual]", "Virtual card  R$ 40,00 (1 transaction)\n", "Total  R$ 140,00\n")
+
+	// An edit takes the mark away, and gives it.
+	h.ok("tx", "e", "2", "--virtual=false")
+	if got := h.ok("cc", "VISA"); strings.Contains(got, "irtual") {
+		t.Fatalf("card with no virtual transaction:\n%s", got)
+	}
+	h.ok("tx", "e", "1", "--virtual")
+	h.has(h.ok("tx", "1"), "Virtual   yes\n")
+	// A transaction that goes to an account loses the mark.
+	h.ok("tx", "e", "1", "--account", "NU")
+	if got := h.ok("tx", "1"); strings.Contains(got, "Virtual") {
+		t.Fatalf("card of a transaction that went to an account:\n%s", got)
+	}
+	h.fail(1, "only a credit card transaction", "tx", "e", "1", "--virtual")
+
+	// All the parts of a purchase have the mark; --all changes it in each one.
+	h.ok("tx", "a", "--title", "Phone", "--value", "300", "--account", "VISA", "--category", "FOOD", "--date", "17/11/2026", "--installments", "3", "--virtual")
+	if got := h.ok("tx", "l", "--virtual"); !strings.Contains(got, "3 transactions\n") || !strings.Contains(got, "Phone 2/3 [virtual]") {
+		t.Fatalf("parts with the mark =\n%s", got)
+	}
+	h.ok("tx", "e", "4", "--virtual=false", "--next")
+	if got := h.ok("tx", "l", "--virtual"); !strings.Contains(got, "1 transaction\n") || !strings.Contains(got, "Phone 1/3 [virtual]") {
+		t.Fatalf("parts after --next =\n%s", got)
+	}
+}

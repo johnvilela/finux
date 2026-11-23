@@ -364,3 +364,64 @@ func TestPaymentCategoryRules(t *testing.T) {
 		t.Fatalf("Mismatched(XFER, grey) = %d, %v", count, err)
 	}
 }
+
+func TestVirtualCard(t *testing.T) {
+	f := newFixture(t)
+	// Only a transaction in a credit card can have the mark.
+	inAccount := f.draft("Market", Expense, "INTER", "FOOD", 100)
+	inAccount.Virtual = true
+	_, err := f.store.Create(inAccount)
+	wantError(t, "virtual in an account", err, "only a credit card transaction can be made with a virtual card")
+
+	draft := f.purchase("Shop", "VISA", "SHOP", 9000, "2026-11-17")
+	draft.Virtual = true
+	shop := f.create(t, draft)
+	if stored, err := f.store.Find(shop.ID); err != nil || !shop.Virtual || !stored.Virtual || !DraftOf(stored.Transaction).Virtual {
+		t.Fatalf("created = %+v, stored = %+v, %v", shop, stored, err)
+	}
+	if plain := f.create(t, f.purchase("Market", "VISA", "FOOD", 100, "2026-11-17")); plain.Virtual {
+		t.Fatalf("a purchase with no mark = %+v", plain)
+	}
+
+	// An edit keeps the mark, and can take it away.
+	next := DraftOf(shop)
+	next.Title = "Online shop"
+	if updated, err := f.store.Update(shop.ID, next); err != nil || !updated.Virtual {
+		t.Fatalf("update that keeps the mark = %+v, %v", updated, err)
+	}
+	next.Virtual = false
+	if _, err := f.store.Update(shop.ID, next); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := f.store.Find(shop.ID); err != nil || stored.Virtual {
+		t.Fatalf("after the mark is gone = %+v, %v", stored, err)
+	}
+	next.Virtual = true
+	if _, err := f.store.Update(shop.ID, next); err != nil {
+		t.Fatal(err)
+	}
+	// A transaction with the mark cannot go to an account.
+	next.CardID, next.AccountID = 0, f.account["INTER"]
+	_, err = f.store.Update(shop.ID, next)
+	wantError(t, "virtual moved to an account", err, "only a credit card transaction")
+
+	// Each part of a purchase in installments has the mark.
+	parts := f.purchase("Phone", "VISA", "SHOP", 3000, "2026-11-17")
+	parts.Virtual, parts.Installments = true, 3
+	phone := f.parts(t, f.create(t, parts).ID)
+	for _, part := range phone {
+		if !part.Virtual {
+			t.Fatalf("part %d has no mark", part.Part)
+		}
+	}
+	// A change of the mark goes to the parts of the scope.
+	change := DraftOf(phone[1])
+	change.Virtual = false
+	if _, err := f.store.UpdateParts(phone[1].ID, Next, change, Changed{Virtual: true}); err != nil {
+		t.Fatal(err)
+	}
+	phone = f.parts(t, phone[0].ID)
+	if !phone[0].Virtual || phone[1].Virtual || phone[2].Virtual {
+		t.Fatalf("marks after a change of the next parts = %v %v %v", phone[0].Virtual, phone[1].Virtual, phone[2].Virtual)
+	}
+}

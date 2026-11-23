@@ -134,7 +134,8 @@ func (s *Store) linkable(goalID uint, currency string, kept bool) error {
 	return nil
 }
 
-// place checks that a draft has an account or a credit card.
+// place checks that a draft has an account or a credit card, and that
+// only a credit card has the mark of a virtual card.
 func place(draft Draft) error {
 	switch {
 	case draft.AccountID != 0 && draft.CardID != 0:
@@ -143,6 +144,8 @@ func place(draft Draft) error {
 		return errors.New("account is required")
 	case draft.CardID != 0 && draft.Type == Transfer:
 		return errors.New("a credit card cannot have a transfer")
+	case draft.CardID == 0 && draft.Virtual:
+		return errors.New("only a credit card transaction can be made with a virtual card")
 	}
 	return nil
 }
@@ -195,7 +198,7 @@ func (s *Store) create(draft Draft) (Transaction, error) {
 	created := Transaction{
 		Title: draft.Title, Description: draft.Description, Type: draft.Type, Amount: signed(draft.Type, draft.Value),
 		AccountID: draft.AccountID, CardID: draft.CardID, CategoryID: draft.CategoryID, Date: draft.Date, Tags: draft.Tags,
-		GoalID: draft.GoalID, ScheduleID: draft.ScheduleID,
+		GoalID: draft.GoalID, ScheduleID: draft.ScheduleID, Virtual: draft.Virtual,
 	}
 	if draft.CardID != 0 {
 		owner, err := s.card(draft.CardID, false)
@@ -374,8 +377,8 @@ func (s *Store) update(id uint, draft Draft, period string) (Transaction, error)
 	}
 	current.Title, current.Description, current.Type, current.Amount = draft.Title, draft.Description, draft.Type, amount
 	current.AccountID, current.CategoryID, current.Date, current.Tags = draft.AccountID, draft.CategoryID, draft.Date, draft.Tags
-	current.CardID, current.BillID, current.GoalID = draft.CardID, billID, draft.GoalID
-	columns := append([]string{"Type", "Amount", "AccountID", "CardID", "BillID"}, shared...)
+	current.CardID, current.BillID, current.GoalID, current.Virtual = draft.CardID, billID, draft.GoalID, draft.Virtual
+	columns := append([]string{"Type", "Amount", "AccountID", "CardID", "BillID", "Virtual"}, shared...)
 	if current.PairID == 0 {
 		return current, s.db.Model(&current).Select(columns).Updates(&current).Error
 	}

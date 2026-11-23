@@ -206,3 +206,31 @@ func TestBotShowsTheItemsWhenACommandHasNoReference(t *testing.T) {
 		t.Fatalf("/gl show with no goals = %q", got)
 	}
 }
+
+func TestBotGuideAsksTheVirtualCardForACreditCard(t *testing.T) {
+	home := botHome(t)
+	succeed(t, home, "cc", "add", "--name", "Visa Gold", "--currency", "BRL", "--limit", "5000", "--closing", "25", "--due", "5", "--code", "VISA")
+	f := newFakeTelegram(t)
+	startDaemon(t, home, f)
+
+	f.say(42, "/tx add")
+	f.next()
+	f.say(42, "Streaming")
+	f.next()
+	f.say(42, "40")
+	question := f.next()
+	// Only a credit card has the question of the virtual card.
+	question = f.step(question, "Account or credit card?", "VISA", "Account or credit card: <b>VISA</b>")
+	if !reflect.DeepEqual(question.buttons, []string{"No", "Yes", "Cancel"}) {
+		t.Fatalf("buttons of the virtual card = %v", question.buttons)
+	}
+	question = f.step(question, "Paid with a virtual card?", "Yes", "Virtual card: <b>Yes</b>")
+	question = f.step(question, "Category?", "FOOD", "Category: <b>FOOD</b>")
+	result := f.step(question, "Date? Press a button or send a date as DD/MM/YYYY.", "Today", "Date: <b>Today</b>")
+	if result.text != pre("✓ Transaction 1 created") {
+		t.Fatalf("result = %+v", result)
+	}
+	if card := f.ask(42, "/tx 1"); !strings.Contains(card, "Virtual   yes") || !strings.Contains(card, "VISA") {
+		t.Fatalf("the transaction has no mark:\n%s", card)
+	}
+}

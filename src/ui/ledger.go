@@ -398,6 +398,10 @@ func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth
 	if part != "" {
 		part = " " + part
 	}
+	// The mark of a virtual card stays also.
+	if view.Virtual {
+		part += " virtual"
+	}
 	title := cut(view.Title, textWidth-lipgloss.Width(part))
 	text := titleStyle.Render(title) + styleDim.Render(part)
 	title += part

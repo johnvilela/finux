@@ -37,6 +37,7 @@ currencies, the goals, and the titles and tags the user already uses.
 | `tags` | Only tags the user gives, or tags the same title had before |
 | `description` | Details that do not fit the title. Usually empty |
 | `goal` | Only when the user says the money is for a goal. See below |
+| `virtual` | `true` only for a purchase on a credit card that the user says was made with a virtual card |
 | `installments` | Only for a purchase or an income in monthly parts. See below |
 
 **Account or credit card.** Use what the user names ("on the Visa", "from

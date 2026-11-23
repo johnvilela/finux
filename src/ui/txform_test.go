@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 	"finux/src/transaction"
 )
@@ -334,5 +335,50 @@ func TestTransactionFormPreset(t *testing.T) {
 	want := transaction.Draft{Title: "Rent", Type: transaction.Income, Value: 1000, AccountID: 2, CategoryID: 3, Date: "2026-11-17"}
 	if got := txForm(t, model).Draft(); got != want {
 		t.Fatalf("draft = %+v\nwant    %+v", got, want)
+	}
+}
+
+func TestTransactionFormVirtualCard(t *testing.T) {
+	options := txOptions()
+	options.Cards = []card.Card{{ID: 7, Name: "Visa Gold", Code: "VISA", Color: "blue", Currency: "BRL"}}
+	var model tea.Model = NewTransactionForm(options)
+	// An account has no virtual card.
+	if view := plain(txForm(t, model).View().Content); strings.Contains(view, "Virtual card") {
+		t.Fatalf("the form of an account shows the field:\n%s", view)
+	}
+	model = step(t, model, TxTitle, keyEnter)
+	model = step(t, model, TxValue, append(text("Shop"), keyTab)...)
+	model = step(t, model, TxInstallments, append(text("10"), keyTab)...)
+	model = step(t, model, TxAccount, keyTab)
+	// The field comes after a credit card. It starts with no.
+	model = step(t, model, TxVirtual, append(text("v"), keyTab)...)
+	f := txForm(t, model)
+	if view := plain(f.View().Content); f.Value(TxAccount) != "VISA" || f.Value(TxVirtual) != "no" || !strings.Contains(view, "Virtual card") {
+		t.Fatalf("account %q, virtual %q:\n%s", f.Value(TxAccount), f.Value(TxVirtual), view)
+	}
+	model = step(t, model, TxCategory, keyRight, keyTab)
+	model = send(t, model, keySave)
+	f = txForm(t, model)
+	if got := f.Draft(); !f.Submitted() || !got.Virtual || got.CardID != 7 || got.AccountID != 0 {
+		t.Fatalf("submitted %v, error %q, draft = %+v", f.Submitted(), f.Error(), got)
+	}
+
+	// An edit starts with the mark of the transaction. A change to an
+	// account takes the mark away.
+	options.Edit = true
+	options.Initial = transaction.Draft{Title: "Shop", Type: transaction.Expense, CardID: 7, CategoryID: 2, Date: "2026-11-17", Virtual: true}
+	options.Value = "10"
+	model = NewTransactionForm(options)
+	if got := txForm(t, model).Value(TxVirtual); got != "yes" {
+		t.Fatalf("virtual of the edit = %q", got)
+	}
+	model = step(t, model, TxTitle, keyEnter)
+	model = step(t, model, TxValue, keyTab)
+	model = step(t, model, TxAccount, keyTab)
+	model = step(t, model, TxCategory, append(text("i"), keyTab)...)
+	model = send(t, model, keySave)
+	f = txForm(t, model)
+	if got := f.Draft(); !f.Submitted() || got.Virtual || got.AccountID != 1 || got.CardID != 0 {
+		t.Fatalf("submitted %v, error %q, draft = %+v", f.Submitted(), f.Error(), got)
 	}
 }

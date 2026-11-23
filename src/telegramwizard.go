@@ -138,6 +138,21 @@ func greyCategory(db *gorm.DB, answers map[string]string) bool {
 	return false
 }
 
+// onCard reports whether the place of the answers is a credit card.
+// Then the virtual card is a question: an account has none.
+func onCard(db *gorm.DB, answers map[string]string) bool {
+	cards, err := card.NewStore(db).List(false)
+	if err != nil {
+		return false
+	}
+	for _, current := range cards {
+		if strings.EqualFold(current.Code, strings.TrimSpace(answers["--account"])) {
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	stepCurrency = step{flag: "--currency", label: "Currency", ask: "Currency?", choices: codes(money.Codes()...)}
 	stepPlace    = step{flag: "--account", label: "Account or credit card", ask: "Account or credit card?", choices: placeChoices}
@@ -146,6 +161,12 @@ var (
 		flag: "--type", label: "Expense or income", ask: "Expense or income?", when: greyCategory,
 		choices: func(*gorm.DB) ([]choice, error) {
 			return []choice{{"Expense", transaction.Expense}, {"Income", transaction.Income}}, nil
+		},
+	}
+	stepVirtual = step{
+		flag: "--virtual", label: "Virtual card", ask: "Paid with a virtual card?", when: onCard,
+		choices: func(*gorm.DB) ([]choice, error) {
+			return []choice{{"No", "false"}, {"Yes", "true"}}, nil
 		},
 	}
 	stepEvery = step{flag: "--every", label: "Period", choices: codes("week", "month", "year")}
@@ -164,7 +185,7 @@ var guides = map[string]guide{
 	"transactions add": {"New transaction", []step{
 		{flag: "--title", label: "Title", ask: "Title?"},
 		{flag: "--value", label: "Value", ask: "Value?"},
-		stepPlace, stepCategory, stepType,
+		stepPlace, stepVirtual, stepCategory, stepType,
 		{flag: "--date", label: "Date", ask: "Date? Press a button or send a date as DD/MM/YYYY.", choices: dateChoices},
 	}},
 	"accounts add": {"New account", []step{

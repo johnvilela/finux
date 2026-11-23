@@ -9,6 +9,7 @@ import (
 	"finux/src/account"
 	"finux/src/category"
 	"finux/src/storage"
+	"finux/src/transaction"
 )
 
 func TestInit(t *testing.T) {
@@ -176,5 +177,29 @@ func TestReseedCommand(t *testing.T) {
 	}
 	if _, stderr, status := reseed("extra"); status != 2 || !strings.Contains(stderr, "unexpected argument: extra") {
 		t.Fatalf("reseed extra: status %d, stderr %q", status, stderr)
+	}
+}
+
+func TestSetupDatabaseAddsTheVirtualCardColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "finux.db")
+	if _, err := setupDatabase(path); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A database from before the virtual cards has no column for the mark.
+	if err := db.Migrator().DropColumn(&transaction.Transaction{}, "virtual"); err != nil {
+		t.Fatal(err)
+	}
+	if transactionsReady(db) {
+		t.Fatal("a database without the column is ready")
+	}
+	if _, err := setupDatabase(path); err != nil {
+		t.Fatal(err)
+	}
+	if !transactionsReady(db) {
+		t.Fatal("the setup did not add the column")
 	}
 }

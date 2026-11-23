@@ -214,3 +214,17 @@ func TestLedgerScrollsAndFits(t *testing.T) {
 		}
 	}
 }
+
+func TestLedgerMarksAVirtualCard(t *testing.T) {
+	views := sampleTransactions()
+	views[0].Virtual = true
+	var model tea.Model = NewLedger("Transactions", views)
+	if view := ledgerView(t, model); !strings.Contains(view, "▼ Weekly market virtual") || strings.Contains(view, "Salary virtual") {
+		t.Fatalf("view does not mark the virtual card:\n%s", view)
+	}
+	// The search reads the mark.
+	model = send(t, model, text("virtual:yes")...)
+	if view := ledgerView(t, model); !strings.Contains(view, "Weekly market") || strings.Contains(view, "Salary") || !strings.Contains(view, "virtual:yes") {
+		t.Fatalf("search for the virtual card:\n%s", view)
+	}
+}

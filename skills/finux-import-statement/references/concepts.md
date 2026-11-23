@@ -132,7 +132,7 @@ installments.
 | `all` | All the parts |
 
 - With `next` or `all`, a title, a description, a type, a category, tags,
-  a goal and an account go to each part of the scope.
+  a goal, an account and `virtual` go to each part of the scope.
 - With `next` or `all`, `value` is the new total of the parts of the
   scope, divided again, and `installment_value` is the new amount of each
   one. `date` is the new date of the first part of the scope; the others
@@ -372,7 +372,9 @@ transaction is not in the balance yet; `cleared` for the others), `tags`
 - a payment: `account`, and the `credit_card` and `bill` it paid;
 - a transfer: `account`, `pair_id` and `other_account`.
 
-A transaction linked to a goal also has `goal` (code). A part of a
+A purchase made with a virtual card of a credit card also has `virtual`
+(`true`); the other transactions do not have the field. A transaction
+linked to a goal also has `goal` (code). A part of a
 transaction in installments also has `installment`, `installments` and
 `installment_id`. A transaction that a schedule created also has
 `schedule` (code).
@@ -387,7 +389,10 @@ that the call created or changed.
 
 **Bill:** `period` (`YYYY-MM`), `closes_on`, `due_on`, `status`, `carried`,
 `spent`, `total`. A paid bill also has `paid_on`, `paid`, `remaining` (the
-value that went to the next bill) and `payment_id`.
+value that went to the next bill) and `payment_id`. The open bill of
+`credit_card_show` also has `transactions`, and `virtual_total` when it has
+purchases made with a virtual card: the sum of these purchases, positive
+as `spent` is.
 
 **Goal:** `id`, `code`, `title`, `description`, `type`, `currency`,
 `archived`, `target`, `progress`, `remaining`, `percent`, `status`,

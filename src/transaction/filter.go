@@ -14,6 +14,9 @@ type Filter struct {
 	Category, Account, Type string
 	// Goal is the code of a goal.
 	Goal string
+	// Virtual is "yes" for the transactions made with a virtual card
+	// and "no" for the other ones. The start of the word is enough.
+	Virtual string
 	// Tags lists tags the transaction must have, with the # sign.
 	Tags []string
 	// Period is the start of a YYYY-MM-DD date: a year, a month or a day.
@@ -31,6 +34,14 @@ func (f Filter) same(value, want string) bool {
 	return value == want
 }
 
+// virtualWord is the word of the filter for a mark of a virtual card.
+func virtualWord(virtual bool) string {
+	if virtual {
+		return "yes"
+	}
+	return "no"
+}
+
 // Match reports whether the filter selects the transaction.
 func (f Filter) Match(v View) bool {
 	switch {
@@ -39,6 +50,7 @@ func (f Filter) Match(v View) bool {
 		f.Account != "" && !f.same(v.Account.Code, f.Account),
 		f.Type != "" && !f.same(v.Type, f.Type),
 		f.Goal != "" && (v.Goal == nil || !f.same(v.Goal.Code, f.Goal)),
+		f.Virtual != "" && strings.HasPrefix(virtualWord(!v.Virtual), strings.ToLower(f.Virtual)),
 		!strings.HasPrefix(v.Date, f.Period):
 		return false
 	}
@@ -70,6 +82,9 @@ func (f Filter) String() string {
 	if f.Goal != "" {
 		parts = append(parts, "goal:"+f.Goal)
 	}
+	if f.Virtual != "" {
+		parts = append(parts, "virtual:"+f.Virtual)
+	}
 	if f.Period != "" {
 		parts = append(parts, f.Period)
 	}
@@ -80,7 +95,7 @@ func (f Filter) String() string {
 var partialDate = regexp.MustCompile(`^\d{4}(-\d{0,2}(-\d{0,2})?)?$`)
 
 // ParseSearch reads the text of the search input. A word is a filter
-// when it is #tag, @ACCOUNT, cat:CODE, type:TYPE or a date (2026,
+// when it is #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes or a date (2026,
 // 2026-11, 11/2026, 17/11/2026). The other words are text of the title.
 func ParseSearch(text string) Filter {
 	filter := Filter{Prefix: true}
@@ -100,6 +115,8 @@ func ParseSearch(text string) Filter {
 			filter.Goal = word[len("goal:"):]
 		case strings.HasPrefix(lower, "type:"):
 			filter.Type = word[len("type:"):]
+		case strings.HasPrefix(lower, "virtual:"):
+			filter.Virtual = lower[len("virtual:"):]
 		case partialDate.MatchString(word):
 			filter.Period = word
 		default:
