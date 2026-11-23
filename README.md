@@ -1199,6 +1199,7 @@ Agent Skills format that Claude Code, Codex and opencode read.
 | `finux-period-review` | Report a month or a year |
 | `finux-credit-card-bills` | See the bills of the credit cards and pay them |
 | `finux-coach` | Analyze spending and warn about debts and bills |
+| `finux-tidy-transactions` | Find the transactions of an account or a card that are not sure, and fix their description, category and tags |
 
 A skill that changes data shows a draft and waits for your approval. The
 skills use the MCP tools; without the MCP server they use the `finux`

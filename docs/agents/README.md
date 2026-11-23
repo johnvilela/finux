@@ -19,6 +19,7 @@ The folder [skills](../../skills) has the workflows that use these files:
 | `finux-period-review` | Report a month or a year |
 | `finux-credit-card-bills` | See the bills of the credit cards and pay them |
 | `finux-coach` | Analyze spending and warn about debts and bills |
+| `finux-tidy-transactions` | Find the transactions of an account or a card that are not sure, and fix their description, category and tags |
 
 Each skill has a copy of the three reference files in its `references`
 folder, so an installed skill works without this repository. `make docs`

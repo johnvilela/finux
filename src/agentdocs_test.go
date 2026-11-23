@@ -25,6 +25,7 @@ const (
 // skillNames lists the skills the repository must have.
 var skillNames = []string{
 	"finux-coach", "finux-credit-card-bills", "finux-import-statement", "finux-log-transactions", "finux-period-review",
+	"finux-tidy-transactions",
 }
 
 // sharedReferences lists the files of docs/agents that each skill has a
