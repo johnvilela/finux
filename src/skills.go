@@ -49,9 +49,10 @@ A skill is a workflow for an agent that manages your finances with Finux,
 for example to record a transaction or to import a statement. The skills
 are in the finux binary: install needs no other file.
 
-Install writes one folder for each skill. Run it again after you update
-Finux: it replaces the Finux skills and keeps all other skills. A skill
-folder that is a link stays as it is. The skills use the MCP server; see
+Install writes one folder for each skill. It replaces the Finux skills and
+keeps all other skills. A skill folder that is a link stays as it is.
+'finux update' writes the skills again for each agent that has them. A
+folder you gave with --dir needs install again after an update. The skills use the MCP server; see
 'finux config mcp --help'.
 `
 }
@@ -124,7 +125,7 @@ func skillsFolder(command string, args []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	agents := []string{"claude", "codex", "opencode"}
+	agents := skillAgents
 	switch {
 	case given["dir"] && len(positional) > 0:
 		return "", usageError(command + ": give an agent or --dir, not the two")
@@ -190,6 +191,46 @@ func writeSkills(folder string) (written int, report string, err error) {
 		out.WriteString(ui.Success(name+" "+action) + "\n")
 	}
 	return written, out.String(), nil
+}
+
+// skillAgents lists the agents that have a skills folder, in the order
+// to show them.
+var skillAgents = []string{"claude", "codex", "opencode"}
+
+// refreshSkills writes the skills of the binary again for each agent
+// that has a Finux skill in its folder. An agent without one gets none:
+// the user did not install the skills there. It reports whether it
+// wrote a skill.
+func refreshSkills(io streams) (changed bool, err error) {
+	names, err := skillList()
+	if err != nil {
+		return false, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, fmt.Errorf("find home directory: %w", err)
+	}
+	var failures []error
+	for _, agent := range skillAgents {
+		folder := filepath.Join(home, skillFolders[agent])
+		if !slices.ContainsFunc(names, func(name string) bool {
+			_, err := os.Lstat(filepath.Join(folder, name))
+			return err == nil
+		}) {
+			continue
+		}
+		written, _, err := writeSkills(folder)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("skills of %s: %w", agent, err))
+			continue
+		}
+		if written == 0 {
+			continue
+		}
+		changed = true
+		fmt.Fprintln(io.stdout, ui.Success(fmt.Sprintf("Skills updated for %s (%s)", agent, plural(int64(written), "skill"))))
+	}
+	return changed, errors.Join(failures...)
 }
 
 // copySkill writes the files of one skill of the binary to target.

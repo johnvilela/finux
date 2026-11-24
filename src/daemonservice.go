@@ -199,12 +199,23 @@ func serviceCommand(command string, args []string, io streams) error {
 }
 
 // restartDaemon starts the daemon again when it is installed and
-// active, so it runs a new binary. It does nothing without systemd.
-func restartDaemon() {
+// active, so it runs a new binary. The MCP server of the daemon is in
+// the same process. A daemon that is stopped stays stopped. It does
+// nothing without systemd.
+func restartDaemon(io streams) (restarted bool, err error) {
 	if _, err := installed(); err != nil {
-		return
+		return false, nil
 	}
-	if found, err := exec.LookPath("systemctl"); err == nil {
-		exec.Command(found, "--user", "try-restart", daemonUnit).Run()
+	found, err := exec.LookPath("systemctl")
+	if err != nil {
+		return false, nil
 	}
+	if exec.Command(found, "--user", "is-active", "--quiet", daemonUnit).Run() != nil {
+		return false, nil
+	}
+	if err := systemd(io, false, "systemctl", "restart", daemonUnit); err != nil {
+		return false, err
+	}
+	_, err = fmt.Fprintln(io.stdout, ui.Success("Finux daemon started again, with its MCP server"))
+	return true, err
 }

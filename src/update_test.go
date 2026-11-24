@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -128,8 +129,8 @@ func TestUpdateCommand(t *testing.T) {
 		t.Fatalf("script got %q, %v", got, err)
 	}
 
-	// With the daemon installed, an update starts the daemon again, so
-	// it runs the new version.
+	// The install script of the release refreshes the daemon and the
+	// skills, with the new binary. The update itself calls no systemd.
 	home := t.TempDir()
 	path, calls := fakeSystemd(t)
 	server := updateServer(t, "v0.11.0", log)
@@ -146,7 +147,7 @@ func TestUpdateCommand(t *testing.T) {
 	if _, stderr, status := runBinary(t, binary, []string{"FINUX_UPDATE_SOURCE=" + server.URL, "PATH=" + path, "HOME=" + home}, "update"); status != 0 || stderr != "" {
 		t.Fatalf("update with the daemon: status %d, stderr %q", status, stderr)
 	}
-	if got := calls(); got != "systemctl --user try-restart finux.service\n" {
+	if got := calls(); got != "" {
 		t.Fatalf("calls of update = %q", got)
 	}
 
@@ -179,7 +180,8 @@ func releaseServer(t *testing.T, log string, goodChecksum bool) (server *httptes
 	t.Helper()
 	// With FAKE_INIT_FAILS, its init breaks the database and fails.
 	binary := []byte("#!/bin/sh\nif [ \"$1\" = version ]; then echo 'finux v0.11.0'; exit 0; fi\necho \"$@\" >> '" + log + "'\n" +
-		"if [ -n \"$FAKE_INIT_FAILS\" ]; then echo broken > \"$FINUX_DB\"; echo 'migration failed' >&2; exit 1; fi\n")
+		"if [ -n \"$FAKE_INIT_FAILS\" ]; then echo broken > \"$FINUX_DB\"; echo 'migration failed' >&2; exit 1; fi\n" +
+		"if [ \"$1\" = update ] && [ -n \"$FAKE_REFRESH_FAILS\" ]; then echo 'refresh failed' >&2; exit 1; fi\n")
 	sum := sha256.Sum256(binary)
 	checksum := hex.EncodeToString(sum[:])
 	if !goodChecksum {
@@ -235,8 +237,15 @@ func TestInstallScript(t *testing.T) {
 		t.Fatalf("requests = %q", got)
 	}
 	// It sets up the database: init creates it or applies the migrations.
-	if got, _ := os.ReadFile(log); strings.TrimSpace(string(got)) != "init" {
-		t.Fatalf("the new binary ran %q, want init", got)
+	// Then the new binary refreshes the skills and the daemon.
+	if got, _ := os.ReadFile(log); string(got) != "init\nupdate --refresh\n" {
+		t.Fatalf("the new binary ran %q, want init and update --refresh", got)
+	}
+	// A refresh that fails does not fail the install.
+	server, _ = releaseServer(t, log, true)
+	output, status = install(server, "FINUX_INSTALL_DIR="+target, "FAKE_REFRESH_FAILS=1")
+	if status != 0 || !strings.Contains(output, "refresh failed") || !strings.Contains(output, "Run 'finux update --refresh'") || !strings.Contains(output, "installed in "+target) {
+		t.Fatalf("install with a failed refresh: status %d\n%s", status, output)
 	}
 	if !strings.Contains(output, "is not in your PATH") {
 		t.Errorf("no advice about the PATH:\n%s", output)
@@ -329,5 +338,176 @@ func TestInstallScript(t *testing.T) {
 	// Only the systems that have a release can install.
 	if output, status = install(server, "FINUX_INSTALL_DIR="+empty, "FINUX_SYSTEM=Darwin arm64"); status == 0 || !strings.Contains(output, "no finux release for Darwin arm64") {
 		t.Fatalf("install on another system: status %d\n%s", status, output)
+	}
+}
+
+// fakeProcesses makes a folder as /proc with one process for each
+// command line. It returns the folder; the processes have the ids 101,
+// 102 and so on.
+func fakeProcesses(t *testing.T, commands ...[]string) string {
+	t.Helper()
+	folder := t.TempDir()
+	for i, command := range commands {
+		process := filepath.Join(folder, strconv.Itoa(101+i))
+		if err := os.MkdirAll(process, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(process, "cmdline"), []byte(strings.Join(command, "\x00")+"\x00"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// /proc has also entries that are not processes.
+	if err := os.WriteFile(filepath.Join(folder, "uptime"), []byte("1 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return folder
+}
+
+func TestUpdateRefresh(t *testing.T) {
+	home := t.TempDir()
+	path, calls := fakeSystemd(t)
+	processes := fakeProcesses(t)
+	refresh := func(args ...string) (stdout, stderr string, status int) {
+		t.Helper()
+		env := []string{"HOME=" + home, "PATH=" + path, "FINUX_PROC=" + processes}
+		return finuxEnv(t, env, append([]string{"update", "--refresh"}, args...)...)
+	}
+
+	// Nothing is installed: the refresh does and tells nothing.
+	if stdout, stderr, status := refresh(); status != 0 || stdout != "" || stderr != "" || calls() != "" {
+		t.Fatalf("refresh of nothing: status %d, stdout %q, stderr %q", status, stdout, stderr)
+	}
+	if _, stderr, status := refresh("--check"); status != 2 || !strings.Contains(stderr, "--refresh") {
+		t.Fatalf("refresh --check: status %d, stderr %q", status, stderr)
+	}
+	if stdout, _, _ := finuxEnv(t, nil, "update", "--help"); !strings.Contains(stdout, "--refresh") {
+		t.Fatalf("help lacks --refresh:\n%s", stdout)
+	}
+
+	// The skills of an agent that has them get the files of this binary.
+	// An agent without the skills gets none.
+	if _, stderr, status := finuxEnv(t, []string{"HOME=" + home}, "config", "skills", "install", "claude"); status != 0 {
+		t.Fatalf("install the skills: %s", stderr)
+	}
+	claude := filepath.Join(home, ".claude", "skills")
+	changed := filepath.Join(claude, skillNames[0], "SKILL.md")
+	want, err := os.ReadFile(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(changed, []byte("old text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claude, skillNames[0], "old-file.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(claude, "other-skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A skill that is a link stays a link.
+	elsewhere := t.TempDir()
+	if err := os.RemoveAll(filepath.Join(claude, skillNames[1])); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(claude, skillNames[1])); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, status := refresh()
+	if status != 0 || stderr != "" || calls() != "" {
+		t.Fatalf("refresh of the skills: status %d, stderr %q, stdout %q", status, stderr, stdout)
+	}
+	for _, text := range []string{"✓ Skills updated for claude (" + strconv.Itoa(len(skillNames)-1) + " skills)\n", "Start a new session of your AI agents"} {
+		if !strings.Contains(stdout, text) {
+			t.Errorf("refresh output lacks %q:\n%s", text, stdout)
+		}
+	}
+	if strings.Contains(stdout, "codex") || strings.Contains(stdout, "opencode") || strings.Contains(stdout, "MCP server") {
+		t.Errorf("refresh output tells too much:\n%s", stdout)
+	}
+	if got, _ := os.ReadFile(changed); string(got) != string(want) {
+		t.Errorf("the refresh did not write the skill again: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(claude, skillNames[0], "old-file.md")); err == nil {
+		t.Error("the refresh kept an old file of a skill")
+	}
+	if _, err := os.Stat(filepath.Join(claude, "other-skill")); err != nil {
+		t.Error("the refresh removed a skill that is not of Finux")
+	}
+	if info, err := os.Lstat(filepath.Join(claude, skillNames[1])); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Error("the refresh replaced a link")
+	}
+	if files, _ := os.ReadDir(elsewhere); len(files) != 0 {
+		t.Errorf("the refresh wrote through a link: %v", files)
+	}
+	for _, folder := range []string{filepath.Join(home, ".codex"), filepath.Join(home, ".config", "opencode")} {
+		if _, err := os.Stat(folder); err == nil {
+			t.Errorf("the refresh made %s", folder)
+		}
+	}
+
+	// A daemon that runs starts again. One that is stopped stays stopped.
+	unit := filepath.Join(home, ".config", "systemd", "user", "finux.service")
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unit, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, status = refresh()
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "✓ Finux daemon started again, with its MCP server\n") {
+		t.Fatalf("refresh with the daemon: status %d, stderr %q, stdout %q", status, stderr, stdout)
+	}
+	if got := calls(); got != "systemctl --user is-active --quiet finux.service\nsystemctl --user restart finux.service\n" {
+		t.Fatalf("calls of refresh = %q", got)
+	}
+	stopped := t.TempDir()
+	script := "#!/bin/sh\necho \"systemctl $*\" >> '" + filepath.Join(stopped, "calls.log") + "'\n[ \"$2\" != is-active ]\n"
+	if err := os.WriteFile(filepath.Join(stopped, "systemctl"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, status = finuxEnv(t, []string{"HOME=" + home, "PATH=" + stopped + ":" + os.Getenv("PATH"), "FINUX_PROC=" + processes}, "update", "--refresh")
+	if status != 0 || stderr != "" || strings.Contains(stdout, "daemon") {
+		t.Fatalf("refresh with a stopped daemon: status %d, stderr %q, stdout %q", status, stderr, stdout)
+	}
+	if got, _ := os.ReadFile(filepath.Join(stopped, "calls.log")); string(got) != "systemctl --user is-active --quiet finux.service\n" {
+		t.Fatalf("calls with a stopped daemon = %q", got)
+	}
+	// A restart that fails is an error, after the other steps.
+	broken := t.TempDir()
+	script = "#!/bin/sh\nif [ \"$2\" = restart ]; then echo 'no bus' >&2; exit 1; fi\n"
+	if err := os.WriteFile(filepath.Join(broken, "systemctl"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, status = finuxEnv(t, []string{"HOME=" + home, "PATH=" + broken + ":" + os.Getenv("PATH"), "FINUX_PROC=" + processes}, "update", "--refresh")
+	if status != 1 || !strings.Contains(stderr, "no bus") || !strings.Contains(stdout, "Skills updated for claude") {
+		t.Fatalf("refresh with a failed restart: status %d, stderr %q, stdout %q", status, stderr, stdout)
+	}
+	calls()
+
+	// The MCP servers that run keep the old version: the refresh tells.
+	processes = fakeProcesses(t,
+		[]string{"/home/me/.local/bin/finux", "config", "mcp"},
+		[]string{"finux", "config", "mcp", "--read-only"},
+		[]string{"/usr/bin/finux", "config", "mcp", "--http", "127.0.0.1:8765"},
+		[]string{"/usr/bin/finux", "config", "mcp", "config", "claude"},
+		[]string{"/usr/bin/finux", "daemon", "run"},
+		[]string{"/usr/bin/finux-dev", "config", "mcp"},
+		[]string{"vim", "config", "mcp"},
+	)
+	stdout, stderr, status = refresh()
+	if status != 0 || stderr != "" {
+		t.Fatalf("refresh with MCP servers: status %d, stderr %q", status, stderr)
+	}
+	for _, text := range []string{"2 agent sessions still run the old MCP server.", "Start a new session of your AI agents", "A 'finux config mcp --http' server still runs the old version (PID 103). Start it again."} {
+		if !strings.Contains(stdout, text) {
+			t.Errorf("refresh output lacks %q:\n%s", text, stdout)
+		}
+	}
+	// One session, and no skills: the refresh still tells.
+	lone := t.TempDir()
+	processes = fakeProcesses(t, []string{"finux", "config", "mcp"})
+	stdout, _, status = finuxEnv(t, []string{"HOME=" + lone, "PATH=" + path, "FINUX_PROC=" + processes}, "update", "--refresh")
+	if status != 0 || !strings.Contains(stdout, "1 agent session still runs the old MCP server.") || !strings.Contains(stdout, "Start a new session") {
+		t.Fatalf("refresh with one MCP server: status %d, stdout %q", status, stdout)
 	}
 }

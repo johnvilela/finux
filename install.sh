@@ -1,7 +1,9 @@
 #!/bin/sh
 # Install or update Finux: download the binary of a release, check it,
 # set up the database and put the binary in a folder of the PATH. Before
-# an update changes the database, the script keeps a copy of it.
+# an update changes the database, the script keeps a copy of it. After an
+# update, the new binary writes the skills of the AI agents again and
+# starts the daemon again.
 #
 #   curl -fsSL https://raw.githubusercontent.com/johnvilela/finux/main/install.sh | sh
 #
@@ -87,6 +89,11 @@ mv "$temporary/$asset" "$directory/.finux.new"
 mv "$directory/.finux.new" "$directory/finux"
 
 echo "✓ $("$directory/finux" version) installed in $directory"
+
+# The new version refreshes what an older one installed: the skills of
+# the agents and the daemon. The install is good also when this fails.
+"$directory/finux" update --refresh ||
+  echo "finux install: could not refresh the skills or the daemon. Run 'finux update --refresh'." >&2
 if [ -n "$backup" ]; then
   echo "Copy of the database: $backup"
   echo "Delete it when the new version works for you."

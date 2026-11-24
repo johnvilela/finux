@@ -32,6 +32,7 @@ For another system, [build from source](#build-and-run).
 finux version          # the version you have
 finux update --check   # tell if a newer version exists
 finux update           # install it
+finux update --refresh # do only the steps after an install
 ```
 
 `finux update` asks GitHub for the newest release. When it is newer, Finux
@@ -41,6 +42,21 @@ script makes a copy of your database beside it, as
 database migrations. When that works, the new binary replaces the old one.
 When it fails, the script puts the database back and your version stays.
 Delete the copy when the new version works for you.
+
+After the install, the new version refreshes what Finux installed, so you
+do not run those commands again:
+
+- It writes the skills again for each agent that has them (`claude`,
+  `codex`, `opencode`). A skills folder you gave with `--dir` needs
+  `finux config skills install --dir` again.
+- It starts the daemon again when it runs. The MCP server of the daemon
+  starts again with it.
+- It tells you when an AI agent, or a `finux config mcp --http` server that
+  you started, still runs the old MCP server. Finux does not stop them: an
+  agent gets the new server and the new skills in a new session.
+
+`finux update --refresh` does these steps again without a new version, for
+example after you build the binary from source.
 
 To uninstall, delete `~/.local/bin/finux`. Your data is in `~/.finux`.
 
@@ -1048,7 +1064,8 @@ start it again after you change them. The other settings need no restart.
 The service is a systemd user unit, `~/.config/systemd/user/finux.service`.
 `finux daemon install` writes it for the binary that runs the command, and
 for the database in `FINUX_DB` when that variable is set. Run it again after
-you move the binary. `finux update` starts the service again by itself. The
+you move the binary. `finux update` starts the service again by itself, when
+it runs. The
 service runs while you are logged in; to keep it running after you log out:
 
 ```sh
@@ -1092,8 +1109,8 @@ Then start a new session of the agent.
   runs the install script of the ai-memory project, which checks the release
   against its checksum. Without a terminal it installs only with `--yes`.
   `--no-memory` skips ai-memory.
-- Run it again after you update Finux or move its binary: it replaces the
-  server and the skills.
+- Run it again after you move the binary of Finux: it replaces the server
+  and the skills. `finux update` writes the skills again by itself.
 
 The next two sections tell what the first two parts are and how to set up
 each one by hand.
@@ -1217,8 +1234,9 @@ skills are in the binary, so the command needs no other file:
 ./bin/finux config skills remove claude      # remove them again
 ```
 
-Run `install` again after you update Finux: it replaces the Finux skills
-and keeps all other skills in the folder. When you work on the skills in
+`install` replaces the Finux skills and keeps all other skills in the
+folder. `finux update` runs it for each agent that has the skills; run it
+again yourself for a folder you gave with `--dir`. When you work on the skills in
 this repository, link them in place of the install, and `install` then
 leaves the links as they are:
 

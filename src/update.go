@@ -32,9 +32,11 @@ const (
 func updateHelp() string {
 	return "Update Finux to the newest version\n\n" +
 		green.Render("Usage:") + ` finux update [--check]
+       finux update --refresh
 
 ` + green.Render("Options:") + `
   --check           Tell if a newer version exists; change nothing
+  --refresh         Do only the steps after an install, with this version
   -h, --help        Show this help
 
 Finux asks GitHub for the newest release of ` + repository + `. When it
@@ -44,6 +46,16 @@ copy of your database beside it (finux.db.backup-<date>-<time>), then the new
 version applies its database migrations. When that works, the script puts
 the new binary in the place of this one. When it fails, the script puts the
 database back and this version stays.
+
+After the install, the new version refreshes what Finux installed:
+- It writes the skills again for each agent that has them (claude, codex,
+  opencode). A skills folder you gave with --dir needs
+  'finux config skills install --dir' again.
+- It starts the daemon again when it runs. The MCP server of the daemon
+  starts again with it.
+- It tells you when an AI agent or a 'finux config mcp --http' server still
+  runs the old MCP server. An agent gets the new one in a new session.
+'finux update --refresh' does these steps again, without a new version.
 
 'finux version' shows the version you have.
 `
@@ -151,11 +163,22 @@ func runUpdate(args []string, io streams) int {
 			return write(io, updateHelp())
 		}
 	}
-	var check bool
-	if _, _, err := parse("update", args, func(f *flag.FlagSet) { f.BoolVar(&check, "check", false, "") }, 0); err != nil {
+	var check, again bool
+	_, _, err := parse("update", args, func(f *flag.FlagSet) {
+		f.BoolVar(&check, "check", false, "")
+		f.BoolVar(&again, "refresh", false, "")
+	}, 0)
+	if err == nil && check && again {
+		err = usageError("update: give --check or --refresh, not the two")
+	}
+	if err != nil {
 		return exitStatus(io, "update", err)
 	}
-	if err := update(check, io); err != nil {
+	run := func() error { return update(check, io) }
+	if again {
+		run = func() error { return refresh(io) }
+	}
+	if err := run(); err != nil {
 		fmt.Fprintf(io.stderr, "finux: update: %v\n", err)
 		return 1
 	}
@@ -201,13 +224,41 @@ func update(check bool, io streams) error {
 		return fmt.Errorf("find the finux binary: %w", err)
 	}
 	// The script copies the database, applies the migrations with the new
-	// binary and then puts that binary in the place of this one.
+	// binary and then puts that binary in the place of this one. Then it
+	// runs 'update --refresh' of the new binary: this process is the old
+	// version, with the old skills.
 	command := exec.Command("sh", "-s")
 	command.Stdin, command.Stdout, command.Stderr = bytes.NewReader(script), io.stdout, io.stderr
 	command.Env = append(os.Environ(), "FINUX_VERSION="+latest, "FINUX_INSTALL_DIR="+filepath.Dir(binary))
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("the install script failed: %w", err)
 	}
-	restartDaemon()
 	return nil
+}
+
+// refresh makes what Finux installed use this version: the skills of
+// the agents and the daemon. It tells about the MCP servers that it
+// cannot start again. A step that fails does not stop the next ones.
+func refresh(io streams) error {
+	changed, skillsErr := refreshSkills(io)
+	_, daemonErr := restartDaemon(io)
+	stdio, served := mcpProcesses()
+	var lines []string
+	switch len(stdio) {
+	case 0:
+	case 1:
+		lines = append(lines, "1 agent session still runs the old MCP server.")
+	default:
+		lines = append(lines, fmt.Sprintf("%d agent sessions still run the old MCP server.", len(stdio)))
+	}
+	if changed || len(stdio) > 0 {
+		lines = append(lines, "Start a new session of your AI agents: open sessions keep the old skills and tools.")
+	}
+	for _, id := range served {
+		lines = append(lines, fmt.Sprintf("A 'finux config mcp --http' server still runs the old version (PID %d). Start it again.", id))
+	}
+	for _, line := range lines {
+		fmt.Fprintln(io.stdout, ui.Hint(line))
+	}
+	return errors.Join(skillsErr, daemonErr)
 }
