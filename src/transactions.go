@@ -84,6 +84,9 @@ Without options, add and edit open a form. The form suggests the titles and
 the tags that other transactions have; press tab to accept a suggestion.
 Without an id, edit and delete open the list.
 
+In a terminal, the details of a transaction have the buttons Edit and Delete.
+Delete asks for confirmation.
+
 In the list, the search input finds transactions by title. It also reads
 filters: #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes or virtual:no, and a
 date such as 2026, 2026-11 or 17/11/2026.
@@ -328,7 +331,28 @@ func (c *transactionsCommand) list(args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.print(ui.TransactionCard(selected, c.plain))
+	return c.details(selected)
+}
+
+// details shows a transaction. In a terminal the card has the buttons
+// that edit and delete the transaction.
+func (c *transactionsCommand) details(view transaction.View) error {
+	card := ui.TransactionCard(view, c.plain)
+	if !c.interactive {
+		return c.print(card)
+	}
+	screen, err := program(ui.NewDetails(card))
+	if err != nil {
+		return err
+	}
+	id := strconv.FormatUint(uint64(view.ID), 10)
+	switch screen.Action() {
+	case ui.DetailsEdit:
+		return c.edit([]string{id})
+	case ui.DetailsDelete:
+		return c.delete([]string{id})
+	}
+	return nil
 }
 
 // listFlags holds the text of the filters of list.
@@ -400,7 +424,7 @@ func (c *transactionsCommand) show(args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.print(ui.TransactionCard(found, c.plain))
+	return c.details(found)
 }
 
 // transactionFlags holds the text of the options of add and edit.
