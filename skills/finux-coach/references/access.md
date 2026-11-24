@@ -87,8 +87,8 @@ Rules for the CLI:
 | `budget_delete` | `finux bg delete <code> --hard --yes` |
 | `schedule_list` | `finux sc list [--all]` |
 | `schedule_show` | `finux sc show <code>` |
-| `schedule_add` | `finux sc add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--date <date>] [--every <period>] [--until <date>] [--times <number>] [--auto] [--tags <tags>] [--goal <code>] [--code <code>] [--description <text>]` |
-| `schedule_edit` | `finux sc edit <code> [--title] [--code] [--description] [--value] [--account] [--category] [--type] [--date] [--every <period\|none>] [--until <date\|none>] [--times <number\|none>] [--auto[=false]] [--tags] [--goal <code\|none>]` |
+| `schedule_add` | `finux sc add --title <text> --value <amount> --category <code> [--account <code>] [--currency <code>] [--type <type>] [--date <date>] [--every <period>] [--until <date>] [--times <number>] [--auto] [--tags <tags>] [--goal <code>] [--code <code>] [--description <text>]` |
+| `schedule_edit` | `finux sc edit <code> [--title] [--code] [--description] [--value] [--account <code\|none>] [--currency] [--category] [--type] [--date] [--every <period\|none>] [--until <date\|none>] [--times <number\|none>] [--auto[=false]] [--tags] [--goal <code\|none>]` |
 | `schedule_pay` | `finux sc pay <code> [--value <amount>] [--date <date>] [--account <code>]` |
 | `schedule_skip` | `finux sc skip <code>` |
 | `schedule_archive` | `finux sc delete <code> --yes` |

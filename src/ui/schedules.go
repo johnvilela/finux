@@ -59,6 +59,26 @@ func scheduleStatus(current schedule.Schedule, today string) string {
 	return status
 }
 
+// notDecided is the text in the place of the account of a schedule that
+// has none.
+const notDecided = "not decided"
+
+// Place returns the code of the account or the card of the schedule, or
+// "-" when the user did not decide it yet.
+func (v ScheduleView) Place() string {
+	if !v.Placed() {
+		return "-"
+	}
+	return v.Account.Code
+}
+
+func (v ScheduleView) placeName() string {
+	if !v.Placed() {
+		return notDecided
+	}
+	return v.Account.Code + "  " + v.Account.Name
+}
+
 // scheduleNext returns the date of the next occurrence, or "-".
 func scheduleNext(current schedule.Schedule) string {
 	if next, ok := current.Next(); ok {
@@ -101,7 +121,7 @@ func ScheduleTable(views []ScheduleView, today string, plain bool) string {
 		}
 		rows[i] = []string{
 			view.Code, title, view.Recurrence(), scheduleNext(view.Schedule), scheduleStatus(view.Schedule, today),
-			view.Account.Code, money.Format(view.Amount(), view.Account.Currency),
+			view.Place(), money.Format(view.Amount(), view.Account.Currency),
 		}
 	}
 	count := fmt.Sprintf("%d schedules", len(views))
@@ -218,7 +238,7 @@ func ScheduleDetailsView(details ScheduleDetails, plain bool) string {
 		{"ID", strconv.FormatUint(uint64(view.ID), 10)},
 		{"Type", view.Type},
 		{"Value", money.Format(view.Value, view.Account.Currency)},
-		{place, view.Account.Code + "  " + view.Account.Name},
+		{place, view.placeName()},
 		{"Category", view.Category.Code + "  " + view.Category.Name},
 	}
 	if view.Tags != "" {
@@ -295,8 +315,12 @@ func styledScheduleDetails(details ScheduleDetails) string {
 		place = "Card"
 	}
 	dot, _ := category.ColorByKey(view.Category.Color)
+	placeRow := styleDim.Render(notDecided)
+	if view.Placed() {
+		placeRow = swatch(view.Account.Color, "●") + " " + styleBold.Render(view.Account.Code) + "  " + view.Account.Name
+	}
 	lines = append(lines,
-		row(place, swatch(view.Account.Color, "●")+" "+styleBold.Render(view.Account.Code)+"  "+view.Account.Name),
+		row(place, placeRow),
 		row("Category", paint(dot.Hex, "●")+" "+styleBold.Render(view.Category.Code)+"  "+view.Category.Name),
 	)
 	if view.Tags != "" {

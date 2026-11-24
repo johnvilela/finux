@@ -88,7 +88,7 @@ func TestScheduledAddChecks(t *testing.T) {
 	h.ok("ac", "a", "--name", "Wise", "--currency", "USD", "--code", "WISE")
 	h.ok("gl", "add", "--title", "Trip", "--type", "save", "--target", "1000", "--currency", "USD", "--code", "TRIP")
 	base := []string{"sc", "add", "--title", "Rent", "--value", "10", "--account", "NU", "--category", "HOME"}
-	h.fail(2, "add: --title, --value, --account and --category are necessary", "sc", "add", "--title", "Rent")
+	h.fail(2, "add: --title, --value and --category are necessary", "sc", "add", "--title", "Rent")
 	h.fail(2, "add: --type is necessary: the category OTHER is for all types", "sc", "add", "--title", "Rent", "--value", "10", "--account", "NU", "--category", "OTHER")
 	for want, extra := range map[string][]string{
 		"invalid period":                     {"--every", "fortnight"},
@@ -288,4 +288,51 @@ func TestScheduledInResumeAndBudgets(t *testing.T) {
 	if got := h.ok("bg", "show", "HOME", "--period", "15/10/2026"); strings.Contains(got, "Scheduled") {
 		t.Fatalf("past period:\n%s", got)
 	}
+}
+
+// The user does not always know which account will pay a bill. A
+// schedule can wait without an account; the payment gives it.
+func TestScheduledWithoutAccount(t *testing.T) {
+	h := newCardsHome(t)
+	if got := h.ok("sc", "add", "--title", "Energy", "--value", "187", "--category", "BILLS", "--every", "month", "--date", "06/10/2026", "--code", "ENERG"); got != "✓ Schedule ENERG created\n" {
+		t.Fatalf("add output = %q", got)
+	}
+	h.has(h.ok("sc"), "ENERG  Energy  every month  06/10/2026  2 due   -        -R$ 187,00\n")
+	h.has(h.ok("sc", "ENERG"), "Value       R$ 187,00\n", "Account     not decided\n")
+	// It still counts in the list of what is due.
+	h.has(h.ok("resume"), "Energy")
+
+	h.fail(2, "pay: give --account: the schedule ENERG has no account", "sc", "pay", "ENERG")
+	h.fail(2, "an automatic schedule needs an account", "sc", "edit", "ENERG", "--auto")
+	h.fail(2, "an automatic schedule needs an account", "sc", "add", "--title", "Water", "--value", "50", "--category", "BILLS", "--auto")
+
+	// The payment tells the account, or the credit card.
+	if got := h.ok("sc", "pay", "ENERG", "--account", "NU"); got != "✓ Schedule ENERG paid: transaction 1 created (06/10/2026, -R$ 187,00)\nNext: 06/11/2026\n" {
+		t.Fatalf("pay output = %q", got)
+	}
+	h.has(h.ok("tx", "1"), "Account   NU  Nubank\n", "Schedule  ENERG  Energy\n")
+	if got := h.ok("sc", "pay", "ENERG", "--account", "VISA", "--value", "190,50"); got != "✓ Schedule ENERG paid: transaction 2 created (06/11/2026, -R$ 190,50)\nNext: 06/12/2026\n" {
+		t.Fatalf("pay with a card output = %q", got)
+	}
+	h.has(h.ok("tx", "2"), "Card      VISA  Visa Gold\n")
+	// The schedule itself stays without an account.
+	h.has(h.ok("sc", "ENERG"), "Account     not decided\n")
+
+	// An edit gives the account and takes it away again.
+	h.ok("sc", "edit", "ENERG", "--account", "NU")
+	h.has(h.ok("sc", "ENERG"), "Account     NU  Nubank\n")
+	h.ok("sc", "edit", "ENERG", "--account", "none")
+	h.has(h.ok("sc", "ENERG"), "Account     not decided\n", "Value       R$ 187,00\n")
+
+	// With accounts in two currencies the schedule needs its currency.
+	h.ok("ac", "a", "--name", "Wise", "--currency", "USD", "--code", "WISE", "--balance", "100")
+	h.fail(2, "add: give --account or --currency: your accounts have more than one currency", "sc", "add", "--title", "Hosting", "--value", "12", "--category", "BILLS")
+	h.fail(2, "unknown currency", "sc", "add", "--title", "Hosting", "--value", "12", "--category", "BILLS", "--currency", "XXX")
+	h.fail(2, "add: give --account or --currency, not the two", "sc", "add", "--title", "Hosting", "--value", "12", "--category", "BILLS", "--currency", "USD", "--account", "WISE")
+	h.ok("sc", "add", "--title", "Hosting", "--value", "12", "--category", "BILLS", "--currency", "usd", "--code", "HOST")
+	h.has(h.ok("sc", "HOST"), "Value       $12.00\n", "Account     not decided\n")
+	// An account in another currency needs the real value.
+	h.fail(2, "pay: give --value: the account NU is in BRL, not in USD", "sc", "pay", "HOST", "--account", "NU")
+	h.ok("sc", "pay", "HOST", "--account", "WISE")
+	h.has(h.ok("ac", "WISE"), "$88.00")
 }

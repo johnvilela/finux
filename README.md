@@ -824,6 +824,11 @@ goal. `add` needs `--title`, `--value`, `--account` and `--category`.
   stays due until then, so a schedule can have many due occurrences; `pay`
   and `skip` take the oldest one first. `pay` can also confirm an occurrence
   before its date.
+- **No account yet**: `--account` is optional. A schedule without it waits
+  for the account, for a bill that you did not decide how to pay. Then
+  `sc pay` needs `--account`, an account or a credit card, and `--auto` is
+  not possible. With accounts in more than one currency, give `--currency`.
+  `sc edit --account none` takes the account away.
 - **Real values**: `sc pay` uses the value, the date of the occurrence and the
   account of the schedule. `--value`, `--date` and `--account` give the real
   ones, for a bill that changes each month.

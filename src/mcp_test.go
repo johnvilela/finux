@@ -1130,3 +1130,26 @@ func TestMCPCorrections(t *testing.T) {
 	h.want(page, "1", "count")
 	h.want(page, "PAY LAMEI", "corrections", 0, "pattern")
 }
+
+func TestMCPScheduleWithoutAccount(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "5000"})
+	h.ok("credit_card_add", map[string]any{"name": "Visa Gold", "currency": "BRL", "limit": "5000", "closing_day": 25, "due_day": 5, "code": "VISA"})
+	// A schedule can wait without an account: the payment gives it.
+	undecided := h.ok("schedule_add", map[string]any{"title": "Energy", "value": "187", "category": "BILLS", "date": "2026-11-06", "every": "month", "code": "ENERG"})
+	h.want(undecided, "BRL", "schedule", "currency")
+	h.want(undecided, "18700", "schedule", "value", "minor")
+	for _, field := range []string{"account", "credit_card"} {
+		if _, ok := undecided["schedule"].(map[string]any)[field]; ok {
+			t.Errorf("schedule without an account has %s: %v", field, undecided)
+		}
+	}
+	h.fail("give account: the schedule ENERG has no account", "schedule_pay", map[string]any{"schedule": "ENERG"})
+	h.fail("automatic schedule needs an account", "schedule_edit", map[string]any{"schedule": "ENERG", "automatic": true})
+	h.want(h.ok("schedule_edit", map[string]any{"schedule": "ENERG", "account": "NU"}), "NU", "schedule", "account")
+	h.want(h.ok("schedule_edit", map[string]any{"schedule": "ENERG", "account": "none"}), "BRL", "schedule", "currency")
+	paid := h.ok("schedule_pay", map[string]any{"schedule": "ENERG", "account": "VISA", "date": "2026-11-17"})
+	h.want(paid, "VISA", "transaction", "credit_card")
+	h.want(paid, "2026-12-06", "schedule", "next")
+	h.fail("give account or currency, not the two", "schedule_add", map[string]any{"title": "A", "value": "1", "category": "BILLS", "account": "NU", "currency": "BRL"})
+}

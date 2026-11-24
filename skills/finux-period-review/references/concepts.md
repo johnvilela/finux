@@ -334,6 +334,16 @@ each month, `every`: `month`, `2 weeks`, `15 days`, `year`). A schedule is
 an expense or an income, in an account or on a credit card. It has no
 transfers.
 
+A schedule can also have **no account**: the user did not decide yet
+which account or card will pay the bill. Leave `account` out of
+`schedule_add`; do not ask the user to choose one, and do not guess. The
+schedule then has only `currency`: the currency of the accounts of the
+user when they have only one, or the `currency` you send. `schedule_pay`
+then needs `account`, an account or a credit card, and the schedule stays
+without one for its next occurrences. Such a schedule cannot be
+`automatic`. `schedule_edit` gives it an account, and `account: "none"`
+takes the account away again.
+
 - A schedule is **not** a transaction. It changes no balance, no bill and
   no total. `transaction_list` does not return it.
 - Each date of a schedule is an occurrence. An occurrence waits until
@@ -345,7 +355,8 @@ transfers.
   after today.
 - `schedule_pay` uses the title, the category, the tags and the goal of
   the schedule. Its value, its date and its account are the ones of the
-  schedule unless you give the real ones. Without `date`, a due occurrence
+  schedule unless you give the real ones. `account` can be a credit card:
+  the transaction then goes to a bill of the card. Without `date`, a due occurrence
   gets its own date and an occurrence that is not due yet gets the date
   of today. The transaction has `schedule` with the code of the schedule.
 - The status of a schedule is `due`, `upcoming` or `done` (no occurrence

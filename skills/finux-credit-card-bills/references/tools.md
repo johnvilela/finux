@@ -512,16 +512,17 @@ No arguments.
 
 ### `schedule_add`
 
-*Change.* Schedule a transaction that will happen: an expense or an income, one time (no every) or again and again (every). It creates no transaction. Each occurrence waits until schedule_pay creates its transaction or schedule_skip drops it.
+*Change.* Schedule a transaction that will happen: an expense or an income, one time (no every) or again and again (every). It creates no transaction. Each occurrence waits until schedule_pay creates its transaction or schedule_skip drops it. The account is optional: a bill that the user did not decide how to pay waits without one, and schedule_pay gives the account or the credit card.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `title` | string | yes | Title of the transactions, at most 60 characters |
 | `value` | string | yes | Positive amount in the currency of the account, as a decimal string. The type gives the sign |
-| `account` | string | yes | Code or id of the account or the credit card of the transactions |
 | `category` | string | yes | Code or id of the category |
+| `account` | string | no | Code or id of the account or the credit card of the transactions. Leave it out when the user did not decide which one will pay: do not ask for it and do not guess. schedule_pay then needs account |
 | `automatic` | boolean | no | True creates each transaction on its date without a confirmation, when the user also turned on the setting automatic-schedules. Default: false. Set it only when the user asks for it |
 | `code` | string | no | Short code, 1 to 5 letters and digits. Default: made from the title |
+| `currency` | string | no | Currency of a schedule without an account, for example BRL. Default: the currency of the accounts of the user, when they have only one. Do not give it with account |
 | `date` | string | no | Date of the first occurrence, YYYY-MM-DD or DD/MM/YYYY. Default: today |
 | `description` | string | no | Description, at most 200 characters |
 | `end_date` | string | no | With every: the last day an occurrence can have |
@@ -538,10 +539,11 @@ No arguments.
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `schedule` | string | yes | Code or id of the schedule |
-| `account` | string | no | Code or id of the new account or credit card. Give value also when the currency is different |
+| `account` | string | no | Code or id of the new account or credit card. Give value also when the currency is different. "none" takes the account away: the schedule waits for it until schedule_pay |
 | `automatic` | boolean | no | True creates each transaction on its date without a confirmation; false stops it |
 | `category` | string | no | Code or id of the new category |
 | `code` | string | no | New code, 1 to 5 letters and digits |
+| `currency` | string | no | New currency of a schedule without an account. Give value also |
 | `date` | string | no | New date of the next occurrence. The occurrences after it count from this date |
 | `description` | string | no | New description |
 | `end_date` | string | no | New last day. An empty string removes it |
@@ -560,7 +562,7 @@ No arguments.
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `schedule` | string | yes | Code or id of the schedule |
-| `account` | string | no | Code or id of the account or credit card that paid, when it is another one |
+| `account` | string | no | Code or id of the account or credit card that paid, when it is another one. Necessary for a schedule without an account |
 | `date` | string | no | Real date. Default: the date of the occurrence, or today for an occurrence that is not due yet |
 | `value` | string | no | Real amount, when it is not the amount of the schedule |
 

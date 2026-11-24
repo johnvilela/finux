@@ -93,7 +93,8 @@ func scheduleTools() []mcp.Tool {
 	type addArguments struct {
 		Title       string  `json:"title" mcp:"Title of the transactions, at most 60 characters"`
 		Value       string  `json:"value" mcp:"Positive amount in the currency of the account, as a decimal string. The type gives the sign"`
-		Account     string  `json:"account" mcp:"Code or id of the account or the credit card of the transactions"`
+		Account     *string `json:"account,omitempty" mcp:"Code or id of the account or the credit card of the transactions. Leave it out when the user did not decide which one will pay: do not ask for it and do not guess. schedule_pay then needs account"`
+		Currency    *string `json:"currency,omitempty" mcp:"Currency of a schedule without an account, for example BRL. Default: the currency of the accounts of the user, when they have only one. Do not give it with account"`
 		Category    string  `json:"category" mcp:"Code or id of the category"`
 		Type        *string `json:"type,omitempty" mcp:"Default: expense for a red category, income for a green one. Necessary for a grey category" enum:"expense,income"`
 		Date        *string `json:"date,omitempty" mcp:"Date of the first occurrence, YYYY-MM-DD or DD/MM/YYYY. Default: today"`
@@ -112,7 +113,8 @@ func scheduleTools() []mcp.Tool {
 		Code        *string `json:"code,omitempty" mcp:"New code, 1 to 5 letters and digits"`
 		Description *string `json:"description,omitempty" mcp:"New description"`
 		Value       *string `json:"value,omitempty" mcp:"New positive amount as a decimal string"`
-		Account     *string `json:"account,omitempty" mcp:"Code or id of the new account or credit card. Give value also when the currency is different"`
+		Account     *string `json:"account,omitempty" mcp:"Code or id of the new account or credit card. Give value also when the currency is different. \"none\" takes the account away: the schedule waits for it until schedule_pay"`
+		Currency    *string `json:"currency,omitempty" mcp:"New currency of a schedule without an account. Give value also"`
 		Category    *string `json:"category,omitempty" mcp:"Code or id of the new category"`
 		Type        *string `json:"type,omitempty" mcp:"New type" enum:"expense,income"`
 		Date        *string `json:"date,omitempty" mcp:"New date of the next occurrence. The occurrences after it count from this date"`
@@ -127,7 +129,7 @@ func scheduleTools() []mcp.Tool {
 		Schedule string  `json:"schedule" mcp:"Code or id of the schedule"`
 		Value    *string `json:"value,omitempty" mcp:"Real amount, when it is not the amount of the schedule"`
 		Date     *string `json:"date,omitempty" mcp:"Real date. Default: the date of the occurrence, or today for an occurrence that is not due yet"`
-		Account  *string `json:"account,omitempty" mcp:"Code or id of the account or credit card that paid, when it is another one"`
+		Account  *string `json:"account,omitempty" mcp:"Code or id of the account or credit card that paid, when it is another one. Necessary for a schedule without an account"`
 	}
 	type deleteArguments struct {
 		Schedule string `json:"schedule" mcp:"Code or id of the schedule"`
@@ -181,16 +183,16 @@ func scheduleTools() []mcp.Tool {
 				result["transactions"] = transactionResults(created)
 				return result, nil
 			})),
-		tool("schedule_add", "Schedule a transaction that will happen: an expense or an income, one time (no every) or again and again (every). It creates no transaction. Each occurrence waits until schedule_pay creates its transaction or schedule_skip drops it.",
+		tool("schedule_add", "Schedule a transaction that will happen: an expense or an income, one time (no every) or again and again (every). It creates no transaction. Each occurrence waits until schedule_pay creates its transaction or schedule_skip drops it. The account is optional: a bill that the user did not decide how to pay waits without one, and schedule_pay gives the account or the credit card.",
 			func(db *gorm.DB, a addArguments) (any, error) {
 				c := open(db)
 				values := scheduleFlags{
-					title: a.Title, value: a.Value, account: a.Account, category: a.Category, kind: text(a.Type), date: text(a.Date),
+					title: a.Title, value: a.Value, account: text(a.Account), currency: text(a.Currency), category: a.Category, kind: text(a.Type), date: text(a.Date),
 					every: text(a.Every), until: text(a.EndDate), times: strconv.Itoa(number(a.Times)), auto: a.Automatic != nil && *a.Automatic,
 					tags: text(a.Tags), goal: text(a.Goal), code: text(a.Code), description: text(a.Description),
 				}
 				sent := given(map[string]bool{
-					"title": true, "value": true, "account": true, "category": true, "type": a.Type != nil, "date": a.Date != nil,
+					"title": true, "value": true, "account": a.Account != nil, "currency": a.Currency != nil, "category": true, "type": a.Type != nil, "date": a.Date != nil,
 					"every": a.Every != nil, "until": a.EndDate != nil, "times": a.Times != nil, "auto": a.Automatic != nil,
 					"tags": a.Tags != nil, "goal": a.Goal != nil, "code": a.Code != nil, "description": a.Description != nil,
 				})
@@ -212,13 +214,13 @@ func scheduleTools() []mcp.Tool {
 			func(db *gorm.DB, a editArguments) (any, error) {
 				c := open(db)
 				values := scheduleFlags{
-					title: text(a.Title), code: text(a.Code), description: text(a.Description), value: text(a.Value), account: text(a.Account),
+					title: text(a.Title), code: text(a.Code), description: text(a.Description), value: text(a.Value), account: text(a.Account), currency: text(a.Currency),
 					category: text(a.Category), kind: text(a.Type), date: text(a.Date), every: text(a.Every), until: text(a.EndDate),
 					times: times(a.Times), auto: a.Automatic != nil && *a.Automatic, tags: text(a.Tags), goal: text(a.Goal),
 				}
 				sent := given(map[string]bool{
 					"title": a.Title != nil, "code": a.Code != nil, "description": a.Description != nil, "value": a.Value != nil,
-					"account": a.Account != nil, "category": a.Category != nil, "type": a.Type != nil, "date": a.Date != nil,
+					"account": a.Account != nil, "currency": a.Currency != nil, "category": a.Category != nil, "type": a.Type != nil, "date": a.Date != nil,
 					"every": a.Every != nil, "until": a.EndDate != nil, "times": a.Times != nil, "auto": a.Automatic != nil,
 					"tags": a.Tags != nil, "goal": a.Goal != nil,
 				})

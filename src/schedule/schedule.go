@@ -14,6 +14,7 @@ import (
 
 	"finux/src/budget"
 	"finux/src/code"
+	"finux/src/money"
 
 	"gorm.io/gorm"
 )
@@ -60,10 +61,16 @@ type Schedule struct {
 	// Value is the amount, always positive, in minor units of the
 	// currency of the account or the card.
 	Value int64
-	// A schedule has an account or a credit card, never the two.
-	AccountID  uint `gorm:"index"`
-	CardID     uint `gorm:"index"`
-	CategoryID uint `gorm:"index"`
+	// A schedule has an account or a credit card, never the two. It can
+	// have none: the user decides which one pays when the occurrence is
+	// paid.
+	AccountID uint `gorm:"index"`
+	CardID    uint `gorm:"index"`
+	// Currency is the currency of the value of a schedule without an
+	// account and without a card. A schedule that has one of them uses
+	// the currency of that record.
+	Currency   string `gorm:"size:3"`
+	CategoryID uint   `gorm:"index"`
 	// GoalID is the goal its transactions count toward, or 0.
 	GoalID uint `gorm:"index"`
 	// Tags holds the tags separated by one space: "#fixed #home".
@@ -88,6 +95,9 @@ type Schedule struct {
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
+
+// Placed reports whether the schedule has an account or a credit card.
+func (s Schedule) Placed() bool { return s.AccountID != 0 || s.CardID != 0 }
 
 // Recurring reports whether the schedule has more than one occurrence.
 func (s Schedule) Recurring() bool { return s.Every > 0 }
@@ -196,8 +206,12 @@ func (s Schedule) Validate() error {
 	switch {
 	case s.AccountID != 0 && s.CardID != 0:
 		return errors.New("a schedule has an account or a credit card, not the two")
-	case s.AccountID == 0 && s.CardID == 0:
-		return errors.New("account is required")
+	case !s.Placed() && s.Currency == "":
+		return errors.New("currency is required: the schedule has no account")
+	case !s.Placed() && !money.Valid(s.Currency):
+		return fmt.Errorf("unknown currency %q: use one of %s", s.Currency, strings.Join(money.Codes(), ", "))
+	case !s.Placed() && s.Auto:
+		return errors.New("an automatic schedule needs an account or a credit card")
 	case s.CategoryID == 0:
 		return errors.New("category is required")
 	}

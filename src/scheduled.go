@@ -48,7 +48,11 @@ func scheduledHelp() string {
   --code <code>         1 to 5 letters and digits (default: made from the title)
   --description <text>  Description, at most ` + strconv.Itoa(schedule.MaxDescription) + ` characters
   --value <amount>      Amount in the currency of the account, for example 1500
-  --account <code>      Account or credit card of the transactions
+  --account <code>      Account or credit card of the transactions. Without it,
+                        the schedule waits for the account until you pay it.
+                        In edit, 'none' takes the account away
+  --currency <code>     Currency of a schedule without an account (default: the
+                        currency of your accounts, when they have only one)
   --category <code>     Category; red is for expenses, green for incomes
   --type <type>         ` + strings.Join(schedule.Types(), ", ") + ` (default: from the color of the category)
   --tags <tags>         Tags, for example "fixed home"
@@ -69,7 +73,8 @@ func scheduledHelp() string {
   --value <amount>      Real amount, when it is not the amount of the schedule
   --date <date>         Real date (default: the date of the occurrence, or today
                         for an occurrence that is not due yet)
-  --account <code>      Account or credit card that paid, when it is another one
+  --account <code>      Account or credit card that paid, when it is another
+                        one. Necessary for a schedule without an account
 
 ` + green.Render("Options for delete:") + `
   --hard                Delete permanently; also works on archived schedules
@@ -78,7 +83,9 @@ func scheduledHelp() string {
 A schedule is a transaction that will happen: a bill to pay or an income to
 receive, one time or again and again. A schedule is not a transaction: it
 does not change a balance, a bill or a budget. Each occurrence waits until
-you confirm it. 'finux sc pay' creates the transaction of the next
+you confirm it. A schedule can wait without an account, for a bill that you
+did not decide how to pay: then 'finux sc pay' needs --account, and --auto
+is not possible. 'finux sc pay' creates the transaction of the next
 occurrence, with the values of the schedule or the real ones you give.
 'finux sc skip' drops the next occurrence. The occurrences go in order: the
 oldest one first.
@@ -183,7 +190,10 @@ func scheduleViews(db *gorm.DB, schedules []schedule.Schedule) ([]ui.ScheduleVie
 	}
 	for i, current := range schedules {
 		view := ui.ScheduleView{Schedule: current, OnCard: current.CardID != 0}
-		if index := slices.IndexFunc(accounts, func(a account.Account) bool { return a.ID == current.AccountID }); index >= 0 && !view.OnCard {
+		if !current.Placed() {
+			// Only the currency of the value is known.
+			view.Account = account.Account{Currency: current.Currency}
+		} else if index := slices.IndexFunc(accounts, func(a account.Account) bool { return a.ID == current.AccountID }); index >= 0 && !view.OnCard {
 			view.Account = accounts[index]
 		}
 		if index := slices.IndexFunc(cards, func(c card.Card) bool { return c.ID == current.CardID }); index >= 0 && view.OnCard {
@@ -337,6 +347,7 @@ func (c *scheduledCommand) show(args []string) error {
 // scheduleFlags holds the values of the options of add and edit.
 type scheduleFlags struct {
 	title, code, description, value, kind, category, tags, account, date, goal, every, until, times string
+	currency                                                                                        string
 	auto                                                                                            bool
 }
 
@@ -349,6 +360,7 @@ func (v *scheduleFlags) define(flags *flag.FlagSet) {
 	flags.StringVar(&v.category, "category", "", "")
 	flags.StringVar(&v.tags, "tags", "", "")
 	flags.StringVar(&v.account, "account", "", "")
+	flags.StringVar(&v.currency, "currency", "", "")
 	flags.StringVar(&v.date, "date", "", "")
 	flags.StringVar(&v.goal, "goal", "", "")
 	flags.StringVar(&v.every, "every", "", "")
@@ -364,8 +376,11 @@ func isNone(text string) bool {
 }
 
 // place returns the account of a schedule, or its credit card shown as
-// an account.
+// an account. A schedule without them gives only its currency.
 func (c *scheduledCommand) place(current schedule.Schedule) (account.Account, error) {
+	if !current.Placed() {
+		return account.Account{Currency: current.Currency}, nil
+	}
 	ref := strconv.FormatUint(uint64(current.AccountID), 10)
 	if current.CardID != 0 {
 		owner, err := c.tx.cards.Find(strconv.FormatUint(uint64(current.CardID), 10), true)
@@ -447,12 +462,19 @@ func (c *scheduledCommand) apply(command string, values scheduleFlags, given map
 	}
 
 	// The records the schedule points to, and the rules between them.
-	before, err := c.place(*current)
-	if err != nil && !create {
-		return err
+	var before account.Account
+	if !create {
+		if before, err = c.place(*current); err != nil {
+			return err
+		}
 	}
 	holder := before
-	if given["account"] {
+	// In an edit, the text 'none' takes the account away.
+	placed := given["account"] && (create || !isNone(values.account))
+	switch {
+	case placed && given["currency"]:
+		return usage(errors.New("give --account or --currency, not the two"))
+	case placed:
 		found, cardID, err := c.tx.findPlace(values.account, false)
 		if err != nil {
 			return err
@@ -464,8 +486,27 @@ func (c *scheduledCommand) apply(command string, values scheduleFlags, given map
 		if cardID != 0 {
 			current.AccountID = 0
 		}
+	case given["currency"]:
+		currency := strings.ToUpper(strings.TrimSpace(values.currency))
+		switch {
+		case !money.Valid(currency):
+			return usage(fmt.Errorf("unknown currency %q: use one of %s", values.currency, strings.Join(money.Codes(), ", ")))
+		case current.Placed() && !given["account"]:
+			return usage(errors.New("--currency is only for a schedule without an account"))
+		case !create && currency != before.Currency && !given["value"]:
+			return usage(fmt.Errorf("give --value: the schedule is in %s, not in %s", before.Currency, currency))
+		}
+		holder = account.Account{Currency: currency}
+	case create:
+		if holder.Currency, err = c.onlyCurrency(); err != nil {
+			return usage(err)
+		}
 	}
-	if given["value"] && (given["account"] || !create) {
+	if !placed && (given["account"] || create) {
+		current.AccountID, current.CardID = 0, 0
+	}
+	current.Currency = holder.Currency
+	if given["value"] {
 		if current.Value, err = amount(command, values.value, holder.Currency); err != nil {
 			return err
 		}
@@ -511,14 +552,36 @@ func (c *scheduledCommand) apply(command string, values scheduleFlags, given map
 	return nil
 }
 
+// onlyCurrency returns the currency of the accounts of the user, for a
+// schedule without an account. It fails when they have more than one.
+func (c *scheduledCommand) onlyCurrency() (string, error) {
+	accounts, err := c.tx.accounts.List(false, today())
+	if err != nil {
+		return "", err
+	}
+	var currencies []string
+	for _, current := range accounts {
+		if !slices.Contains(currencies, current.Currency) {
+			currencies = append(currencies, current.Currency)
+		}
+	}
+	switch len(currencies) {
+	case 0:
+		return "", errors.New("give --account or --currency: you have no account")
+	case 1:
+		return currencies[0], nil
+	}
+	return "", errors.New("give --account or --currency: your accounts have more than one currency")
+}
+
 func (c *scheduledCommand) add(args []string) error {
 	var values scheduleFlags
 	_, given, err := parse("add", args, values.define, 0)
 	if err != nil {
 		return err
 	}
-	if !given["title"] || !given["value"] || !given["account"] || !given["category"] {
-		return usageError("add: --title, --value, --account and --category are necessary")
+	if !given["title"] || !given["value"] || !given["category"] {
+		return usageError("add: --title, --value and --category are necessary")
 	}
 	var draft schedule.Schedule
 	if err := c.apply("add", values, given, &draft); err != nil {
@@ -545,7 +608,7 @@ func (c *scheduledCommand) edit(args []string) error {
 		return err
 	}
 	if len(given) == 0 {
-		return usageError("edit: give --title, --code, --description, --value, --account, --category, --type, --tags, --goal, --date, --every, --until, --times or --auto")
+		return usageError("edit: give --title, --code, --description, --value, --account, --currency, --category, --type, --tags, --goal, --date, --every, --until, --times or --auto")
 	}
 	current, err := c.active("edit", reference(positional), "Edit schedule")
 	if err != nil {
@@ -605,6 +668,9 @@ func (c *scheduledCommand) payDraft(current schedule.Schedule, value, date, plac
 	holder, err := c.place(current)
 	if err != nil {
 		return draft, err
+	}
+	if !current.Placed() && !given["account"] {
+		return draft, usageError(fmt.Sprintf("pay: give --account: the schedule %s has no account", current.Code))
 	}
 	var err2 error
 	if given["date"] {

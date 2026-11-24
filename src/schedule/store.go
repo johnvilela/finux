@@ -68,7 +68,7 @@ func (s *Store) Update(schedule *Schedule) error {
 		return err
 	}
 	return s.db.Model(schedule).Select(
-		"Title", "Code", "Description", "Type", "Value", "AccountID", "CardID", "CategoryID", "GoalID", "Tags",
+		"Title", "Code", "Description", "Type", "Value", "AccountID", "CardID", "Currency", "CategoryID", "GoalID", "Tags",
 		"StartDate", "Every", "Unit", "EndDate", "Times", "Auto", "Done",
 	).Updates(schedule).Error
 }

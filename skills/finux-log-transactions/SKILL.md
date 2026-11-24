@@ -110,6 +110,12 @@ planned: rent, internet, a dentist next month.
   real amount is different, `date` when the user paid on another day, and
   `account` when another account paid. A `transaction_add` here would
   count the bill two times and leave the occurrence due.
+- A schedule without an account (no `account` and no `credit_card` in
+  the result) needs `account` in `schedule_pay`: the account or the
+  credit card that paid. Ask when the user did not tell it.
+- For a new schedule, the account is optional. When the user did not
+  tell which account will pay a future bill, create the schedule without
+  `account`. Do not ask for a default account.
 - Match by meaning, not only by title, and use the category and the
   account to confirm. When two schedules can match, or the schedule has
   more than one date in `due`, ask which one. `schedule_pay` takes the

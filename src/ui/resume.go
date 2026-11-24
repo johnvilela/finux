@@ -214,7 +214,7 @@ func ResumeView(resume Resume, plain bool) string {
 			view := occurrence.View
 			rows[i] = []string{
 				transaction.FormatDate(occurrence.Date), view.Code, view.Title, occurrence.status(resume.Today),
-				view.Account.Code, money.Format(view.Amount(), view.Account.Currency),
+				view.Place(), money.Format(view.Amount(), view.Account.Currency),
 			}
 		}
 		out += "\nScheduled until " + transaction.FormatDate(resume.ScheduledUntil) + "\n" +
@@ -350,7 +350,7 @@ func styledResume(resume Resume) string {
 				tint = colorWarning
 			}
 			left := styleDim.Render(transaction.FormatDate(occurrence.Date)) + "  " + pad(view.Code, codeWidth) + "  " + pad(view.Title, 16) + "  " +
-				paint(tint, pad(status, statusWidth)) + "  " + styleDim.Render(view.Account.Code)
+				paint(tint, pad(status, statusWidth)) + "  " + styleDim.Render(view.Place())
 			out += indent + spread(left, typeStyle(view.Type).Render(money.Format(view.Amount(), view.Account.Currency))) + "\n"
 		}
 		currencies, sums := resume.after()

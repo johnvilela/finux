@@ -100,13 +100,22 @@ func TestValidate(t *testing.T) {
 	if err := rent().Validate(); err != nil {
 		t.Fatal(err)
 	}
+	// The user did not decide yet which account pays: the schedule has
+	// only the currency of its value.
+	undecided := rent()
+	undecided.AccountID, undecided.Currency = 0, "BRL"
+	if err := undecided.Validate(); err != nil {
+		t.Fatalf("schedule without an account: %v", err)
+	}
 	for want, change := range map[string]func(*Schedule){
 		"title is required":                func(s *Schedule) { s.Title = " " },
 		"title is too long":                func(s *Schedule) { s.Title = strings.Repeat("a", 61) },
 		"description is too long":          func(s *Schedule) { s.Description = strings.Repeat("a", 201) },
 		"unknown type":                     func(s *Schedule) { s.Type = "transfer" },
 		"value must be more than zero":     func(s *Schedule) { s.Value = 0 },
-		"account is required":              func(s *Schedule) { s.AccountID = 0 },
+		"currency is required":             func(s *Schedule) { s.AccountID = 0 },
+		"unknown currency":                 func(s *Schedule) { s.AccountID, s.Currency = 0, "XXX" },
+		"automatic schedule needs":         func(s *Schedule) { s.AccountID, s.Currency, s.Auto = 0, "BRL", true },
 		"not the two":                      func(s *Schedule) { s.CardID = 3 },
 		"category is required":             func(s *Schedule) { s.CategoryID = 0 },
 		"invalid date":                     func(s *Schedule) { s.StartDate = "05/11/2026" },
