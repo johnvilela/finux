@@ -31,6 +31,9 @@ currencies, the goals, and the titles and tags the user already uses.
 Read the rules of names too, as names.md tells. For a raw line of a bank,
 call `transaction_corrections` with it.
 
+When `note_list` with `status: due` returns notes, tell them to the user
+in one line each before the draft.
+
 ### 2. Make a draft for each transaction
 
 | Field | How to find it |

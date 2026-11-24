@@ -14,6 +14,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/setting"
 	"finux/src/transaction"
@@ -133,6 +134,7 @@ type transactionsCommand struct {
 	goals      *goal.Store
 	budgets    *budget.Store
 	schedules  *schedule.Store
+	notes      *note.Store
 }
 
 // errOutdated means the database lacks tables or columns of this Finux.
@@ -149,7 +151,7 @@ func transactionsReady(db *gorm.DB) bool {
 		migrator.HasColumn(&transaction.Transaction{}, "installment_id") && migrator.HasColumn(&transaction.Transaction{}, "virtual") &&
 		migrator.HasColumn(&transaction.Transaction{}, "status") && migrator.HasColumn(&card.Bill{}, "status") &&
 		migrator.HasTable(&schedule.Schedule{}) && migrator.HasColumn(&schedule.Schedule{}, "currency") && migrator.HasColumn(&transaction.Transaction{}, "schedule_id") &&
-		migrator.HasTable(&setting.Setting{}) && migrator.HasTable(&transaction.Correction{}) &&
+		migrator.HasTable(&setting.Setting{}) && migrator.HasTable(&transaction.Correction{}) && migrator.HasTable(&note.Note{}) &&
 		migrator.HasTable(&budget.Budget{}) && migrator.HasTable(&budget.Link{})
 }
 
@@ -185,7 +187,7 @@ func runTransactions(args []string, io streams) int {
 	defer closeDatabase(db)
 	command.store, command.accounts, command.categories = transaction.NewStore(db), account.NewStore(db), category.NewStore(db)
 	command.cards, command.goals, command.budgets = card.NewStore(db), goal.NewStore(db), budget.NewStore(db)
-	command.schedules = schedule.NewStore(db)
+	command.schedules, command.notes = schedule.NewStore(db), note.NewStore(db)
 	return exitStatus(io, "transactions", handler(rest))
 }
 
@@ -317,7 +319,11 @@ func (c *transactionsCommand) list(args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.print(ui.TransactionTable(views, c.plain) + notice)
+		notes, err := dueNotes(c.notes)
+		if err != nil {
+			return err
+		}
+		return c.print(ui.TransactionTable(views, c.plain) + notice + notes)
 	}
 	title := "Transactions"
 	if len(given) > 0 {

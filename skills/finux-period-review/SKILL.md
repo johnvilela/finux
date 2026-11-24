@@ -64,6 +64,8 @@ the transactions inside the range.
   bill and the bills that wait for a payment.
 - `goal_list` for the goals and their progress.
 - `schedule_list` for the scheduled transactions that wait.
+- `note_list` with `status: due` for the notes that are due: list them at
+  the end of the report.
 - `budget_list` for the budgets, and `budget_show` with a `date` of the
   period for each budget that had a period in it.
 

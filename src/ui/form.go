@@ -19,6 +19,7 @@ import (
 	"finux/src/code"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/transaction"
 )
 
@@ -50,13 +51,15 @@ const (
 	// FieldRollover tells whether a budget moves what a period left to
 	// the next period.
 	FieldRollover
+	// FieldTags is the tags of a note.
+	FieldTags
 	FieldColor
 	fieldCount
 )
 
 var fieldLabels = [fieldCount]string{
 	"Name", "Code", "Description", "Type", "Currency", "Opening balance", "Limit", "Target",
-	"Categories", "Period", "Start date", "Closing day", "Due day", "Final date", "Rollover", "Color",
+	"Categories", "Period", "Start date", "Closing day", "Due day", "Final date", "Rollover", "Tags", "Color",
 }
 
 // goalFields are the fields only a goal form has. A budget form has the
@@ -143,6 +146,7 @@ type Form struct {
 	category *category.Category
 	card     *card.Card
 	goal     *goal.Goal
+	note     *note.Note
 	kind     int
 	budget   *budget.Budget
 	// categories are the choices of the categories field of a budget;
@@ -452,6 +456,8 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 	if f.taken == nil {
 		f.taken = func(string) bool { return false }
 	}
+	// Only a note has tags.
+	hidden[FieldTags] = hidden[FieldTags] || f.note == nil
 	for field := FieldName; field < fieldCount; field++ {
 		if !hidden[field] {
 			f.fields = append(f.fields, field)
@@ -487,6 +493,10 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 	f.inputs[FieldDate].CharLimit = 10
 	f.inputs[FieldStart].CharLimit = 10
 	f.inputs[FieldEvery].CharLimit = 16
+	f.inputs[FieldTags].CharLimit = 120
+	if f.note != nil {
+		f.inputs[FieldDescription].CharLimit = note.MaxText
+	}
 	f.codeTouched = values[FieldCode] != ""
 	f.suggestCode()
 	f.syncBalancePlaceholder()
@@ -532,6 +542,7 @@ func (f Form) Value(field Field) string {
 // textFields are the fields the user types in.
 var textFields = []Field{
 	FieldName, FieldCode, FieldDescription, FieldBalance, FieldLimit, FieldTarget, FieldEvery, FieldStart, FieldClosing, FieldDue, FieldDate,
+	FieldTags,
 }
 
 // Error returns the validation message of the focused field, or "".
@@ -617,6 +628,66 @@ func (f Form) Goal() goal.Goal {
 	result.DueDate = ""
 	if date, err := transaction.ParseDate(f.Value(FieldDate)); err == nil {
 		result.DueDate = date
+	}
+	return result
+}
+
+// NoteFormOptions configures a note form.
+type NoteFormOptions struct {
+	// Title is the heading of the form.
+	Title string
+	// Initial holds the starting values. In edit mode it is the note to change.
+	Initial note.Note
+	// Edit lets the user go to the fields in any order.
+	Edit bool
+	// Preset lists fields that already have a final value. The form hides them.
+	Preset []Field
+}
+
+// NewNoteForm builds a note form. Its fields are title, text, reminder
+// date and tags. The links of a note come from the options of the command.
+func NewNoteForm(options NoteFormOptions) Form {
+	title := options.Title
+	if title == "" {
+		title = "New note"
+		if options.Edit {
+			title = "Edit note"
+		}
+	}
+	hidden := map[Field]bool{}
+	for field := FieldName; field < fieldCount; field++ {
+		hidden[field] = field != FieldName && field != FieldDescription && field != FieldDate && field != FieldTags
+	}
+	for _, field := range options.Preset {
+		hidden[field] = true
+	}
+	initial := options.Initial
+	f := Form{title: title, note: &initial, edit: options.Edit}
+	remind := ""
+	if initial.RemindOn != "" {
+		remind = transaction.FormatDate(initial.RemindOn)
+	}
+	f.build(hidden, "", map[Field]string{
+		FieldName: initial.Title, FieldDescription: initial.Text, FieldDate: remind, FieldTags: initial.Tags,
+	}, "Ask the bank about the fee", "")
+	return f
+}
+
+// Note returns the initial note with the values of the form applied.
+// Use it for a form that NewNoteForm built.
+func (f Form) Note() note.Note {
+	var result note.Note
+	if f.note != nil {
+		result = *f.note
+	}
+	result.Title = strings.TrimSpace(f.Value(FieldName))
+	result.Text = strings.TrimSpace(f.Value(FieldDescription))
+	result.RemindOn = ""
+	if date, err := transaction.ParseDate(f.Value(FieldDate)); err == nil {
+		result.RemindOn = date
+	}
+	if tags, err := transaction.ParseTags(f.Value(FieldTags)); err == nil {
+		result.Tags = tags
 	}
 	return result
 }
@@ -799,6 +870,10 @@ func (f Form) validate(field Field) string {
 		}
 		if f.budget != nil && date < f.Budget().StartDate {
 			return "End date is before the start date"
+		}
+	case FieldTags:
+		if _, err := transaction.ParseTags(f.Value(FieldTags)); err != nil {
+			return reason(err)
 		}
 	case FieldClosing, FieldDue:
 		day, err := strconv.Atoi(strings.TrimSpace(f.Value(field)))
@@ -1045,7 +1120,11 @@ func (f Form) row(field Field, focused bool) string {
 // not a name. The date of a budget is its end date.
 func (f Form) label(field Field) string {
 	switch {
-	case (f.goal != nil || f.budget != nil) && field == FieldName:
+	case f.note != nil && field == FieldDescription:
+		return "Text"
+	case f.note != nil && field == FieldDate:
+		return "Reminder"
+	case (f.goal != nil || f.budget != nil || f.note != nil) && field == FieldName:
 		return "Title"
 	case f.budget != nil && field == FieldDate:
 		return "End date"
@@ -1142,6 +1221,21 @@ func (f Form) colorGrid(focused bool) string {
 }
 
 func (f Form) preview() string {
+	if f.note != nil {
+		current := f.Note()
+		title, details := current.Title, "no reminder"
+		if title == "" {
+			title = "Note title"
+		}
+		if current.RemindOn != "" {
+			details = "reminder on " + transaction.FormatDate(current.RemindOn)
+		}
+		if current.Tags != "" {
+			details += " · " + current.Tags
+		}
+		room := f.width - 6 - labelWidth - 2 - lipgloss.Width(details)
+		return styleDim.Width(labelWidth).Render("Preview") + styleBold.Render(cut(title, max(room, 6))) + "  " + styleDim.Render(details)
+	}
 	if f.budget != nil {
 		current := f.Budget()
 		code, title := current.Code, current.Title

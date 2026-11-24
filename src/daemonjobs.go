@@ -15,6 +15,7 @@ import (
 	"finux/src/budget"
 	"finux/src/card"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/setting"
 	"finux/src/telegram"
@@ -133,6 +134,18 @@ func reminders(db *gorm.DB, store *telegram.Store) ([]string, error) {
 		message := fmt.Sprintf("Schedule %s (%s) is due since %s. Send /sc pay %s or /sc skip %s.",
 			current.Code, current.Title, transaction.FormatDate(pending[0]), current.Code, current.Code)
 		if err := remind(fmt.Sprintf("schedule:%d:%s", current.ID, pending[len(pending)-1]), message); err != nil {
+			return nil, err
+		}
+	}
+
+	notes, err := note.NewStore(db).List(note.Filter{Status: note.StatusDue}, now)
+	if err != nil {
+		return nil, err
+	}
+	for _, current := range notes {
+		message := fmt.Sprintf("Note %d (%s) is due. Send /nt %d to see it, or /nt done %d.", current.ID, current.Title, current.ID, current.ID)
+		// The date is in the key, so a new date reminds again.
+		if err := remind(fmt.Sprintf("note:%d:%s", current.ID, current.RemindOn), message); err != nil {
 			return nil, err
 		}
 	}

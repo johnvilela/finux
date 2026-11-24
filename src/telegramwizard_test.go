@@ -234,3 +234,46 @@ func TestBotGuideAsksTheVirtualCardForACreditCard(t *testing.T) {
 		t.Fatalf("the transaction has no mark:\n%s", card)
 	}
 }
+
+func TestBotGuidesANewNoteAndMarksItDone(t *testing.T) {
+	home, f := botHome(t), newFakeTelegram(t)
+	startDaemon(t, home, f)
+
+	f.say(42, "/nt add")
+	question := f.next()
+	if question.text != "<b>New note</b>\nTitle?" {
+		t.Fatalf("first question = %+v", question)
+	}
+	f.say(42, "Ask about the fee")
+	if question = f.next(); question.text != "Text? What the note tells, in a few words. It is optional." || !slices.Contains(question.buttons, "Skip") {
+		t.Fatalf("second question = %+v", question)
+	}
+	f.say(42, "The bank took R$ 12 in November.")
+	if question = f.next(); question.text != "Reminder date, as DD/MM/YYYY? It is optional." {
+		t.Fatalf("third question = %+v", question)
+	}
+	f.say(42, "20/11/2026")
+	if question = f.next(); question.text != "Tags? It is optional." {
+		t.Fatalf("fourth question = %+v", question)
+	}
+	f.say(42, "bank")
+	if result := f.next(); result.text != pre("✓ Note 1 created") {
+		t.Fatalf("result = %+v", result)
+	}
+	card := f.ask(42, "/nt 1")
+	for _, want := range []string{"Ask about the fee", "The bank took R$ 12 in November.", "Remind    20/11/2026", "Tags      #bank", "Source    user"} {
+		if !strings.Contains(card, want) {
+			t.Errorf("the note has no %q:\n%s", want, card)
+		}
+	}
+
+	// A command without an id shows the open notes.
+	f.say(42, "/nt done")
+	question = f.next()
+	if !reflect.DeepEqual(question.buttons, []string{"1 Ask about the fee", "Cancel"}) {
+		t.Fatalf("buttons of the notes = %v", question.buttons)
+	}
+	if result := f.step(question, "Which note?\n<code>/nt done</code>", "1 Ask about the fee", "<code>/nt done 1</code>"); result.text != pre("✓ Note 1 done") {
+		t.Fatalf("result of done = %+v", result)
+	}
+}

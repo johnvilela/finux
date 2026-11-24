@@ -428,7 +428,7 @@ func TestBotDoesNotUnderstand(t *testing.T) {
 	}
 	for _, command := range []string{"/help", "/start"} {
 		got := f.ask(42, command)
-		for _, want := range []string{"/ac", "/ct", "/tx", "/cc", "/gl", "/bg", "/sc", "/rs", "/cancel", "--help"} {
+		for _, want := range []string{"/ac", "/ct", "/tx", "/cc", "/gl", "/bg", "/sc", "/nt", "/rs", "/cancel", "--help"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("%s has no %s:\n%s", command, want, got)
 			}

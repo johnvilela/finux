@@ -14,6 +14,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/transaction"
 )
@@ -44,6 +45,9 @@ type Resume struct {
 	// the date ScheduledUntil, the oldest first.
 	Scheduled      []ResumeOccurrence
 	ScheduledUntil string
+	// Notes holds the open notes with a reminder up to ScheduledUntil,
+	// the oldest date first.
+	Notes []note.Note
 }
 
 // ResumeOccurrence is one occurrence of a schedule that is not paid and
@@ -224,6 +228,13 @@ func ResumeView(resume Resume, plain bool) string {
 			out += "After " + currency + "  " + money.Format(sums[currency], currency) + "\n"
 		}
 	}
+	if len(resume.Notes) > 0 {
+		rows := make([][]string, len(resume.Notes))
+		for i, current := range resume.Notes {
+			rows[i] = []string{strconv.FormatUint(uint64(current.ID), 10), current.Title, noteRemind(current), current.Status(resume.Today)}
+		}
+		out += "\nNotes\n" + plainTable([]string{"ID", "TITLE", "REMIND", "STATUS"}, rows, -1)
+	}
 	if len(resume.Bills) > 0 {
 		rows := make([][]string, len(resume.Bills))
 		for i, pending := range resume.Bills {
@@ -356,6 +367,14 @@ func styledResume(resume Resume) string {
 		currencies, sums := resume.after()
 		for _, currency := range currencies {
 			out += indent + spread(styleDim.Render("  Balance after, "+currency), bold.Render(money.Format(sums[currency], currency))) + "\n"
+		}
+	}
+	if len(resume.Notes) > 0 {
+		section("NOTES")
+		for _, current := range resume.Notes {
+			status := current.Status(resume.Today)
+			left := styleDim.Render(noteRemind(current)) + "  " + cut(current.Title, 40)
+			out += indent + spread(left, paint(noteColor(status), status)+styleDim.Render("  #"+strconv.FormatUint(uint64(current.ID), 10))) + "\n"
 		}
 	}
 	if len(resume.Bills) > 0 {

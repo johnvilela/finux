@@ -60,6 +60,34 @@ func TestDaemonSendsReminders(t *testing.T) {
 	f.quiet()
 	stop()
 
+	// A note reminds on its date. A note that is done does not, and a
+	// new date reminds again.
+	at := func(args ...string) { on(t, home, "2026-11-17", args...) }
+	at("nt", "add", "--title", "Ask about the fee", "--remind", "17/11/2026")
+	at("nt", "add", "--title", "Later", "--remind", "18/11/2026")
+	at("nt", "add", "--title", "Handled", "--remind", "16/11/2026")
+	at("nt", "done", "3")
+	stop = startDaemon(t, home, f)
+	if got := f.next().text; got != "Note 1 (Ask about the fee) is due. Send /nt 1 to see it, or /nt done 1." {
+		t.Fatalf("reminder of a note = %q", got)
+	}
+	f.quiet()
+	stop()
+	at("nt", "edit", "1", "--remind", "18/11/2026")
+	stop = startDaemon(t, home, f, "FINUX_TODAY=2026-11-18")
+	got = f.messages(2)
+	want = []string{
+		"Note 1 (Ask about the fee) is due. Send /nt 1 to see it, or /nt done 1.",
+		"Note 2 (Later) is due. Send /nt 2 to see it, or /nt done 2.",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("reminders of the notes = %q", got)
+	}
+	f.quiet()
+	stop()
+	at("nt", "done", "1")
+	at("nt", "done", "2")
+
 	// The bill closes on 25/11/2026 and is due on 05/12/2026.
 	stop = startDaemon(t, home, f, "FINUX_TODAY=2026-11-26")
 	if got := f.next().text; got != "The bill 12/2026 of VISA closed: R$ 300,00. It is due on 05/12/2026. Send /cc pay VISA." {

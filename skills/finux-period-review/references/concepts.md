@@ -384,6 +384,36 @@ When the user says that a bill of a schedule is paid, use `schedule_pay`,
 not `transaction_add`: a second transaction would count the bill two times
 and the occurrence would stay due.
 
+## Notes
+
+A note is a short text about the finances of the user: a fact to
+remember, a decision, or a thing to do or to check. The user writes notes
+in the CLI and in Telegram, and an agent writes them with `note_add`.
+
+```json
+{"id": 12, "title": "Ask the bank about the fee", "text": "R$ 12 in November.",
+ "status": "due", "remind_on": "2026-11-17", "tags": ["#bank"],
+ "account": "NU", "source": "user", "created": "2026-11-10"}
+```
+
+- A note has a `title` (60 characters at most) and an optional `text`
+  (500 characters at most). It has an id and no code.
+- All the rest is optional: `remind_on`, `tags`, and the records the note
+  is about: `goal`, `budget`, and `account` or `credit_card`.
+- `status` is `open`, `due` or `done`. A note is `due` when it is open
+  and its reminder date is today or before. It stays due until
+  `note_done`, or until `note_edit` gives it a later date.
+- Finux shows the due notes in `finux resume` and `finux tx`, and the
+  Telegram bot sends one message for each reminder date.
+- `source` tells who wrote the note: `user` or `agent`. A note that a
+  tool creates has `agent`.
+- The results of `account_show`, `credit_card_show`, `goal_show` and
+  `budget_show` have `notes`: the open notes of the record.
+- A note changes no balance, no bill and no total. It is not a schedule:
+  a bill that will happen is `schedule_add`.
+- A record that is deleted permanently leaves its notes; they lose the
+  link. `note_delete` deletes one note and needs `confirm: true`.
+
 ## Deletes need confirmation
 
 `account_delete`, `category_delete`, `transaction_delete`, `goal_delete`,

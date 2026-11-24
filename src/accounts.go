@@ -10,6 +10,7 @@ import (
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
@@ -186,7 +187,7 @@ func (c *accountsCommand) list(args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.print(ui.AccountCard(accounts[index], c.plain))
+	return c.card(accounts[index])
 }
 
 func (c *accountsCommand) show(args []string) error {
@@ -198,7 +199,19 @@ func (c *accountsCommand) show(args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.print(ui.AccountCard(found, c.plain))
+	return c.card(found)
+}
+
+// card prints the details of an account, then its open notes.
+func (c *accountsCommand) card(current account.Account) error {
+	notes := ""
+	if transactionsReady(c.db) {
+		var err error
+		if notes, err = openNotes(c.db, note.LinkAccount, current.ID, c.plain); err != nil {
+			return err
+		}
+	}
+	return c.print(ui.AccountCard(current, c.plain) + notes)
 }
 
 // checkFlags validates the values of the flags that were given.
@@ -438,6 +451,9 @@ func (c *accountsCommand) purge(current account.Account, hasTransfers bool) erro
 				return err
 			}
 			if err := schedule.NewStore(tx).DeleteByAccount(current.ID); err != nil {
+				return err
+			}
+			if err := note.NewStore(tx).ClearLink(note.LinkAccount, current.ID); err != nil {
 				return err
 			}
 		}

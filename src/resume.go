@@ -11,6 +11,7 @@ import (
 	"finux/src/budget"
 	"finux/src/card"
 	"finux/src/goal"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
@@ -133,6 +134,11 @@ func monthFlows(views []transaction.View) []ui.ResumeFlow {
 func gatherScheduled(db *gorm.DB, resume *ui.Resume) error {
 	first, _ := time.Parse("2006-01-02", resume.Today[:len("2006-01")]+"-01")
 	resume.ScheduledUntil = first.AddDate(0, 1, -1).Format("2006-01-02")
+	// The open notes with a reminder in the same days.
+	var err error
+	if resume.Notes, err = note.NewStore(db).List(note.Filter{Until: resume.ScheduledUntil}, resume.Today); err != nil {
+		return err
+	}
 	schedules, err := schedule.NewStore(db).List(false)
 	if err != nil {
 		return err

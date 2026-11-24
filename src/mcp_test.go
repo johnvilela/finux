@@ -18,6 +18,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/transaction"
 )
@@ -199,6 +200,7 @@ func TestMCPTools(t *testing.T) {
 		"budget_list", "budget_show", "budget_add", "budget_edit", "budget_archive", "budget_restore", "budget_delete",
 		"schedule_list", "schedule_show", "schedule_add", "schedule_edit", "schedule_pay", "schedule_skip",
 		"schedule_archive", "schedule_restore", "schedule_delete",
+		"note_list", "note_show", "note_add", "note_edit", "note_done", "note_delete",
 	}
 	if got := toolNames(t, responses[1]); !slices.Equal(got, want) {
 		t.Errorf("tools = %v\nwant    %v", got, want)
@@ -213,7 +215,7 @@ func TestMCPTools(t *testing.T) {
 	want = []string{
 		"database_doctor", "account_list", "account_show", "category_list", "category_show",
 		"transaction_list", "transaction_show", "transaction_suggestions", "transaction_corrections", "credit_card_list", "credit_card_show", "credit_card_bills",
-		"goal_list", "goal_show", "budget_list", "budget_show", "schedule_list", "schedule_show",
+		"goal_list", "goal_show", "budget_list", "budget_show", "schedule_list", "schedule_show", "note_list", "note_show",
 	}
 	if got := toolNames(t, readOnly[0]); !slices.Equal(got, want) {
 		t.Errorf("read-only tools = %v\nwant              %v", got, want)
@@ -233,6 +235,8 @@ func TestMCPEnums(t *testing.T) {
 		"transaction_edit.scope": {"one", "next", "all"}, "transaction_delete.scope": {"one", "next", "all"},
 		"schedule_add.type": schedule.Types(), "schedule_edit.type": schedule.Types(),
 		"goal_add.type": goal.Types(), "goal_edit.type": goal.Types(),
+		"note_list.status": {note.StatusOpen, note.StatusDue, note.StatusDone, note.StatusAll},
+		"note_list.source": {note.SourceUser, note.SourceAgent},
 	}
 	checked := 0
 	for _, tool := range mcpTools(false) {
@@ -251,8 +255,8 @@ func TestMCPEnums(t *testing.T) {
 			checked++
 		}
 	}
-	if checked != 19 {
-		t.Errorf("checked %d enums, want 19", checked)
+	if checked != 21 {
+		t.Errorf("checked %d enums, want 21", checked)
 	}
 }
 
@@ -1152,4 +1156,85 @@ func TestMCPScheduleWithoutAccount(t *testing.T) {
 	h.want(paid, "VISA", "transaction", "credit_card")
 	h.want(paid, "2026-12-06", "schedule", "next")
 	h.fail("give account or currency, not the two", "schedule_add", map[string]any{"title": "A", "value": "1", "category": "BILLS", "account": "NU", "currency": "BRL"})
+}
+
+func TestMCPNotes(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "5000"})
+	h.ok("credit_card_add", map[string]any{"name": "Visa Gold", "currency": "BRL", "limit": "5000", "closing_day": 25, "due_day": 5, "code": "VISA"})
+	h.ok("goal_add", map[string]any{"title": "Trip", "type": "save", "target": "1000", "currency": "BRL", "code": "TRIP"})
+	h.ok("budget_add", map[string]any{"title": "Food", "limit": "800", "currency": "BRL", "categories": "FOOD", "every": "month", "code": "FOOD"})
+	h.want(h.ok("note_list", nil), "[]", "notes")
+
+	created := h.ok("note_add", map[string]any{"title": "Ask about the fee", "text": "The bank took R$ 12 in November.", "remind_on": "10/11/2026", "tags": "bank fee", "account": "NU"})
+	h.want(created, "1", "note", "id")
+	h.want(created, "Ask about the fee", "note", "title")
+	h.want(created, "2026-11-10", "note", "remind_on")
+	h.want(created, "due", "note", "status")
+	h.want(created, "[#bank #fee]", "note", "tags")
+	h.want(created, "NU", "note", "account")
+	h.want(created, "agent", "note", "source")
+	h.ok("note_add", map[string]any{"title": "Check the limit", "remind_on": "2026-12-05", "account": "VISA", "goal": "TRIP", "budget": "FOOD"})
+	h.ok("note_add", map[string]any{"title": "No new installments until March"})
+	// The user writes a note in the CLI.
+	succeed(t, h.home, "nt", "add", "--title", "Mine", "--tags", "bank")
+	h.fail("title is empty", "note_add", map[string]any{"title": " "})
+	h.fail("text is too long", "note_add", map[string]any{"title": "A", "text": strings.Repeat("a", 501)})
+	h.fail("goal not found: NOPE", "note_add", map[string]any{"title": "A", "goal": "NOPE"})
+
+	list := h.ok("note_list", nil)
+	h.want(list, "4", "total")
+	h.want(list, "1", "due")
+	h.want(list, "Ask about the fee", "notes", 0, "title")
+	h.want(list, "VISA", "notes", 1, "credit_card")
+	h.want(list, "TRIP", "notes", 1, "goal")
+	h.want(list, "FOOD", "notes", 1, "budget")
+	for filter, want := range map[string]map[string]any{
+		"1": {"status": "due"},
+		"2": {"tag": "bank"},
+		"0": {"status": "done"},
+	} {
+		h.want(h.ok("note_list", want), filter, "total")
+	}
+	h.want(h.ok("note_list", map[string]any{"search": "installments"}), "3", "notes", 0, "id")
+	h.want(h.ok("note_list", map[string]any{"account": "VISA"}), "2", "notes", 0, "id")
+	h.want(h.ok("note_list", map[string]any{"goal": "TRIP"}), "1", "total")
+	h.want(h.ok("note_list", map[string]any{"source": "user"}), "Mine", "notes", 0, "title")
+	page := h.ok("note_list", map[string]any{"limit": 1, "offset": 1})
+	h.want(page, "4", "total")
+	h.want(page, "1", "count")
+	h.want(page, "2", "notes", 0, "id")
+	h.fail("must be one of open, due, done, all", "note_list", map[string]any{"status": "late"})
+	h.want(h.ok("note_show", map[string]any{"id": 1}), "The bank took R$ 12 in November.", "note", "text")
+	h.fail("note not found: 99", "note_show", map[string]any{"id": 99})
+
+	// The linked records return their open notes.
+	h.want(h.ok("account_show", map[string]any{"account": "NU"}), "Ask about the fee", "notes", 0, "title")
+	h.want(h.ok("credit_card_show", map[string]any{"credit_card": "VISA"}), "2", "notes", 0, "id")
+	h.want(h.ok("goal_show", map[string]any{"goal": "TRIP"}), "2", "notes", 0, "id")
+	h.want(h.ok("budget_show", map[string]any{"budget": "FOOD"}), "2", "notes", 0, "id")
+
+	edited := h.ok("note_edit", map[string]any{"id": 2, "title": "Check the card limit", "remind_on": "none", "goal": "none", "account": "NU", "tags": ""})
+	h.want(edited, "Check the card limit", "note", "title")
+	h.want(edited, "NU", "note", "account")
+	h.want(edited, "[]", "note", "tags")
+	h.want(edited, "open", "note", "status")
+	for _, field := range []string{"remind_on", "goal", "credit_card"} {
+		if _, ok := edited["note"].(map[string]any)[field]; ok {
+			t.Errorf("the note keeps %s after the edit: %v", field, edited)
+		}
+	}
+	h.fail("give at least one", "note_edit", map[string]any{"id": 2})
+
+	done := h.ok("note_done", map[string]any{"id": 1})
+	h.want(done, "done", "note", "status")
+	h.fail("note 1 is already done", "note_done", map[string]any{"id": 1})
+	h.want(h.ok("note_list", map[string]any{"status": "due"}), "0", "total")
+	h.want(h.ok("account_show", map[string]any{"account": "NU"}), "2", "notes", 0, "id")
+	h.want(h.ok("note_done", map[string]any{"id": 1, "done": false}), "due", "note", "status")
+
+	preview := h.ok("note_delete", map[string]any{"id": 3})
+	h.want(preview, "true", "confirm_required")
+	h.want(h.ok("note_delete", map[string]any{"id": 3, "confirm": true}), "true", "deleted")
+	h.want(h.ok("note_list", map[string]any{"status": "all"}), "3", "total")
 }

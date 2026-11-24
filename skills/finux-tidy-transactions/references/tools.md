@@ -598,3 +598,76 @@ No arguments.
 | --- | --- | --- | --- |
 | `schedule` | string | yes | Code or id of the schedule |
 | `confirm` | boolean | no | Set to true to delete. Without it the tool only tells what it will delete. |
+
+## Note
+
+### `note_list`
+
+*Read.* List the notes: short texts about the finances that the user or an agent wrote, with an optional reminder date. The due notes come first. The result has due: the number of open notes with a reminder date up to today. Read the due notes at the start of a conversation and tell the user about them.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `account` | string | no | Code or id of an account or a credit card: the notes about it |
+| `budget` | string | no | Code or id of a budget: the notes about it |
+| `goal` | string | no | Code or id of a goal: the notes about it |
+| `limit` | integer | no | Most notes to return. Default: 50 |
+| `offset` | integer | no | Number of notes to skip, to read the next page. Default: 0 |
+| `search` | string | no | Text that the title or the text of the note contains |
+| `source` | string | no | Notes that the user wrote, or the ones an agent wrote. One of: `user`, `agent` |
+| `status` | string | no | Default: open, which has the due notes too. due is an open note with a reminder date up to today. One of: `open`, `due`, `done`, `all` |
+| `tag` | string | no | Notes that have this tag |
+
+### `note_show`
+
+*Read.* Show one note: its title, its text, its status, its reminder date, its tags and the records it is about.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | integer | yes | Id of the note |
+
+### `note_add`
+
+*Change.* Write a note about the finances of the user: a fact to remember, a decision, or a thing to do or to check on a date. Keep it short and plain. A note is not a transaction, and it is not a schedule: for a bill that will happen, use schedule_add. All the arguments but the title are optional.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `title` | string | yes | Title, at most 60 characters: 6 words at most, in the words of the user |
+| `account` | string | no | Code or id of the account or the credit card the note is about |
+| `budget` | string | no | Code or id of the budget the note is about |
+| `goal` | string | no | Code or id of the goal the note is about |
+| `remind_on` | string | no | Reminder date, YYYY-MM-DD or DD/MM/YYYY. Give it only when the user must do or check something on a date |
+| `tags` | string | no | Tags divided by spaces, for example "bank fee". Prefer the tags the user already has |
+| `text` | string | no | What the note tells, at most 500 characters: 1 to 3 short sentences with the facts and the numbers. No advice and no greeting |
+
+### `note_edit`
+
+*Change.* Change a note. Give only the arguments to change.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | integer | yes | Id of the note |
+| `account` | string | no | Code or id of the new account or credit card. "none" takes it away |
+| `budget` | string | no | Code or id of the new budget. "none" takes the budget away |
+| `goal` | string | no | Code or id of the new goal. "none" takes the goal away |
+| `remind_on` | string | no | New reminder date. "none" removes it |
+| `tags` | string | no | New tags. An empty string removes all tags |
+| `text` | string | no | New text. An empty string removes it |
+| `title` | string | no | New title |
+
+### `note_done`
+
+*Change.* Mark a note as done: the user did what the note tells, or it has no use now. A done note leaves the lists and reminds no more. Use it when the user says so, or when the data shows that it is handled. done: false opens the note again.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | integer | yes | Id of the note |
+| `done` | boolean | no | Default: true. False opens the note again |
+
+### `note_delete`
+
+*Delete.* Delete a note permanently. To keep the note out of the lists, use note_done.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | integer | yes | Id of the note |
+| `confirm` | boolean | no | Set to true to delete. Without it the tool only tells what it will delete. |

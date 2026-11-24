@@ -70,7 +70,7 @@ func TestConfigAI(t *testing.T) {
 	binary := finuxBinary(t)
 
 	stdout, stderr, status := h.run("config", "ai", "claude")
-	want := "✓ MCP server added to Claude Code\n✓ 6 skills installed in " + filepath.Join(h.home, ".claude", "skills") + "\n" +
+	want := "✓ MCP server added to Claude Code\n✓ 7 skills installed in " + filepath.Join(h.home, ".claude", "skills") + "\n" +
 		"✓ ai-memory connected to Claude Code\n" +
 		"No database yet: run 'finux init', then 'finux config set ai-provider claude' to use /ai in Telegram.\n" +
 		"Start a new session of Claude Code to use Finux.\n"
@@ -81,8 +81,8 @@ func TestConfigAI(t *testing.T) {
 	if got, want := h.calls(), "claude mcp remove --scope user finux\nclaude mcp add --scope user finux -- "+binary+" config mcp\nai-memory setup --yes --agent claude-code\n"; got != want {
 		t.Fatalf("claude calls = %q, want %q", got, want)
 	}
-	if got := h.skills(".claude", "skills"); got != 6 {
-		t.Fatalf("%d skills for claude, want 6", got)
+	if got := h.skills(".claude", "skills"); got != 7 {
+		t.Fatalf("%d skills for claude, want 7", got)
 	}
 	if stdout, _, status = h.run("config", "ai", "claude", "--read-only"); status != 0 || !strings.Contains(stdout, "✓ MCP server added to Claude Code (read-only)\n") {
 		t.Fatalf("config ai claude --read-only: status %d, stdout %q", status, stdout)
@@ -91,14 +91,14 @@ func TestConfigAI(t *testing.T) {
 		t.Fatalf("read-only call = %q", got)
 	}
 
-	if stdout, stderr, status = h.run("config", "ai", "codex"); status != 0 || stderr != "" || !strings.HasPrefix(stdout, "✓ MCP server added to Codex\n✓ 6 skills installed in ") {
+	if stdout, stderr, status = h.run("config", "ai", "codex"); status != 0 || stderr != "" || !strings.HasPrefix(stdout, "✓ MCP server added to Codex\n✓ 7 skills installed in ") {
 		t.Fatalf("config ai codex: status %d, stderr %q, stdout %q", status, stderr, stdout)
 	}
 	if got, want := h.calls(), "codex mcp remove finux\ncodex mcp add finux -- "+binary+" config mcp\nai-memory setup --yes --agent codex\n"; got != want {
 		t.Fatalf("codex calls = %q, want %q", got, want)
 	}
-	if got := h.skills(".codex", "skills"); got != 6 {
-		t.Fatalf("%d skills for codex, want 6", got)
+	if got := h.skills(".codex", "skills"); got != 7 {
+		t.Fatalf("%d skills for codex, want 7", got)
 	}
 
 	// A command of the agent that fails stops the setup, with its message.
@@ -270,7 +270,7 @@ func TestConfigAIOpencode(t *testing.T) {
 
 	// Without a file, it makes one.
 	stdout, stderr, status := h.run("config", "ai", "opencode")
-	if status != 0 || stderr != "" || !strings.HasPrefix(stdout, "✓ MCP server added to opencode\n✓ 6 skills installed in ") {
+	if status != 0 || stderr != "" || !strings.HasPrefix(stdout, "✓ MCP server added to opencode\n✓ 7 skills installed in ") {
 		t.Fatalf("config ai opencode: status %d, stderr %q, stdout %q", status, stderr, stdout)
 	}
 	config := read()
@@ -280,8 +280,8 @@ func TestConfigAIOpencode(t *testing.T) {
 	if config["$schema"] != "https://opencode.ai/config.json" {
 		t.Fatalf("new file has no schema: %v", config)
 	}
-	if got := h.skills(".config", "opencode", "skills"); got != 6 {
-		t.Fatalf("%d skills for opencode, want 6", got)
+	if got := h.skills(".config", "opencode", "skills"); got != 7 {
+		t.Fatalf("%d skills for opencode, want 7", got)
 	}
 
 	// A file that exists keeps its other values, and gets a copy first.

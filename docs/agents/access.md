@@ -94,6 +94,12 @@ Rules for the CLI:
 | `schedule_archive` | `finux sc delete <code> --yes` |
 | `schedule_restore` | `finux sc restore <code>` |
 | `schedule_delete` | `finux sc delete <code> --hard --yes` |
+| `note_list` | `finux nt list [--all] [--due] [--tag <tag>] [--search <text>] [--goal <code>] [--budget <code>] [--account <code>]` |
+| `note_show` | `finux nt show <id>` |
+| `note_add` | `finux nt add --title <text> [--text <text>] [--remind <date>] [--tags <tags>] [--goal <code>] [--budget <code>] [--account <code>]` |
+| `note_edit` | `finux nt edit <id> [--title] [--text] [--remind <date\|none>] [--tags] [--goal <code\|none>] [--budget <code\|none>] [--account <code\|none>]` |
+| `note_done` | `finux nt done <id>`; `finux nt reopen <id>` opens it again |
+| `note_delete` | `finux nt delete <id> --yes` |
 
 Differences from the MCP tools:
 

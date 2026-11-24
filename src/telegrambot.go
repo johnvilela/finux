@@ -42,6 +42,7 @@ var botCommands = map[string]string{
 	"goals": "goals", "goal": "goals", "gl": "goals",
 	"budgets": "budgets", "budget": "budgets", "bg": "budgets",
 	"scheduled": "scheduled", "schedule": "scheduled", "sc": "scheduled",
+	"notes": "notes", "note": "notes", "nt": "notes",
 	"resume": "resume", "rs": "resume",
 	"version": "version",
 }
@@ -58,6 +59,7 @@ var botMenu = []telegram.Command{
 	{Name: "sc", Description: "Scheduled transactions"},
 	{Name: "bg", Description: "Budgets"},
 	{Name: "gl", Description: "Goals"},
+	{Name: "nt", Description: "Notes"},
 	{Name: "ct", Description: "Categories"},
 	{Name: "help", Description: "Show the commands"},
 	{Name: "cancel", Description: "Stop the current question"},
@@ -88,6 +90,7 @@ const botCommandsHelp = `<b>Finux</b>
 /sc  Scheduled transactions
 /bg  Budgets
 /gl  Goals
+/nt  Notes
 /ct  Categories
 /cancel  Stop the current question
 

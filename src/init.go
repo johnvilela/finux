@@ -10,6 +10,7 @@ import (
 	"finux/src/card"
 	"finux/src/category"
 	"finux/src/goal"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/setting"
 	"finux/src/storage"
@@ -21,7 +22,7 @@ import (
 )
 
 // models lists the tables that 'finux init' migrates.
-var models = []any{&account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &budget.Budget{}, &budget.Link{}, &schedule.Schedule{}, &transaction.Transaction{}, &transaction.Correction{}, &setting.Setting{}, &telegram.User{}, &telegram.Notice{}, &telegram.Session{}, &telegram.Pairing{}}
+var models = []any{&account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &budget.Budget{}, &budget.Link{}, &schedule.Schedule{}, &transaction.Transaction{}, &transaction.Correction{}, &note.Note{}, &setting.Setting{}, &telegram.User{}, &telegram.Notice{}, &telegram.Session{}, &telegram.Pairing{}}
 
 func initHelp() string {
 	return "Set up the Finux database\n\n" +

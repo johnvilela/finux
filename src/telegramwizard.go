@@ -15,6 +15,7 @@ import (
 	"finux/src/category"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/telegram"
 	"finux/src/transaction"
@@ -223,6 +224,12 @@ var guides = map[string]guide{
 		{flag: "--categories", label: "Categories", ask: "Categories? Send the codes with commas, for example FOOD,FUN. Skip counts all of them.", optional: true},
 		every("How long is one period? Press a button or send a length, for example 2 weeks.", false),
 	}},
+	"notes add": {"New note", []step{
+		{flag: "--title", label: "Title", ask: "Title?"},
+		{flag: "--text", label: "Text", ask: "Text? What the note tells, in a few words. It is optional.", optional: true},
+		{flag: "--remind", label: "Reminder", ask: "Reminder date, as DD/MM/YYYY? It is optional.", optional: true},
+		{flag: "--tags", label: "Tags", ask: "Tags? It is optional.", optional: true},
+	}},
 	"scheduled add": {"New schedule", []step{
 		{flag: "--title", label: "Title", ask: "Title?"},
 		{flag: "--value", label: "Value", ask: "Value?"},
@@ -409,7 +416,7 @@ func (b *bot) pressed(ctx context.Context, press *telegram.Callback, data string
 // missingReference reports whether the output of a command tells that
 // it needs the code or the id of an item.
 func missingReference(output string) bool {
-	return strings.Contains(output, "is necessary") && (strings.Contains(output, "code or id") || strings.Contains(output, "transaction id"))
+	return strings.Contains(output, "is necessary") && (strings.Contains(output, "code or id") || strings.Contains(output, "transaction id") || strings.Contains(output, "note id"))
 }
 
 // items returns the items of a module as buttons, and the noun of one
@@ -475,6 +482,19 @@ func items(db *gorm.DB, module, command string) (choices []choice, noun string, 
 		}
 		for _, current := range found {
 			add(current.Code)
+		}
+	case "notes":
+		noun = "note"
+		// A note that is done can only open again.
+		filter := note.Filter{}
+		if command == "reopen" {
+			filter.Status = note.StatusDone
+		}
+		var found []note.Note
+		found, err = note.NewStore(db).List(filter, today())
+		for _, current := range found {
+			id := strconv.FormatUint(uint64(current.ID), 10)
+			choices = append(choices, choice{id + " " + current.Title, id})
 		}
 	case "transactions":
 		noun = "transaction"

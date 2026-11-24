@@ -58,6 +58,8 @@ plainly. This skill reads data; it changes nothing.
 - `account_list`, `credit_card_list`, and `credit_card_show` for each
   card.
 - `goal_list`, and `goal_show` for each active or overdue goal.
+- `note_list` for the open notes of the user: the decisions and the
+  things to do. Tell the due ones first, and mind them in your advice.
 - `schedule_list` for the scheduled transactions: what is due and what
   comes.
 - `budget_list`, and `budget_show` for each budget that is `near` or

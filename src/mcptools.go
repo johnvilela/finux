@@ -16,6 +16,7 @@ import (
 	"finux/src/goal"
 	"finux/src/mcp"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/storage"
 	"finux/src/transaction"
@@ -393,7 +394,7 @@ func number(value *int) int {
 // tools that change nothing.
 func mcpTools(readOnly bool) []mcp.Tool {
 	var tools []mcp.Tool
-	for _, group := range [][]mcp.Tool{databaseTools(), accountTools(), categoryTools(), transactionTools(), creditCardTools(), goalTools(), budgetTools(), scheduleTools()} {
+	for _, group := range [][]mcp.Tool{databaseTools(), accountTools(), categoryTools(), transactionTools(), creditCardTools(), goalTools(), budgetTools(), scheduleTools(), noteTools()} {
 		for _, current := range group {
 			if current.ReadOnly || !readOnly {
 				tools = append(tools, current)
@@ -534,7 +535,11 @@ func accountTools() []mcp.Tool {
 				if err != nil {
 					return nil, err
 				}
-				return map[string]any{"account": accountResult(found)}, nil
+				notes, err := linkedNotes(db, note.LinkAccount, found.ID)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"account": accountResult(found), "notes": notes}, nil
 			})),
 		tool("account_add", "Create an account, for example a bank account or a wallet. For a credit card, use credit_card_add.",
 			func(db *gorm.DB, a addArguments) (any, error) {
@@ -827,7 +832,7 @@ func newTransactionsCommand(db *gorm.DB) *transactionsCommand {
 	return &transactionsCommand{
 		streams: quiet, store: transaction.NewStore(db), accounts: account.NewStore(db),
 		categories: category.NewStore(db), cards: card.NewStore(db), goals: goal.NewStore(db), budgets: budget.NewStore(db),
-		schedules: schedule.NewStore(db),
+		schedules: schedule.NewStore(db), notes: note.NewStore(db),
 	}
 }
 
@@ -1249,7 +1254,11 @@ func creditCardTools() []mcp.Tool {
 				for i, bill := range details.Pending {
 					pending[i] = billResult(found, bill)
 				}
-				return map[string]any{"credit_card": cardResult(found), "open_bill": open, "pending_bills": pending}, nil
+				notes, err := linkedNotes(db, note.LinkCard, found.ID)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"credit_card": cardResult(found), "open_bill": open, "pending_bills": pending, "notes": notes}, nil
 			})),
 		reads(tool("credit_card_bills", "List the bills of a credit card, the newest first. A bill is open until its closing date, then closed until its due date, then late, until it is paid.",
 			func(db *gorm.DB, a referenceArguments) (any, error) {
@@ -1550,7 +1559,11 @@ func goalTools() []mcp.Tool {
 						transactions = append(transactions, linked{transactionResult(view), cash(effect, found.Currency)})
 					}
 				}
-				return map[string]any{"goal": goalResult(found), "transactions": transactions}, nil
+				notes, err := linkedNotes(db, note.LinkGoal, found.ID)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"goal": goalResult(found), "transactions": transactions, "notes": notes}, nil
 			})),
 		tool("goal_add", "Create a goal: an amount to save, a debt to pay off or a purchase to save for. Link transactions to it with the argument goal of transaction_add and transaction_edit.",
 			func(db *gorm.DB, a addArguments) (any, error) {
@@ -1790,7 +1803,11 @@ func budgetTools() []mcp.Tool {
 				if err != nil {
 					return nil, err
 				}
-				result := map[string]any{"budget": results[0]}
+				notes, err := linkedNotes(db, note.LinkBudget, found.ID)
+				if err != nil {
+					return nil, err
+				}
+				result := map[string]any{"budget": results[0], "notes": notes}
 				if details.Usage != nil {
 					result["period"] = usageResult(*details.Usage, found.Currency)
 				}
@@ -1918,7 +1935,7 @@ func budgetTools() []mcp.Tool {
 				if !a.Confirm {
 					return confirmation(fmt.Sprintf("Delete budget %s (%s) permanently? No transaction changes.", current.Code, current.Title)), nil
 				}
-				if err := c.store.Delete(current.ID); err != nil {
+				if err := c.purge(current.ID); err != nil {
 					return nil, err
 				}
 				return map[string]any{"deleted": true, "budget": current.Code}, nil

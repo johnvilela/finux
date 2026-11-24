@@ -24,7 +24,7 @@ const (
 
 // skillNames lists the skills the repository must have.
 var skillNames = []string{
-	"finux-coach", "finux-credit-card-bills", "finux-import-statement", "finux-log-transactions", "finux-period-review",
+	"finux-coach", "finux-credit-card-bills", "finux-import-statement", "finux-log-transactions", "finux-notes", "finux-period-review",
 	"finux-tidy-transactions",
 }
 
@@ -155,7 +155,7 @@ func TestAgentSkillReferencesAreCopies(t *testing.T) {
 
 var (
 	frontmatter = regexp.MustCompile(`(?s)\A---\nname: ([^\n]+)\ndescription: ([^\n]+)\n---\n\n# `)
-	toolMention = regexp.MustCompile("`((?:database|account|category|transaction|credit_card|goal|budget|schedule)_[a-z_]+)`")
+	toolMention = regexp.MustCompile("`((?:database|account|category|transaction|credit_card|goal|budget|schedule|note)_[a-z_]+)`")
 	linkTarget  = regexp.MustCompile(`\]\(([^)#]+\.md)(?:#[^)]*)?\)`)
 )
 

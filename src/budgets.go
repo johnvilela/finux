@@ -11,6 +11,7 @@ import (
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
@@ -262,12 +263,24 @@ func scheduledFor(db *gorm.DB, current budget.Budget, period budget.Usage, incom
 	return max(total, 0), nil
 }
 
+// purge deletes a budget in one step. Its notes stay; they lose the
+// link to the budget.
+func (c *budgetsCommand) purge(id uint) error {
+	return c.db.Transaction(func(tx *gorm.DB) error {
+		if err := note.NewStore(tx).ClearLink(note.LinkBudget, id); err != nil {
+			return err
+		}
+		return budget.NewStore(tx).Delete(id)
+	})
+}
+
 func (c *budgetsCommand) details(current budget.Budget, date string, history int) (string, error) {
 	details, err := c.gather(current, date, history)
 	if err != nil {
 		return "", err
 	}
-	return ui.BudgetDetailsView(details, c.plain), nil
+	notes, err := openNotes(c.db, note.LinkBudget, current.ID, c.plain)
+	return ui.BudgetDetailsView(details, c.plain) + notes, err
 }
 
 func (c *budgetsCommand) list(args []string) error {
@@ -582,7 +595,7 @@ func (c *budgetsCommand) delete(args []string) error {
 		}
 	}
 	if hard {
-		if err := c.store.Delete(current.ID); err != nil {
+		if err := c.purge(current.ID); err != nil {
 			return err
 		}
 		return c.print(ui.Success("Budget "+current.Code+" deleted permanently") + "\n")

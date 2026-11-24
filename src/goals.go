@@ -9,6 +9,7 @@ import (
 	"finux/src/code"
 	"finux/src/goal"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
@@ -178,7 +179,8 @@ func (c *goalsCommand) details(current goal.Goal) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ui.GoalDetailsView(details, c.plain), nil
+	notes, err := openNotes(c.db, note.LinkGoal, current.ID, c.plain)
+	return ui.GoalDetailsView(details, c.plain) + notes, err
 }
 
 func (c *goalsCommand) list(args []string) error {
@@ -453,6 +455,9 @@ func (c *goalsCommand) purge(current goal.Goal) error {
 			return err
 		}
 		if err := schedule.NewStore(tx).ClearGoal(current.ID); err != nil {
+			return err
+		}
+		if err := note.NewStore(tx).ClearLink(note.LinkGoal, current.ID); err != nil {
 			return err
 		}
 		return goal.NewStore(tx).Delete(current.ID)

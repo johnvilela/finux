@@ -130,6 +130,7 @@ Commands:
   goals, gl         Manage goals
   budgets, bg       Manage budgets
   scheduled, sc     Manage scheduled transactions
+  notes, nt         Manage notes
   resume, rs        Show your financial resume
   update            Update Finux to the newest version
   version           Show the version
@@ -852,6 +853,38 @@ deletes a transaction, and a delete of a transaction does not bring its
 occurrence back. A category that a schedule has cannot be deleted. A
 permanent delete of an account or a credit card also deletes its schedules.
 
+## Notes
+
+A note is a short text about your finances: a fact to remember, a decision
+or a thing to do. You write it, or an AI agent writes it for you.
+
+```sh
+./bin/finux nt add --title "Energy bill is shared" --text "Ana pays half." --tags home
+./bin/finux nt add --title "Ask the bank about the fee" --remind 05/12/2026 --account INTER
+./bin/finux nt add                 # opens a form
+./bin/finux nt                     # the open notes, the due ones first
+./bin/finux nt 2                   # one note
+./bin/finux nt --due               # the notes with a reminder up to today
+./bin/finux nt --tag home          # also --search, --goal, --budget, --account, --all
+./bin/finux nt edit 2 --remind 10/12/2026
+./bin/finux nt done 2              # mark as done; 'nt reopen 2' opens it again
+./bin/finux nt delete 2            # delete permanently
+```
+
+- **Fields**: a title (60 characters at most) and, all optional: a text (500
+  characters at most), a reminder date, tags, and a link to a goal
+  (`--goal`), a budget (`--budget`) and an account or a credit card
+  (`--account`). In `edit`, `none` removes the date or a link.
+- **Status**: a note is open until you mark it as done. An open note with a
+  reminder date up to today is due.
+- **Reminders**: `finux resume` lists the notes with a reminder in the month,
+  `finux tx` tells how many notes are due, and the Telegram bot sends one
+  message on the reminder date. A new date reminds again.
+- **Links**: the details of a goal, a budget, an account and a credit card
+  list their open notes. A permanent delete of the record leaves the notes;
+  they lose the link.
+- **Source**: a note tells who wrote it, you or an AI agent.
+
 ## Resume
 
 The resume is the summary of your finances on the date of today.
@@ -937,6 +970,7 @@ options as in the terminal and without the word `finux`:
 /sc                    Scheduled transactions
 /bg                    Budgets
 /gl                    Goals
+/nt                    Notes
 /ct                    Categories
 /ai                    Ask the AI; see below
 /help                  Show the commands
@@ -1193,6 +1227,7 @@ Each tool returns JSON. The tools with `*` need `confirm: true`.
 | Credit cards | `credit_card_list`, `credit_card_show`, `credit_card_bills` | `credit_card_add`, `credit_card_edit`, `credit_card_pay`, `credit_card_unpay`*, `credit_card_archive`, `credit_card_restore`, `credit_card_delete`* |
 | Goals | `goal_list`, `goal_show` | `goal_add`, `goal_edit`, `goal_archive`, `goal_restore`, `goal_delete`* |
 | Budgets | `budget_list`, `budget_show` | `budget_add`, `budget_edit`, `budget_archive`, `budget_restore`, `budget_delete`* |
+| Notes | `note_list`, `note_show` | `note_add`, `note_edit`, `note_done`, `note_delete`* |
 
 The rules are the rules of the CLI, with these differences:
 
@@ -1224,6 +1259,7 @@ Agent Skills format that Claude Code, Codex and opencode read.
 | `finux-credit-card-bills` | See the bills of the credit cards and pay them |
 | `finux-coach` | Analyze spending and warn about debts and bills |
 | `finux-tidy-transactions` | Find the transactions of an account or a card that are not sure, and fix their description, category and tags |
+| `finux-notes` | Write short notes with an optional reminder, tell the due ones and mark them as done |
 
 A skill that changes data shows a draft and waits for your approval. The
 skills use the MCP tools; without the MCP server they use the `finux`

@@ -12,6 +12,7 @@ import (
 	"finux/src/category"
 	"finux/src/code"
 	"finux/src/money"
+	"finux/src/note"
 	"finux/src/schedule"
 	"finux/src/transaction"
 	"finux/src/ui"
@@ -194,7 +195,8 @@ func (c *creditCardsCommand) details(current card.Card) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ui.CardDetailsView(details, c.plain), nil
+	notes, err := openNotes(c.db, note.LinkCard, current.ID, c.plain)
+	return ui.CardDetailsView(details, c.plain) + notes, err
 }
 
 // gather reads the open bill of a credit card, its transactions and the
@@ -718,6 +720,9 @@ func (c *creditCardsCommand) purge(current card.Card, hasPayments bool) error {
 			return err
 		}
 		if err := schedule.NewStore(tx).DeleteByCard(current.ID); err != nil {
+			return err
+		}
+		if err := note.NewStore(tx).ClearLink(note.LinkCard, current.ID); err != nil {
 			return err
 		}
 		return card.NewStore(tx).Delete(current.ID)

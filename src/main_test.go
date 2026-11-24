@@ -31,6 +31,7 @@ Commands:
   goals, gl         Manage goals
   budgets, bg       Manage budgets
   scheduled, sc     Manage scheduled transactions
+  notes, nt         Manage notes
   resume, rs        Show your financial resume
   daemon            Run the Telegram bot and the background jobs
   update            Update Finux to the newest version
