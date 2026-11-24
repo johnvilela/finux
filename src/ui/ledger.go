@@ -394,7 +394,11 @@ func (l Ledger) View() tea.View {
 			}
 			rule := strings.Repeat("─", max(0, l.width-4-lipgloss.Width(day)-1))
 			future := l.future(line.day)
-			list = append(list, "  "+styleBold.Faint(future).Render(day)+" "+styleDim.Faint(future).Render(rule))
+			heading := styleBold
+			if future {
+				heading = styleDim.Bold(true).Faint(true)
+			}
+			list = append(list, "  "+heading.Render(day)+" "+styleDim.Faint(future).Render(rule))
 			continue
 		}
 		list = append(list, l.row(l.views[l.shown[line.row]], line.row == l.cursor, textWidth, accountWidth, amountWidth))
@@ -439,7 +443,8 @@ func (l Ledger) View() tea.View {
 
 // row renders one transaction: a sign for its type, the title and the
 // tags, the category, the account and the amount. A transaction in the
-// future has the same colors, but faint.
+// future is faint: its sign, its dot and its amount keep their colors,
+// and its text is grey.
 func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth, amountWidth int) string {
 	faint := l.future(view.Date)
 	dim := styleDim.Faint(faint)
@@ -456,7 +461,11 @@ func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth
 		sign = paint(colorIncome, "▲")
 	}
 	// The transaction is further in than the heading of its day.
-	marker, titleStyle := "    ", lipgloss.NewStyle().Faint(faint)
+	plainStyle := lipgloss.NewStyle()
+	if faint {
+		plainStyle = dim
+	}
+	marker, titleStyle := "    ", plainStyle
 	if current {
 		marker, titleStyle = styleAccent.Render("▌")+"   ", styleTitle
 	}
@@ -479,7 +488,7 @@ func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth
 	text += strings.Repeat(" ", max(0, textWidth-lipgloss.Width(text)))
 
 	color, _ := category.ColorByKey(view.Category.Color)
-	group := paint(color.Hex, "●") + " " + lipgloss.NewStyle().Faint(faint).Render(view.Category.Code) + strings.Repeat(" ", max(0, code.MaxLength-len(view.Category.Code)))
+	group := paint(color.Hex, "●") + " " + plainStyle.Render(view.Category.Code) + strings.Repeat(" ", max(0, code.MaxLength-len(view.Category.Code)))
 	account := ledgerAccount(view)
 	account += strings.Repeat(" ", max(0, accountWidth-lipgloss.Width(account)))
 	amount := money.Format(view.Amount, view.Account.Currency)

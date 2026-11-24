@@ -334,6 +334,13 @@ func TestLedgerDimsFutureRows(t *testing.T) {
 			t.Fatalf("faint = %v, want %v, in line %q", !future, future, line)
 		}
 	}
+	// The text of a future row is grey also, not only faint.
+	if !regexp.MustCompile(`\x1b\[[0-9;]*90mRow 2027-01-01`).MatchString(styled) || regexp.MustCompile(`\x1b\[[0-9;]*90mRow 2026`).MatchString(styled) {
+		t.Fatalf("only the title of a future row is grey:\n%q", styled)
+	}
+	if !regexp.MustCompile(`\x1b\[[0-9;]*90m01/01/2027`).MatchString(styled) || regexp.MustCompile(`\x1b\[[0-9;]*90m2[13]/11/2026`).MatchString(styled) {
+		t.Fatalf("only the heading of a future day is grey:\n%q", styled)
+	}
 	if !strings.Contains(plain(styled), "Row 2027-01-01") {
 		t.Fatalf("view lacks the future row:\n%s", plain(styled))
 	}
