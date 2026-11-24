@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -25,7 +26,7 @@ func ledgerView(t *testing.T, model tea.Model) string {
 }
 
 func TestLedgerView(t *testing.T) {
-	var model tea.Model = NewLedger("Transactions", sampleTransactions())
+	var model tea.Model = NewLedger("Transactions", sampleTransactions(), "2026-12-31")
 	view := ledgerView(t, model)
 	for _, want := range []string{
 		"Transactions", "title, #tag, @ACCOUNT, cat:CODE, 2026-11",
@@ -79,7 +80,7 @@ func TestLedgerView(t *testing.T) {
 }
 
 func TestLedgerSearch(t *testing.T) {
-	var model tea.Model = NewLedger("Transactions", sampleTransactions())
+	var model tea.Model = NewLedger("Transactions", sampleTransactions(), "2026-12-31")
 	for query, want := range map[string]string{
 		"sal":           "1 of 4 transactions",
 		"#week":         "1 of 4 transactions",
@@ -121,7 +122,7 @@ func TestLedgerSearch(t *testing.T) {
 }
 
 func TestLedgerSelect(t *testing.T) {
-	var model tea.Model = NewLedger("Transactions", sampleTransactions())
+	var model tea.Model = NewLedger("Transactions", sampleTransactions(), "2026-12-31")
 	if _, ok := ledger(t, model).Selected(); ok {
 		t.Fatal("selected before enter")
 	}
@@ -154,7 +155,7 @@ func TestLedgerScrollsAndFits(t *testing.T) {
 		views = append(views, view)
 	}
 	views[3].Title, views[3].Tags = strings.Repeat("long title ", 6), "#one #two #three #four #five #six #seven"
-	var model tea.Model = NewLedger("Transactions", views)
+	var model tea.Model = NewLedger("Transactions", views, "2026-12-31")
 	first := ledgerView(t, model)
 	if !strings.Contains(first, "Purchase 01") || strings.Contains(first, "Purchase 40") {
 		t.Fatalf("first screen:\n%s", first)
@@ -235,7 +236,7 @@ func TestLedgerScrollsAndFits(t *testing.T) {
 func TestLedgerMarksAVirtualCard(t *testing.T) {
 	views := sampleTransactions()
 	views[0].Virtual = true
-	var model tea.Model = NewLedger("Transactions", views)
+	var model tea.Model = NewLedger("Transactions", views, "2026-12-31")
 	if view := ledgerView(t, model); !strings.Contains(view, "▼ Weekly market virtual") || strings.Contains(view, "Salary virtual") {
 		t.Fatalf("view does not mark the virtual card:\n%s", view)
 	}
@@ -243,5 +244,117 @@ func TestLedgerMarksAVirtualCard(t *testing.T) {
 	model = send(t, model, text("virtual:yes")...)
 	if view := ledgerView(t, model); !strings.Contains(view, "Weekly market") || strings.Contains(view, "Salary") || !strings.Contains(view, "virtual:yes") {
 		t.Fatalf("search for the virtual card:\n%s", view)
+	}
+}
+
+// datedTransactions returns one expense of 10,00 for each date, in the
+// order given.
+func datedTransactions(dates ...string) []transaction.View {
+	base := sampleTransactions()[0]
+	var views []transaction.View
+	for i, date := range dates {
+		view := base
+		view.ID, view.Title, view.Date, view.Amount, view.Tags = uint(100-i), "Row "+date, date, -1000, ""
+		views = append(views, view)
+	}
+	return views
+}
+
+func TestLedgerStartsAtToday(t *testing.T) {
+	views := datedTransactions("2027-02-01", "2027-01-01", "2026-12-01", "2026-11-23", "2026-11-21", "2026-11-19")
+	var model tea.Model = NewLedger("Transactions", views, "2026-11-23")
+	// The cursor starts on the newest transaction that is not in the future.
+	if got, _ := ledger(t, send(t, model, keyEnter)).Selected(); got != 3 {
+		t.Fatalf("selected at the start = %d, want 3", got)
+	}
+	// A line for today is between the future and the rest.
+	view := ledgerView(t, model)
+	future, divider, now := strings.Index(view, "Row 2026-12-01"), strings.Index(view, "── today 23/11/2026 ─"), strings.Index(view, "23/11/2026  Monday")
+	if future < 0 || divider < future || now < divider || strings.Count(view, "today 23/11/2026") != 1 {
+		t.Fatalf("line for today is not between the future and today:\n%s", view)
+	}
+	// Up goes to the future, home to its first row.
+	if got, _ := ledger(t, send(t, model, keyUp, keyEnter)).Selected(); got != 2 {
+		t.Fatalf("selected after up = %d, want 2", got)
+	}
+	if got, _ := ledger(t, send(t, model, tea.KeyPressMsg{Code: tea.KeyHome}, keyEnter)).Selected(); got != 0 {
+		t.Fatalf("selected after home = %d, want 0", got)
+	}
+	// A search starts at today again.
+	searched := send(t, send(t, model, keyUp, keyUp), text("Row")...)
+	if got, _ := ledger(t, send(t, searched, keyEnter)).Selected(); got != 3 {
+		t.Fatalf("selected after a search = %d, want 3", got)
+	}
+	// A search that finds only the future has no line for today.
+	if view := ledgerView(t, send(t, model, text("2027")...)); strings.Contains(view, "── today") || !strings.Contains(view, "Row 2027-02-01") {
+		t.Fatalf("search for the future:\n%s", view)
+	}
+	// No line for today when no transaction is in the future.
+	past := NewLedger("Transactions", views, "2027-06-01")
+	if view := ledgerView(t, past); strings.Contains(view, "── today") {
+		t.Fatalf("line for today without a future transaction:\n%s", view)
+	}
+	if got, _ := ledger(t, send(t, past, keyEnter)).Selected(); got != 0 {
+		t.Fatalf("selected without a future transaction = %d, want 0", got)
+	}
+
+	// Many future transactions: the screen starts at the line for today
+	// and keeps the transaction of today on it, at all heights.
+	var dates []string
+	for month := 12; month >= 1; month-- {
+		dates = append(dates, fmt.Sprintf("2027-%02d-01", month))
+	}
+	dates = append(dates, "2026-11-23", "2026-11-21", "2026-11-19", "2026-11-18", "2026-11-17")
+	model = NewLedger("Transactions", datedTransactions(dates...), "2026-11-23")
+	for _, height := range []int{14, 20, 30, 80} {
+		sized := send(t, model, tea.WindowSizeMsg{Width: 100, Height: height})
+		view := ledgerView(t, sized)
+		if !strings.Contains(view, "── today 23/11/2026") || !strings.Contains(view, "Row 2026-11-23") || strings.Count(view, "\n") != height-1 {
+			t.Fatalf("height %d: first screen:\n%s", height, view)
+		}
+		if height < 40 && strings.Contains(view, "Row 2027-12-01") {
+			t.Fatalf("height %d: first screen starts in the future:\n%s", height, view)
+		}
+		if got, _ := ledger(t, send(t, sized, keyEnter)).Selected(); got != 12 {
+			t.Fatalf("height %d: selected = %d, want 12", height, got)
+		}
+	}
+}
+
+func TestLedgerDimsFutureRows(t *testing.T) {
+	views := datedTransactions("2027-01-01", "2026-11-23", "2026-11-21")
+	styled := NewLedger("Transactions", views, "2026-11-23").View().Content
+	faint := regexp.MustCompile(`\x1b\[(?:[0-9;:]*;)?2(?:;[0-9;:]*)?m`)
+	for _, line := range strings.Split(styled, "\n") {
+		future := strings.Contains(line, "Row 2027-01-01") || strings.Contains(line, "01/01/2027")
+		known := future || strings.Contains(line, "Row 2026-11-2") || strings.Contains(line, "/11/2026  ")
+		// 38;2;R;G;B is a color, not the faint attribute.
+		codes := regexp.MustCompile(`[34]8;2;[0-9]+;[0-9]+;[0-9]+`).ReplaceAllString(line, "")
+		if known && faint.MatchString(codes) != future {
+			t.Fatalf("faint = %v, want %v, in line %q", !future, future, line)
+		}
+	}
+	if !strings.Contains(plain(styled), "Row 2027-01-01") {
+		t.Fatalf("view lacks the future row:\n%s", plain(styled))
+	}
+}
+
+func TestLedgerTotalsLeaveFutureOut(t *testing.T) {
+	views := datedTransactions("2027-02-01", "2027-01-01", "2026-11-23", "2026-11-21")
+	income := sampleTransactions()[1]
+	income.Date = "2026-11-20"
+	views = append(views, income)
+	view := ledgerView(t, NewLedger("Transactions", views, "2026-11-23"))
+	for _, want := range []string{"in R$ 3.000,00", "out R$ 20,00", "net R$ 2.980,00", "upcoming -R$ 20,00"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("totals lack %q:\n%s", want, view)
+		}
+	}
+	// Only future transactions: the currency still has its line.
+	if view := ledgerView(t, NewLedger("Transactions", views[:2], "2026-11-23")); !strings.Contains(view, "in R$ 0,00") || !strings.Contains(view, "upcoming -R$ 20,00") {
+		t.Errorf("totals of a list in the future:\n%s", view)
+	}
+	if view := ledgerView(t, NewLedger("Transactions", views, "2027-06-01")); strings.Contains(view, "upcoming") || !strings.Contains(view, "out R$ 40,00") {
+		t.Errorf("totals without a future transaction:\n%s", view)
 	}
 }

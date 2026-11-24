@@ -48,8 +48,11 @@ var ledgerKeyMap = ledgerKeys{
 // amounts are in one column, and the totals of the list are at the top.
 // The search input reads the filters of transaction.ParseSearch.
 type Ledger struct {
-	title  string
-	views  []transaction.View
+	title string
+	views []transaction.View
+	// today is the date of today, YYYY-MM-DD. A transaction after it is in
+	// the future: the part of a purchase in installments that is not due.
+	today  string
 	search textinput.Model
 	// shown holds the indexes, in views, of the transactions the search
 	// selects. cursor is a position in shown.
@@ -67,15 +70,16 @@ type Ledger struct {
 }
 
 // NewLedger builds the list of transactions. views must be in the
-// order to show, the newest date first.
-func NewLedger(title string, views []transaction.View) Ledger {
+// order to show, the newest date first. today is the date of today,
+// YYYY-MM-DD: the list starts there, with the future above.
+func NewLedger(title string, views []transaction.View, today string) Ledger {
 	search := textinput.New()
 	search.Prompt = "Search: "
 	search.Placeholder = "title, #tag, @ACCOUNT, cat:CODE, 2026-11"
 	search.CharLimit = 120
 	search.SetWidth(60)
 	search.Focus()
-	l := Ledger{title: title, views: views, search: search, width: ledgerWidth, height: ledgerRows, help: help.New(), selected: -1}
+	l := Ledger{title: title, views: views, today: today, search: search, width: ledgerWidth, height: ledgerRows, help: help.New(), selected: -1}
 	l.filter()
 	l.totalLines = len(l.totals())
 	return l
@@ -90,7 +94,35 @@ func (l *Ledger) filter() {
 			l.shown = append(l.shown, index)
 		}
 	}
-	l.cursor, l.top = 0, 0
+	l.start()
+}
+
+// future reports whether a date is after today.
+func (l Ledger) future(date string) bool { return l.today != "" && date > l.today }
+
+// startRow returns the row the cursor starts on: the newest transaction
+// that is not in the future, or the first row when all are.
+func (l Ledger) startRow() int {
+	for row, index := range l.shown {
+		if !l.future(l.views[index].Date) {
+			return row
+		}
+	}
+	return 0
+}
+
+// start puts the cursor on its start row and the line for today at the
+// top of the screen. The future is above: the up key goes there.
+func (l *Ledger) start() {
+	l.cursor, l.top = l.startRow(), 0
+	lines := l.lines()
+	for index, line := range lines {
+		if line.row == lineToday {
+			l.top = index
+		}
+	}
+	l.top = max(0, min(l.top, len(lines)-l.height))
+	l.move(l.cursor)
 }
 
 // Init starts the cursor blink of the search input.
@@ -110,17 +142,20 @@ func (l Ledger) Cancelled() bool { return l.cancelled }
 const (
 	lineHeading = -1
 	lineSpace   = -2
+	lineToday   = -3
 )
 
 // ledgerLine is one line of the list: the transaction at the position
-// row in shown, the heading of a day, or the empty line between two days.
+// row in shown, the heading of a day, the empty line between two days,
+// or the line for today between the future and the rest.
 type ledgerLine struct {
 	day string
 	row int
 }
 
 // lines returns the headings and the transactions in display order,
-// with an empty line between two days.
+// with an empty line between two days. The line for today is after the
+// last day in the future, when the list has days on its two sides.
 func (l Ledger) lines() []ledgerLine {
 	var lines []ledgerLine
 	day := ""
@@ -128,6 +163,9 @@ func (l Ledger) lines() []ledgerLine {
 		if date := l.views[index].Date; date != day {
 			if day != "" {
 				lines = append(lines, ledgerLine{row: lineSpace})
+			}
+			if l.future(day) && !l.future(date) {
+				lines = append(lines, ledgerLine{row: lineToday}, ledgerLine{row: lineSpace})
 			}
 			day = date
 			lines = append(lines, ledgerLine{day: day, row: lineHeading})
@@ -206,7 +244,13 @@ func (l Ledger) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the screen.
 		chrome := 8 + l.totalLines
 		l.height = max(4, msg.Height-chrome)
-		l.move(l.cursor)
+		// A cursor that is on its start row keeps the line for today at
+		// the top of the new size.
+		if l.cursor == l.startRow() {
+			l.start()
+		} else {
+			l.move(l.cursor)
+		}
 		return l, nil
 	case tea.KeyPressMsg:
 		switch {
@@ -257,29 +301,37 @@ func (l Ledger) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // totals returns one line for each currency that has incomes or
-// expenses in the list: what came in, what went out and the difference.
+// expenses in the list: what came in, what went out and the difference,
+// up to today, and then the sum of the transactions in the future.
 // The sides of a transfer are not in the totals: the money stays yours.
 func (l Ledger) totals() []string {
-	in, out := map[string]int64{}, map[string]int64{}
+	in, out, upcoming := map[string]int64{}, map[string]int64{}, map[string]int64{}
 	for _, index := range l.shown {
 		view := l.views[index]
-		switch view.Type {
-		case transaction.Income:
+		switch {
+		case transaction.Neutral(view.Type):
+		case l.future(view.Date):
+			upcoming[view.Account.Currency] += view.Amount
+		case view.Type == transaction.Income:
 			in[view.Account.Currency] += view.Amount
-		case transaction.Expense:
+		case view.Type == transaction.Expense:
 			out[view.Account.Currency] -= view.Amount
 		}
 	}
 	var lines []string
 	for _, currency := range money.Codes() {
-		if in[currency] == 0 && out[currency] == 0 || len(lines) == ledgerCurrencies {
+		if in[currency] == 0 && out[currency] == 0 && upcoming[currency] == 0 || len(lines) == ledgerCurrencies {
 			continue
 		}
 		net := in[currency] - out[currency]
+		later := ""
+		if upcoming[currency] != 0 {
+			later = styleDim.Render("   upcoming " + money.Format(upcoming[currency], currency))
+		}
 		lines = append(lines, "  "+styleBold.Render(currency)+
 			styleDim.Render("   in ")+typeStyle(transaction.Income).Render(money.Format(in[currency], currency))+
 			styleDim.Render("   out ")+typeStyle(transaction.Expense).Render(money.Format(out[currency], currency))+
-			styleDim.Render("   net ")+styleBold.Render(money.Format(net, currency)))
+			styleDim.Render("   net ")+styleBold.Render(money.Format(net, currency))+later)
 	}
 	return lines
 }
@@ -330,13 +382,19 @@ func (l Ledger) View() tea.View {
 			list = append(list, "")
 			continue
 		}
+		if line.row == lineToday {
+			label := "── today " + transaction.FormatDate(l.today) + " "
+			list = append(list, "  "+styleAccent.Render(label+strings.Repeat("─", max(0, l.width-4-lipgloss.Width(label)))))
+			continue
+		}
 		if line.row == lineHeading {
 			day := transaction.FormatDate(line.day)
 			if date, err := time.Parse("2006-01-02", line.day); err == nil {
 				day += "  " + date.Weekday().String()
 			}
 			rule := strings.Repeat("─", max(0, l.width-4-lipgloss.Width(day)-1))
-			list = append(list, "  "+styleBold.Render(day)+" "+styleDim.Render(rule))
+			future := l.future(line.day)
+			list = append(list, "  "+styleBold.Faint(future).Render(day)+" "+styleDim.Faint(future).Render(rule))
 			continue
 		}
 		list = append(list, l.row(l.views[l.shown[line.row]], line.row == l.cursor, textWidth, accountWidth, amountWidth))
@@ -380,11 +438,17 @@ func (l Ledger) View() tea.View {
 }
 
 // row renders one transaction: a sign for its type, the title and the
-// tags, the category, the account and the amount.
+// tags, the category, the account and the amount. A transaction in the
+// future has the same colors, but faint.
 func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth, amountWidth int) string {
+	faint := l.future(view.Date)
+	dim := styleDim.Faint(faint)
+	paint := func(hex, text string) string {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Faint(faint).Render(text)
+	}
 	// The signs have fixed colors, the same as the category dots: the
 	// colors of a terminal theme can make red and green look the same.
-	sign := styleDim.Render("↔")
+	sign := dim.Render("↔")
 	switch view.Type {
 	case transaction.Expense:
 		sign = paint(colorExpense, "▼")
@@ -392,7 +456,7 @@ func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth
 		sign = paint(colorIncome, "▲")
 	}
 	// The transaction is further in than the heading of its day.
-	marker, titleStyle := "    ", lipgloss.NewStyle()
+	marker, titleStyle := "    ", lipgloss.NewStyle().Faint(faint)
 	if current {
 		marker, titleStyle = styleAccent.Render("▌")+"   ", styleTitle
 	}
@@ -406,22 +470,23 @@ func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth
 		part += " virtual"
 	}
 	title := cut(view.Title, textWidth-lipgloss.Width(part))
-	text := titleStyle.Render(title) + styleDim.Render(part)
+	text := titleStyle.Render(title) + dim.Render(part)
 	title += part
 	// The tags use the room the title leaves.
 	if room := textWidth - lipgloss.Width(title) - 2; view.Tags != "" && room > 3 {
-		text += "  " + styleDim.Render(cut(view.Tags, room))
+		text += "  " + dim.Render(cut(view.Tags, room))
 	}
 	text += strings.Repeat(" ", max(0, textWidth-lipgloss.Width(text)))
 
 	color, _ := category.ColorByKey(view.Category.Color)
-	group := paint(color.Hex, "●") + " " + view.Category.Code + strings.Repeat(" ", max(0, code.MaxLength-len(view.Category.Code)))
+	group := paint(color.Hex, "●") + " " + lipgloss.NewStyle().Faint(faint).Render(view.Category.Code) + strings.Repeat(" ", max(0, code.MaxLength-len(view.Category.Code)))
 	account := ledgerAccount(view)
 	account += strings.Repeat(" ", max(0, accountWidth-lipgloss.Width(account)))
 	amount := money.Format(view.Amount, view.Account.Currency)
-	amount = strings.Repeat(" ", max(0, amountWidth-lipgloss.Width(amount))) + typeStyle(view.Type).Render(amount)
+	amountStyle := typeStyle(view.Type).Faint(faint)
 	if transaction.Neutral(view.Type) {
-		amount = styleDim.Render(amount)
+		amountStyle = dim
 	}
-	return marker + sign + " " + text + "  " + group + "  " + styleDim.Render(account) + "  " + amount
+	amount = strings.Repeat(" ", max(0, amountWidth-lipgloss.Width(amount))) + amountStyle.Render(amount)
+	return marker + sign + " " + text + "  " + group + "  " + dim.Render(account) + "  " + amount
 }

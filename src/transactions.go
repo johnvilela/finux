@@ -196,7 +196,7 @@ const noTransactions = notice("No transactions yet. Run 'finux tx add'.")
 // choose opens the list of transactions and returns the one the user
 // selected.
 func (c *transactionsCommand) choose(title string, views []transaction.View) (transaction.View, error) {
-	ledger, err := program(ui.NewLedger(title, views))
+	ledger, err := program(ui.NewLedger(title, views, today()))
 	if err != nil {
 		return transaction.View{}, err
 	}

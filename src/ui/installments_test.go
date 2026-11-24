@@ -34,7 +34,7 @@ func TestInstallmentShowsItsPart(t *testing.T) {
 	if got := TransactionCard(sampleTransactions()[0], true); strings.Contains(got, "Part") {
 		t.Errorf("card of a normal transaction has a part:\n%s", got)
 	}
-	var model tea.Model = NewLedger("Transactions", []transaction.View{part})
+	var model tea.Model = NewLedger("Transactions", []transaction.View{part}, "2026-12-31")
 	if view := ledgerView(t, model); !strings.Contains(view, "Notebook 3/10") {
 		t.Errorf("ledger:\n%s", view)
 	}
