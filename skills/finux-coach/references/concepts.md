@@ -90,6 +90,38 @@ an account or a credit card, never the two.
   `#market`. Send them divided by spaces, with or without `#`. In an edit,
   the tags you send replace the tags of the transaction.
 
+## Corrections
+
+Finux learns from each change of a transaction. When the title, the
+category, the tags or the description of a transaction changes, in the
+CLI, in Telegram or through `transaction_edit`, Finux keeps a correction:
+"a transaction with this title must have this title, this category, these
+tags, this description". `transaction_corrections` returns them.
+
+```json
+{"pattern": "PAY LAMEI", "title": "Lamen House", "category": "FOOD",
+ "tags": ["#lunch"], "source": "user", "count": 3, "updated": "2026-11-24"}
+```
+
+- `pattern` is the title the transaction had, in capitals, without
+  accents, without dates and without the words that have a digit:
+  `PAY LAMEI 21/11` and `PAY LAMEI 23/11` have the pattern `PAY LAMEI`.
+  There is one correction for each pattern, and a new change replaces
+  the values of the old one.
+- A field that is absent was not taught: use what you know for it. Empty
+  `tags` or an empty `description` mean that the user wants none.
+- `source` tells who made the last change. `user` is a change by hand:
+  the user did not want what the transaction had. `agent` is a change
+  through the tools.
+- A change follows the names: when `PAY LAMEI` became `Lamen` and the
+  user then changes `Lamen` to `Lamen House`, the corrections of
+  `PAY LAMEI` and of `LAMEN` give `Lamen House`.
+- A new transaction teaches nothing: a title that an agent gave is not a
+  title that the user chose. Transfers and payments teach nothing.
+- Send `titles` to get only the corrections of the transactions at hand;
+  a title can be a raw line of a statement. Do not read all the
+  corrections for an import.
+
 ## Installments
 
 An expense or an income can be in installments: N monthly parts. Finux

@@ -29,7 +29,7 @@ type fixture struct {
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "finux.db")
-	if _, err := storage.Init(path, &account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &Transaction{}); err != nil {
+	if _, err := storage.Init(path, &account.Account{}, &category.Category{}, &card.Card{}, &card.Bill{}, &goal.Goal{}, &Transaction{}, &Correction{}); err != nil {
 		t.Fatal(err)
 	}
 	db, err := storage.Open(path)

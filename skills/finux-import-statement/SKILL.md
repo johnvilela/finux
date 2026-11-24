@@ -18,6 +18,8 @@ duplicates, and prove the result with the totals of the statement.
 - The names and the tags that the user gave before are in ai-memory.
   [references/names.md](references/names.md) tells how to read them, how
   to ask about a line you do not know, and how to save the answer.
+  Call `transaction_corrections` with the titles of the rows too: it has
+  the changes the user made by hand.
 - A statement has private data. Do not repeat account numbers, document
   numbers or addresses in your replies, and do not put them in a title or
   a description.

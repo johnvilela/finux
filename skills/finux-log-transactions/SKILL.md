@@ -18,6 +18,8 @@ approves a draft before you write.
 - The names and the tags that the user gave before are in ai-memory.
   [references/names.md](references/names.md) tells how to read them, how
   to ask about a name you do not know, and how to save the answer.
+  Call `transaction_corrections` with the titles of the rows too: it has
+  the changes the user made by hand.
 
 ## Steps
 
@@ -26,7 +28,8 @@ approves a draft before you write.
 Call `account_list`, `credit_card_list`, `category_list`, `goal_list`,
 `schedule_list` and `transaction_suggestions`. Keep the results: they give the codes, the
 currencies, the goals, and the titles and tags the user already uses.
-Read the rules of names too, as names.md tells.
+Read the rules of names too, as names.md tells. For a raw line of a bank,
+call `transaction_corrections` with it.
 
 ### 2. Make a draft for each transaction
 

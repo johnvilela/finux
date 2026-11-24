@@ -149,7 +149,7 @@ func transactionsReady(db *gorm.DB) bool {
 		migrator.HasColumn(&transaction.Transaction{}, "installment_id") && migrator.HasColumn(&transaction.Transaction{}, "virtual") &&
 		migrator.HasColumn(&transaction.Transaction{}, "status") && migrator.HasColumn(&card.Bill{}, "status") &&
 		migrator.HasTable(&schedule.Schedule{}) && migrator.HasColumn(&transaction.Transaction{}, "schedule_id") &&
-		migrator.HasTable(&setting.Setting{}) &&
+		migrator.HasTable(&setting.Setting{}) && migrator.HasTable(&transaction.Correction{}) &&
 		migrator.HasTable(&budget.Budget{}) && migrator.HasTable(&budget.Link{})
 }
 

@@ -60,6 +60,7 @@ Rules for the CLI:
 | `transaction_edit` | `finux tx edit <id> [--title] [--description] [--value] [--type] [--category] [--tags] [--account] [--date] [--goal <code\|none>] [--virtual[=false]] [--installment-value <amount>] [--all\|--next]` |
 | `transaction_delete` | `finux tx delete <id> [--all\|--next] --yes` |
 | `transaction_suggestions` | No command. Read the titles and the tags in the output of `finux tx list` |
+| `transaction_corrections` | No command. The corrections are for the MCP tools only |
 | `credit_card_list` | `finux cc list [--all]` |
 | `credit_card_show` | `finux cc show <code>` |
 | `credit_card_bills` | `finux cc bills <code>` |

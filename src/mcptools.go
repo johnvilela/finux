@@ -791,6 +791,38 @@ func categoryTools() []mcp.Tool {
 
 // --- Transactions --------------------------------------------------------
 
+// defaultCorrections is the number of corrections of one page.
+const defaultCorrections = 50
+
+type correctionsArguments struct {
+	Titles []string `json:"titles,omitempty" mcp:"Titles or raw lines of a statement, for example [\"PAY LAMEI 21/11\"]. The result then has only the corrections of these titles; dates and codes in a title do not count. Without it, the result has all the corrections, the last one changed first"`
+	Limit  *int     `json:"limit,omitempty" mcp:"Most corrections to return. Default: 50"`
+	Offset *int     `json:"offset,omitempty" mcp:"Number of corrections to skip, to read the next page. Default: 0"`
+}
+
+// correctionJSON is a correction in a result. A field that no change
+// taught is absent. Empty tags or an empty description mean that the
+// user wants none.
+type correctionJSON struct {
+	Pattern     string    `json:"pattern"`
+	Title       string    `json:"title,omitempty"`
+	Category    string    `json:"category,omitempty"`
+	Tags        *[]string `json:"tags,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	Source      string    `json:"source"`
+	Count       int       `json:"count"`
+	Updated     string    `json:"updated"`
+}
+
+// agentTransactionsCommand makes the command that the transaction
+// tools use. Its changes have the agent as their source in the
+// corrections.
+func agentTransactionsCommand(db *gorm.DB) *transactionsCommand {
+	command := newTransactionsCommand(db)
+	command.store.Actor = transaction.SourceAgent
+	return command
+}
+
 func newTransactionsCommand(db *gorm.DB) *transactionsCommand {
 	return &transactionsCommand{
 		streams: quiet, store: transaction.NewStore(db), accounts: account.NewStore(db),
@@ -938,7 +970,7 @@ func transactionTools() []mcp.Tool {
 	return []mcp.Tool{
 		reads(tool("transaction_list", "List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset.",
 			func(db *gorm.DB, a listArguments) (any, error) {
-				c := newTransactionsCommand(db)
+				c := agentTransactionsCommand(db)
 				sent := given(map[string]bool{"category": a.Category != nil, "tag": a.Tags != nil, "date": a.Date != nil, "account": a.Account != nil, "type": a.Type != nil, "goal": a.Goal != nil, "virtual": a.Virtual != nil})
 				filter, err := c.filter(listFlags{category: text(a.Category), tags: text(a.Tags), search: text(a.Search), date: text(a.Date), account: text(a.Account), kind: text(a.Type), goal: text(a.Goal), virtual: a.Virtual != nil && *a.Virtual}, sent)
 				if err != nil {
@@ -960,11 +992,11 @@ func transactionTools() []mcp.Tool {
 			})),
 		reads(tool("transaction_show", "Show one transaction by its id.",
 			func(db *gorm.DB, a showArguments) (any, error) {
-				return newTransactionsCommand(db).one(a.ID)
+				return agentTransactionsCommand(db).one(a.ID)
 			})),
 		tool("transaction_add", "Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give virtual for a purchase made with a virtual card of a credit card. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.",
 			func(db *gorm.DB, a addArguments) (any, error) {
-				c := newTransactionsCommand(db)
+				c := agentTransactionsCommand(db)
 				values := transactionFlags{
 					title: a.Title, value: text(a.Value), account: a.Account, category: text(a.Category), kind: text(a.Type),
 					description: text(a.Description), tags: text(a.Tags), date: text(a.Date), to: text(a.To), received: text(a.Received),
@@ -1002,7 +1034,7 @@ func transactionTools() []mcp.Tool {
 			}),
 		tool("transaction_edit", "Change a transaction. Give only the arguments to change. A change of one side of a transfer also changes the other side. A payment of a bill cannot change: delete it. For a transaction in installments, scope tells which parts change: the result then has them in transactions.",
 			func(db *gorm.DB, a editArguments) (any, error) {
-				c := newTransactionsCommand(db)
+				c := agentTransactionsCommand(db)
 				values := transactionFlags{
 					title: text(a.Title), description: text(a.Description), value: text(a.Value), kind: text(a.Type),
 					category: text(a.Category), tags: text(a.Tags), account: text(a.Account), date: text(a.Date), goal: text(a.Goal),
@@ -1056,7 +1088,7 @@ func transactionTools() []mcp.Tool {
 			}),
 		deletes(tool("transaction_delete", "Delete a transaction permanently. The delete of one side of a transfer also deletes the other side. The delete of a payment opens its bill again. For a transaction in installments, scope tells which parts to delete.",
 			func(db *gorm.DB, a deleteArguments) (any, error) {
-				c := newTransactionsCommand(db)
+				c := agentTransactionsCommand(db)
 				current, err := c.resolve("delete", strconv.FormatUint(uint64(a.ID), 10), "")
 				if err != nil {
 					return nil, err
@@ -1091,11 +1123,34 @@ func transactionTools() []mcp.Tool {
 			})),
 		reads(tool("transaction_suggestions", "List the titles and the tags that the transactions use, the last one used first. Use them to keep the titles and the tags of new transactions consistent.",
 			func(db *gorm.DB, _ struct{}) (any, error) {
-				titles, tags, err := newTransactionsCommand(db).suggestions()
+				titles, tags, err := agentTransactionsCommand(db).suggestions()
 				if err != nil {
 					return nil, err
 				}
 				return map[string]any{"titles": append([]string{}, titles...), "tags": append([]string{}, tags...)}, nil
+			})),
+		reads(tool("transaction_corrections", "List what the changes to transactions taught: for the title a transaction had (pattern), the title, the category, the tags and the description that the user wants. Call it with the titles of the transactions you create or tidy, and use the corrections in place of your own names. A correction with the source user is a change the user made by hand: it wins over what you know. A field that is absent was not taught.",
+			func(db *gorm.DB, a correctionsArguments) (any, error) {
+				limit := defaultCorrections
+				if a.Limit != nil && *a.Limit > 0 {
+					limit = *a.Limit
+				}
+				found, total, err := transaction.NewStore(db).Corrections(a.Titles, limit, max(number(a.Offset), 0))
+				if err != nil {
+					return nil, err
+				}
+				corrections := make([]correctionJSON, len(found))
+				for i, current := range found {
+					corrections[i] = correctionJSON{
+						Pattern: current.Pattern, Title: current.Title, Category: current.Category, Description: current.Description,
+						Source: current.Source, Count: current.Count, Updated: current.UpdatedAt.Local().Format("2006-01-02"),
+					}
+					if current.Tags != nil {
+						tags := strings.Fields(*current.Tags)
+						corrections[i].Tags = &tags
+					}
+				}
+				return map[string]any{"total": total, "offset": max(number(a.Offset), 0), "count": len(corrections), "corrections": corrections}, nil
 			})),
 	}
 }

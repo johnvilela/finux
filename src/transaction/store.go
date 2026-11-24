@@ -23,6 +23,9 @@ var ErrNotFound = errors.New("transaction not found")
 // Store reads and writes transactions in the database.
 type Store struct {
 	db *gorm.DB
+	// Actor tells who changes the transactions: SourceUser, the
+	// default, or SourceAgent. The corrections keep it.
+	Actor string
 }
 
 // NewStore returns a Store that uses db.
@@ -289,8 +292,22 @@ var shared = []string{"Title", "Description", "CategoryID", "Date", "Tags", "Goa
 // other side, except a new value between two currencies. A transaction
 // of a credit card keeps its bill when its date and its card stay.
 func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
-	updated, err := s.update(id, draft, "")
-	return updated, s.stamp(err, &updated)
+	var updated Transaction
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		bound := &Store{db: tx, Actor: s.Actor}
+		before, err := bound.take(id)
+		if err != nil {
+			return err
+		}
+		if updated, err = bound.update(id, draft, ""); err != nil {
+			return err
+		}
+		return bound.learn(before, updated)
+	})
+	if err != nil {
+		return Transaction{}, err
+	}
+	return updated, s.stamp(nil, &updated)
 }
 
 // update is Update for a transaction that goes to the bill of the given

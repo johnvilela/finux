@@ -75,6 +75,7 @@ const mcpInstructions = `Finux is a personal finance manager. These tools read a
 - A goal gets its progress from the transactions linked to it with the argument goal. A transaction has at most one goal, in the currency of the goal. A payment of a credit card bill cannot have a goal.
 - A budget has no link to its transactions: each expense and income of its categories counts by itself, in the currency of the budget, in the period of its date. transaction_add and transaction_edit return budget_warnings when a budget is near or over its limit: tell the user.
 - A schedule is a transaction that will happen, one time or again and again. It is not a transaction and it changes no balance. Each of its occurrences waits until schedule_pay creates its transaction or schedule_skip drops it. When the user paid a scheduled bill, call schedule_pay, not transaction_add. Do not set automatic unless the user asks for it.
+- Finux keeps what each change of a title, a category, tags or a description teaches. Before you give a title, a category or tags to a transaction, call transaction_corrections with its title or its raw line, and use what the user chose before.
 - A tool that deletes data needs confirm: true. Without it, the tool returns confirm_required and a message, and changes nothing. Ask the user before you confirm.
 - If a tool reports that the database is not found or is out of date, call database_init.`
 

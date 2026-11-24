@@ -167,7 +167,7 @@ func (s *Store) UpdateParts(id uint, scope Scope, draft Draft, changed Changed) 
 	}
 	updated := make([]Transaction, 0, len(parts))
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		bound := &Store{db: tx}
+		bound := &Store{db: tx, Actor: s.Actor}
 		for i, part := range parts {
 			next := DraftOf(part)
 			if changed.Title {
@@ -218,7 +218,8 @@ func (s *Store) UpdateParts(id uint, scope Scope, draft Draft, changed Changed) 
 			}
 			updated = append(updated, result)
 		}
-		return nil
+		// The parts are one purchase: they teach one time.
+		return bound.learn(first, updated[0])
 	})
 	if err != nil {
 		return nil, err

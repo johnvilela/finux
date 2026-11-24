@@ -229,6 +229,16 @@ No arguments.
 
 No arguments.
 
+### `transaction_corrections`
+
+*Read.* List what the changes to transactions taught: for the title a transaction had (pattern), the title, the category, the tags and the description that the user wants. Call it with the titles of the transactions you create or tidy, and use the corrections in place of your own names. A correction with the source user is a change the user made by hand: it wins over what you know. A field that is absent was not taught.
+
+| Argument | Type | Required | Description |
+| --- | --- | --- | --- |
+| `limit` | integer | no | Most corrections to return. Default: 50 |
+| `offset` | integer | no | Number of corrections to skip, to read the next page. Default: 0 |
+| `titles` | array | no | Titles or raw lines of a statement, for example ["PAY LAMEI 21/11"]. The result then has only the corrections of these titles; dates and codes in a title do not count. Without it, the result has all the corrections, the last one changed first |
+
 ## Credit card
 
 ### `credit_card_list`

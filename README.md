@@ -1256,7 +1256,10 @@ and the rules ([concepts.md](docs/agents/concepts.md)), the MCP tools
 `references` folder. The skills that create or tidy transactions also
 learn your names: they keep in ai-memory which raw line of a bank is
 which name, category and tags ([names.md](docs/agents/names.md)), and
-they ask you about a line they do not know. `tools.md` and the copies are generated: after a
+they ask you about a line they do not know. Finux also keeps what each
+change of a title, a category, tags or a description teaches, so a
+rename you make by hand reaches the agent (the tool
+`transaction_corrections`). `tools.md` and the copies are generated: after a
 change to a tool or to `docs/agents`, run `make docs`. The tests fail when
 they are out of date, or when a skill names a tool that does not exist.
 

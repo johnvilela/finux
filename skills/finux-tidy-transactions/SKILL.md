@@ -20,6 +20,8 @@ write.
 - The names and the tags that the user gave before are in ai-memory.
   [references/names.md](references/names.md) tells how to read them, how
   to ask about a title you do not know, and how to save the answer.
+  Call `transaction_corrections` with the titles of the rows too: it has
+  the changes the user made by hand.
 
 ## Inputs
 
@@ -73,7 +75,7 @@ the reason: the user sees it.
 | --- | --- |
 | `no category` | The category is `OTHER` |
 | `raw title` | The title looks as a line of a statement and not as a name: a code of a payment company (`PAG*`, `PAY`, `MP *`, `PIX`, `TED`, `DOC`), a long number, a date or a code at the end, a city or a country at the end, a word that is cut, all in capitals with no meaning |
-| `rule` | A rule of names matches the title, and the title, the category or the tags are not those of the rule |
+| `rule` | A correction or a rule of names matches the title, and the title, the category or the tags are not those it gives |
 | `new title` | No other transaction in the history has this title, and the transaction has no description |
 | `other category` | The history of the title has a different category in most of its transactions |
 | `no tags` | The history of the title has tags, and this transaction has none |
@@ -92,8 +94,10 @@ the number of transactions you read, and stop.
 For each row, make a suggestion when the history or the title supports
 it:
 
-- A rule of names that matches the title gives the title, the category
-  and the tags. It is the best evidence: the user gave them before.
+- A correction (`transaction_corrections`) or a rule of names that
+  matches the title gives the title, the category and the tags. It is
+  the best evidence: the user gave them before. names.md tells which one
+  wins.
 - Category: the usual category of the title, or the best match by
   meaning from `category_list`.
 - Tags: the tags the same title had before. Without them, one or two

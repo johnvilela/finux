@@ -192,6 +192,7 @@ func TestMCPTools(t *testing.T) {
 		"account_list", "account_show", "account_add", "account_edit", "account_archive", "account_restore", "account_delete",
 		"category_list", "category_show", "category_add", "category_edit", "category_delete",
 		"transaction_list", "transaction_show", "transaction_add", "transaction_edit", "transaction_delete", "transaction_suggestions",
+		"transaction_corrections",
 		"credit_card_list", "credit_card_show", "credit_card_bills", "credit_card_add", "credit_card_edit", "credit_card_pay",
 		"credit_card_unpay", "credit_card_archive", "credit_card_restore", "credit_card_delete",
 		"goal_list", "goal_show", "goal_add", "goal_edit", "goal_archive", "goal_restore", "goal_delete",
@@ -211,7 +212,7 @@ func TestMCPTools(t *testing.T) {
 	readOnly := h.serve([]string{"--read-only"}, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	want = []string{
 		"database_doctor", "account_list", "account_show", "category_list", "category_show",
-		"transaction_list", "transaction_show", "transaction_suggestions", "credit_card_list", "credit_card_show", "credit_card_bills",
+		"transaction_list", "transaction_show", "transaction_suggestions", "transaction_corrections", "credit_card_list", "credit_card_show", "credit_card_bills",
 		"goal_list", "goal_show", "budget_list", "budget_show", "schedule_list", "schedule_show",
 	}
 	if got := toolNames(t, readOnly[0]); !slices.Equal(got, want) {
@@ -1090,4 +1091,42 @@ func TestMCPVirtualCard(t *testing.T) {
 		t.Fatalf("a bill with no virtual transaction has virtual_total: %v", card)
 	}
 	h.want(h.ok("transaction_edit", map[string]any{"id": 1, "virtual": true}), "true", "transaction", "virtual")
+}
+
+// The corrections tell an agent how the user changed the transactions
+// with a title, by hand or through the agent.
+func TestMCPCorrections(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "1000"})
+	h.ok("transaction_add", map[string]any{"title": "PAY LAMEI 21/11", "value": "16", "account": "NU", "category": "OTHER", "type": "expense", "date": "2026-11-21"})
+	h.ok("transaction_add", map[string]any{"title": "PAY MINUT 19/11", "value": "38.39", "account": "NU", "category": "FOOD", "date": "2026-11-19"})
+	h.want(h.ok("transaction_corrections", nil), "0", "total")
+
+	// The user changes a transaction in the CLI.
+	succeed(t, h.home, "tx", "edit", "1", "--title", "Lamen House", "--category", "FOOD")
+	rules := h.ok("transaction_corrections", map[string]any{"titles": []string{"PAY LAMEI 28/11", "PAY OTHER 01/12"}})
+	h.want(rules, "1", "total")
+	h.want(rules, "PAY LAMEI", "corrections", 0, "pattern")
+	h.want(rules, "Lamen House", "corrections", 0, "title")
+	h.want(rules, "FOOD", "corrections", 0, "category")
+	h.want(rules, "user", "corrections", 0, "source")
+	h.want(rules, "1", "corrections", 0, "count")
+	rule := rules["corrections"].([]any)[0].(map[string]any)
+	for _, field := range []string{"tags", "description"} {
+		if _, ok := rule[field]; ok {
+			t.Errorf("the correction has %s, which no change gave: %v", field, rule)
+		}
+	}
+
+	// A change through the agent has the agent as its source.
+	h.ok("transaction_edit", map[string]any{"id": 2, "title": "Minuto", "tags": "market"})
+	all := h.ok("transaction_corrections", nil)
+	h.want(all, "2", "total")
+	h.want(all, "PAY MINUT", "corrections", 0, "pattern")
+	h.want(all, "agent", "corrections", 0, "source")
+	h.want(all, "[#market]", "corrections", 0, "tags")
+	page := h.ok("transaction_corrections", map[string]any{"limit": 1, "offset": 1})
+	h.want(page, "2", "total")
+	h.want(page, "1", "count")
+	h.want(page, "PAY LAMEI", "corrections", 0, "pattern")
 }
