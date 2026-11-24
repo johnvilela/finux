@@ -569,7 +569,9 @@ func (f TransactionForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		f.suggestTags()
 		return f, nil
 	case key.Matches(press, formKeyMap.Next):
-		if message := f.validate(f.focus); message != "" {
+		// An edit checks the fields when it saves, so the user can
+		// leave a field and come back.
+		if message := f.validate(f.focus); message != "" && !f.edit {
 			f.err = message
 			return f, nil
 		}
@@ -577,6 +579,13 @@ func (f TransactionForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return f.submit()
 		}
 		return f, f.setFocus(fields[index+1])
+	}
+	// The arrows of a field with a suggestion go to the other suggestions.
+	if step := fieldStep(f.edit, press); step != 0 && f.suggestion() == "" {
+		if next := index + step; next >= 0 && next < len(fields) {
+			return f, f.setFocus(fields[next])
+		}
+		return f, nil
 	}
 	if f.isText(f.focus) {
 		return f.updateInput(msg)
@@ -710,6 +719,15 @@ func (f TransactionForm) View() tea.View {
 }
 
 func (f TransactionForm) bindings() []key.Binding {
+	bindings := f.fieldBindings()
+	if f.edit && f.suggestion() == "" {
+		// The keys that save and cancel stay at the end.
+		bindings = slices.Insert(bindings, len(bindings)-2, keyField)
+	}
+	return bindings
+}
+
+func (f TransactionForm) fieldBindings() []key.Binding {
 	switch {
 	case f.suggestion() != "":
 		return []key.Binding{keyAccept, keySuggest, formKeyMap.Save, formKeyMap.Cancel}

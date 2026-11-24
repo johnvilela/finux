@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -391,4 +392,49 @@ func TestTransactionFormUsesTheTerminalWidth(t *testing.T) {
 			t.Fatalf("width %d: the lines have %d to %d columns:\n%s", width, narrowest, widest, plain(view))
 		}
 	}
+}
+
+// In an edit the user goes to a field in any order: the arrows move
+// between the fields, and a field with a mistake does not hold the focus.
+func TestTransactionFormEditMovesFreely(t *testing.T) {
+	options := txOptions()
+	options.Edit = true
+	options.Initial = transaction.Draft{Title: "Market", Type: transaction.Expense, AccountID: 1, CategoryID: 2, Date: "2026-10-01"}
+	options.Value = "50.00"
+	var model tea.Model = NewTransactionForm(options)
+	fields := txForm(t, model).fields()
+	if len(fields) < 4 || txForm(t, model).Focus() != fields[0] {
+		t.Fatalf("fields = %v, focus %v", fields, txForm(t, model).Focus())
+	}
+	model = step(t, model, fields[3], keyDown, keyDown, keyDown)
+	model = step(t, model, fields[1], keyUp, keyUp)
+	model = step(t, model, fields[0], keyUp, keyUp)
+	last := fields[len(fields)-1]
+	model = step(t, model, last, slices.Repeat([]tea.Msg{keyDown}, len(fields)+2)...)
+
+	// An empty title is a mistake, but the user can leave the field.
+	for txForm(t, model).Focus() != TxTitle {
+		model = send(t, model, keyUp)
+	}
+	model = send(t, model, slices.Repeat([]tea.Msg{keyBack}, 10)...)
+	model = send(t, model, keyTab)
+	if f := txForm(t, model); f.Focus() == TxTitle || f.Error() != "" {
+		t.Fatalf("tab with an empty title: focus %v, error %q", f.Focus(), f.Error())
+	}
+	// Save still checks all the fields.
+	model = send(t, model, keySave)
+	if f := txForm(t, model); f.Submitted() || f.Focus() != TxTitle || f.Error() == "" {
+		t.Fatalf("save with an empty title: submitted %v, focus %v, error %q", f.Submitted(), f.Focus(), f.Error())
+	}
+	if view := plain(txForm(t, model).View().Content); !strings.Contains(view, "↑/↓ field") {
+		t.Fatalf("help has no keys for the fields:\n%s", view)
+	}
+}
+
+// A new transaction keeps the order: the arrows do not move between the
+// fields.
+func TestTransactionFormCreateKeepsTheOrder(t *testing.T) {
+	var model tea.Model = NewTransactionForm(txOptions())
+	first := txForm(t, model).Focus()
+	step(t, model, first, keyDown)
 }

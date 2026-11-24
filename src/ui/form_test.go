@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -299,5 +300,47 @@ func TestFormUsesTheTerminalWidth(t *testing.T) {
 		if got := strings.Contains(plain(view), strings.TrimSpace(long)); got != (width > 60) {
 			t.Fatalf("width %d: long text shown = %v:\n%s", width, got, plain(view))
 		}
+	}
+}
+
+// In an edit the user goes to a field in any order: the arrows move
+// between the fields, and a field with a mistake does not hold the focus.
+func TestFormEditMovesFreely(t *testing.T) {
+	var model tea.Model = NewForm(FormOptions{Initial: sampleAccounts()[0], Edit: true, Taken: free})
+	model = send(t, model, keyDown, keyDown)
+	if got := form(t, model).Focus(); got != FieldDescription {
+		t.Fatalf("focus after two downs = %v, want the description", got)
+	}
+	model = send(t, model, keyUp, keyUp, keyUp)
+	if got := form(t, model).Focus(); got != FieldName {
+		t.Fatalf("focus after three ups = %v, want the name", got)
+	}
+	// An empty name is a mistake, but the user can leave the field.
+	model = send(t, model, slices.Repeat([]tea.Msg{keyBack}, 20)...)
+	model = send(t, model, keyTab)
+	if f := form(t, model); f.Focus() != FieldCode || f.Error() != "" {
+		t.Fatalf("focus after tab = %v, error %q; want the code and no error", f.Focus(), f.Error())
+	}
+	// Save still checks all the fields.
+	model = send(t, model, keySave)
+	if f := form(t, model); f.Submitted() || f.Focus() != FieldName || f.Error() == "" {
+		t.Fatalf("save with an empty name: submitted %v, focus %v, error %q", f.Submitted(), f.Focus(), f.Error())
+	}
+	if view := plain(form(t, model).View().Content); !strings.Contains(view, "↑/↓ field") {
+		t.Fatalf("help has no keys for the fields:\n%s", view)
+	}
+}
+
+// A new record keeps the order: a mistake holds the focus, and the
+// arrows do not move between the fields.
+func TestFormCreateKeepsTheOrder(t *testing.T) {
+	var model tea.Model = NewForm(FormOptions{Taken: free})
+	model = send(t, model, keyDown)
+	if got := form(t, model).Focus(); got != FieldName {
+		t.Fatalf("focus after down = %v, want the name", got)
+	}
+	model = send(t, model, keyTab)
+	if f := form(t, model); f.Focus() != FieldName || f.Error() == "" {
+		t.Fatalf("tab with an empty name: focus %v, error %q", f.Focus(), f.Error())
 	}
 }

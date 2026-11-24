@@ -110,6 +110,24 @@ var formKeyMap = formKeys{
 	Toggle: key.NewBinding(key.WithKeys("space", " "), key.WithHelp("space", "pick")),
 }
 
+// keyField moves between the fields of a form that edits a record.
+var keyField = key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "field"))
+
+// fieldStep returns where an arrow moves the focus in a form that edits
+// a record: -1 to the field before, 1 to the next field, 0 for no move.
+// A new record keeps the order of its fields.
+func fieldStep(edit bool, press tea.KeyPressMsg) int {
+	switch {
+	case !edit:
+		return 0
+	case key.Matches(press, formKeyMap.Up):
+		return -1
+	case key.Matches(press, formKeyMap.Down):
+		return 1
+	}
+	return 0
+}
+
 // formColor is one choice of the color field.
 type formColor struct {
 	key, hex string
@@ -847,7 +865,9 @@ func (f Form) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return f, f.setFocus(f.focus - 1)
 	case key.Matches(press, formKeyMap.Next):
-		if message := f.validate(f.Focus()); message != "" {
+		// An edit checks the fields when it saves, so the user can
+		// leave a field and come back.
+		if message := f.validate(f.Focus()); message != "" && !f.edit {
 			f.err = message
 			return f, nil
 		}
@@ -855,6 +875,14 @@ func (f Form) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return f.submit()
 		}
 		return f, f.setFocus(f.focus + 1)
+	}
+	// The arrows of a grid of colors stay in the grid while they can move.
+	inGrid := f.Focus() == FieldColor && !f.colorsInRow() && move(f.color, len(f.colors), press, 0, paletteWidth) != f.color
+	if step := fieldStep(f.edit, press); step != 0 && !inGrid {
+		if next := f.focus + step; next >= 0 && next < len(f.fields) {
+			return f, f.setFocus(next)
+		}
+		return f, nil
 	}
 	switch f.Focus() {
 	case FieldKind:
@@ -979,6 +1007,9 @@ func (f Form) bindings() []key.Binding {
 		} else {
 			bindings = append(bindings, formKeyMap.Up)
 		}
+	}
+	if f.edit {
+		bindings = append(bindings, keyField)
 	}
 	return append(bindings, formKeyMap.Save, formKeyMap.Cancel)
 }
