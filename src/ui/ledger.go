@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	// ledgerWidth is the widest the ledger gets.
+	// ledgerWidth and ledgerRows are the size of the ledger before the
+	// terminal gives its size: the columns, and the lines of days and
+	// transactions. After that the ledger fills the terminal.
 	ledgerWidth = 96
-	// ledgerRows is the most lines of days and transactions it shows.
-	ledgerRows = 20
+	ledgerRows  = 20
 	// ledgerCurrencies is the most currencies the totals show.
 	ledgerCurrencies = 3
 )
@@ -198,11 +199,13 @@ func (l *Ledger) move(row int) {
 func (l Ledger) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		l.width = min(msg.Width, ledgerWidth)
-		// The lines around the list: title, search, totals, status, help
-		// and the empty lines between them.
-		chrome := 7 + l.totalLines
-		l.height = min(ledgerRows, max(4, msg.Height-chrome))
+		l.width = msg.Width
+		l.search.SetWidth(max(20, l.width-12))
+		// The lines around the list: title, search, totals, status, help,
+		// the empty lines between them and the line of the cursor after
+		// the screen.
+		chrome := 8 + l.totalLines
+		l.height = max(4, msg.Height-chrome)
 		l.move(l.cursor)
 		return l, nil
 	case tea.KeyPressMsg:

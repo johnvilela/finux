@@ -19,9 +19,11 @@ import (
 )
 
 const (
+	// selectorWidth and selectorPage are the size of the selector before
+	// the terminal gives its size: the columns, and the records it shows
+	// at a time. After that the selector fills the terminal.
 	selectorWidth = 64
-	// selectorPage is the number of records the selector shows at a time.
-	selectorPage = 5
+	selectorPage  = 5
 )
 
 // Entry is one row of a Selector.
@@ -132,8 +134,10 @@ type Selector struct {
 	search           textinput.Model
 	list             list.Model
 	help             help.Model
-	selected         int
-	cancelled        bool
+	// page is the number of records the terminal has room for.
+	page      int
+	selected  int
+	cancelled bool
 }
 
 // NewSelector builds a selector. singular and plural name the records,
@@ -161,7 +165,7 @@ func NewSelector(title, singular, plural string, entries []Entry) Selector {
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
 
-	s := Selector{title: title, singular: singular, plural: plural, entries: entries, search: search, list: l, help: help.New(), selected: -1}
+	s := Selector{title: title, singular: singular, plural: plural, entries: entries, search: search, list: l, help: help.New(), page: selectorPage, selected: -1}
 	s.filter()
 	return s
 }
@@ -200,7 +204,13 @@ func (s Selector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		s.list.SetWidth(min(msg.Width, selectorWidth))
+		s.list.SetWidth(msg.Width)
+		// The lines around the list: title, search, the empty line,
+		// status, help and the line of the cursor after the screen. A
+		// record has 2 lines and an empty line, and the list has one
+		// line more.
+		s.page = max(1, (msg.Height-7)/3)
+		s.list.SetHeight(min(len(s.entries), s.page)*3 + 1)
 		return s, nil
 	case tea.KeyPressMsg:
 		switch {
@@ -252,7 +262,7 @@ func (s Selector) View() tea.View {
 		records = lipgloss.NewStyle().Height(s.list.Height()).Render(styleDim.Render("  No " + s.plural + " match the search"))
 	}
 	bindings := []key.Binding{selectorKeyMap.Up, selectorKeyMap.Select, selectorKeyMap.Cancel}
-	if total > selectorPage {
+	if total > s.page {
 		bindings = []key.Binding{selectorKeyMap.Up, selectorKeyMap.NextPage, selectorKeyMap.Select, selectorKeyMap.Cancel}
 	}
 	return tea.NewView(strings.Join([]string{

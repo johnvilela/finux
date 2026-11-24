@@ -110,6 +110,36 @@ func TestSelectorShowsFiveAccounts(t *testing.T) {
 	}
 }
 
+func TestSelectorUsesTheTerminal(t *testing.T) {
+	var accounts []account.Account
+	for i := range 12 {
+		code := string(rune('A'+i)) + "Z"
+		accounts = append(accounts, account.Account{Name: "Bank " + code, Code: code, Color: "blue", Currency: "USD"})
+	}
+	var model tea.Model = NewSelector("Accounts", "account", "accounts", AccountEntries(accounts))
+	// A tall terminal shows all the records and no keys for pages.
+	tall := plain(selector(t, send(t, model, tea.WindowSizeMsg{Width: 100, Height: 60})).View().Content)
+	if got := strings.Count(tall, "Bank "); got != 12 || strings.Contains(tall, "pgup") {
+		t.Fatalf("tall terminal shows %d records:\n%s", got, tall)
+	}
+	// The value of a record ends at the right edge.
+	widest := 0
+	for _, line := range strings.Split(tall, "\n") {
+		widest = max(widest, lipglossWidth(strings.TrimRight(line, " ")))
+	}
+	if widest != 98 {
+		t.Fatalf("wide terminal: the widest line has %d columns, want 98:\n%s", widest, tall)
+	}
+	// The records fill the height and the screen stays in the terminal.
+	for _, size := range []int{10, 13, 22, 30} {
+		view := plain(selector(t, send(t, model, tea.WindowSizeMsg{Width: 100, Height: size})).View().Content)
+		want := (size - 7) / 3
+		if got := strings.Count(view, "Bank "); got != want || strings.Count(view, "\n") >= size || !strings.Contains(view, "pgup") {
+			t.Fatalf("height %d: %d records, want %d, in %d lines:\n%s", size, got, want, strings.Count(view, "\n"), view)
+		}
+	}
+}
+
 func TestSelectorOfCategories(t *testing.T) {
 	categories := []category.Category{
 		{ID: 1, Name: "Food", Code: "FOOD", Color: "red", Description: "Groceries"},

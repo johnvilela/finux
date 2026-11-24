@@ -535,7 +535,13 @@ func (f *TransactionForm) suggestTags() {
 // Update handles a key or a timer message.
 func (f TransactionForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		f.width = min(size.Width, formWidth)
+		f.width = size.Width
+		for field, input := range f.inputs {
+			input.SetWidth(inputRoom(f.width))
+			// The input then shows the text again from the new width.
+			input.SetCursor(input.Position())
+			f.inputs[field] = input
+		}
 		return f, nil
 	}
 	press, ok := msg.(tea.KeyPressMsg)

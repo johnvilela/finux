@@ -51,11 +51,13 @@ type Settings struct {
 	saved, done bool
 	// problem tells why the screen did not save.
 	problem string
+	// width is the width of the box: the columns of the terminal.
+	width int
 }
 
 // NewSettings builds the settings screen.
 func NewSettings(rows []SettingRow) Settings {
-	s := Settings{rows: slices.Clone(rows)}
+	s := Settings{rows: slices.Clone(rows), width: formWidth}
 	for i := range s.rows {
 		s.rows[i].start = s.rows[i].Value
 	}
@@ -165,6 +167,10 @@ func (s Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return s, nil
 	}
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		s.width = size.Width
+		return s, nil
+	}
 	press, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return s, nil
@@ -239,12 +245,12 @@ func (s Settings) View() tea.View {
 			keys = "↑/↓ move • ←/→ pick • type or paste • ctrl+u clear • enter save • esc cancel"
 		}
 	}
-	lines = append(lines, "", styleDim.Width(formWidth-6).Render(s.rows[s.focus].Description))
+	lines = append(lines, "", styleDim.Width(s.width-6).Render(s.rows[s.focus].Description))
 	if s.problem != "" {
-		lines = append(lines, "", lipgloss.NewStyle().Foreground(colorError).Width(formWidth-6).Render(s.problem))
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(colorError).Width(s.width-6).Render(s.problem))
 	}
 	lines = append(lines, "", styleDim.Render(keys))
-	return tea.NewView(styleBox.Width(formWidth).Render(strings.Join(lines, "\n")) + "\n")
+	return tea.NewView(styleBox.Width(s.width).Render(strings.Join(lines, "\n")) + "\n")
 }
 
 // field renders the value of a text setting.

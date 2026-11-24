@@ -73,7 +73,9 @@ var otherFields = append(slices.Clone(goalFields), budgetFields...)
 const (
 	labelWidth   = 17
 	paletteWidth = 4
-	formWidth    = 78
+	// formWidth is the width of a form before the terminal gives its
+	// size. After that the form has the width of the terminal.
+	formWidth = 78
 )
 
 // FormOptions configures an account form.
@@ -812,10 +814,21 @@ func (f Form) submit() (tea.Model, tea.Cmd) {
 	return f, tea.Quit
 }
 
+// inputRoom is the width of a text input in a form that has width
+// columns: the room after the border, the padding, the label and the
+// cursor at the end of the text.
+func inputRoom(width int) int { return max(20, width-7-labelWidth) }
+
 // Update handles a key or a timer message.
 func (f Form) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		f.width = min(size.Width, formWidth)
+		f.width = size.Width
+		for field, input := range f.inputs {
+			input.SetWidth(inputRoom(f.width))
+			// The input then shows the text again from the new width.
+			input.SetCursor(input.Position())
+			f.inputs[field] = input
+		}
 		return f, nil
 	}
 	press, ok := msg.(tea.KeyPressMsg)

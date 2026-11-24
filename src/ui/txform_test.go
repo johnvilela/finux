@@ -382,3 +382,13 @@ func TestTransactionFormVirtualCard(t *testing.T) {
 		t.Fatalf("submitted %v, error %q, draft = %+v", f.Submitted(), f.Error(), got)
 	}
 }
+
+func TestTransactionFormUsesTheTerminalWidth(t *testing.T) {
+	var model tea.Model = NewTransactionForm(txOptions())
+	for _, width := range []int{60, 120, 200} {
+		view := txForm(t, send(t, model, tea.WindowSizeMsg{Width: width, Height: 40})).View().Content
+		if narrowest, widest := boxWidths(view); narrowest != width || widest != width {
+			t.Fatalf("width %d: the lines have %d to %d columns:\n%s", width, narrowest, widest, plain(view))
+		}
+	}
+}

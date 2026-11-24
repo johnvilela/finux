@@ -273,3 +273,31 @@ func TestCategoryFormValidationAndEdit(t *testing.T) {
 		t.Fatalf("preset category = %+v", f.Category())
 	}
 }
+
+// boxWidths returns the width of the narrowest and the widest line of a
+// screen in a box.
+func boxWidths(view string) (narrowest, widest int) {
+	lines := strings.Split(strings.TrimRight(plain(view), "\n"), "\n")
+	narrowest = lipglossWidth(lines[0])
+	for _, line := range lines {
+		narrowest, widest = min(narrowest, lipglossWidth(line)), max(widest, lipglossWidth(line))
+	}
+	return narrowest, widest
+}
+
+func TestFormUsesTheTerminalWidth(t *testing.T) {
+	long := strings.Repeat("long text ", 7)
+	var model tea.Model = NewForm(FormOptions{Title: "New account", Taken: free})
+	model = send(t, model, append(text("Banco Inter"), keyTab, keyTab)...)
+	model = send(t, model, text(long)...)
+	for _, width := range []int{60, 120, 200} {
+		view := form(t, send(t, model, tea.WindowSizeMsg{Width: width, Height: 40})).View().Content
+		if narrowest, widest := boxWidths(view); narrowest != width || widest != width {
+			t.Fatalf("width %d: the lines have %d to %d columns:\n%s", width, narrowest, widest, plain(view))
+		}
+		// A wide form shows all of a long text.
+		if got := strings.Contains(plain(view), strings.TrimSpace(long)); got != (width > 60) {
+			t.Fatalf("width %d: long text shown = %v:\n%s", width, got, plain(view))
+		}
+	}
+}

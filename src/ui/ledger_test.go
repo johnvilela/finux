@@ -202,6 +202,23 @@ func TestLedgerScrollsAndFits(t *testing.T) {
 	if view := ledgerView(t, send(t, model, text("Purchase 07")...)); strings.Count(view, "\n") != height {
 		t.Fatalf("height changed with the search:\n%s", view)
 	}
+	// A tall and wide terminal is all in use: the screen has one line
+	// less than the terminal, for the cursor after the last line, and the
+	// amounts end 2 columns before the right edge, as the left margin.
+	tall := ledgerView(t, send(t, model, tea.WindowSizeMsg{Width: 120, Height: 50}))
+	if got := strings.Count(tall, "\n"); got != 49 {
+		t.Fatalf("tall terminal: %d lines, want 49:\n%s", got, tall)
+	}
+	if got := strings.Count(tall, "Purchase"); got < 19 {
+		t.Fatalf("tall terminal shows %d transactions:\n%s", got, tall)
+	}
+	widest := 0
+	for _, line := range strings.Split(tall, "\n") {
+		widest = max(widest, lipglossWidth(strings.TrimRight(line, " ")))
+	}
+	if widest != 118 {
+		t.Fatalf("wide terminal: the widest line has %d columns, want 118:\n%s", widest, tall)
+	}
 	// A small terminal shows fewer rows.
 	small := send(t, model, tea.WindowSizeMsg{Width: 70, Height: 18})
 	view := ledgerView(t, small)
