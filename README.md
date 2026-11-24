@@ -1253,7 +1253,10 @@ lunch with Nubank" or "how was my month".
 and the rules ([concepts.md](docs/agents/concepts.md)), the MCP tools
 ([tools.md](docs/agents/tools.md)) and the CLI commands for an agent
 ([access.md](docs/agents/access.md)). Each skill has a copy in its
-`references` folder. `tools.md` and the copies are generated: after a
+`references` folder. The skills that create or tidy transactions also
+learn your names: they keep in ai-memory which raw line of a bank is
+which name, category and tags ([names.md](docs/agents/names.md)), and
+they ask you about a line they do not know. `tools.md` and the copies are generated: after a
 change to a tool or to `docs/agents`, run `make docs`. The tests fail when
 they are out of date, or when a skill names a tool that does not exist.
 

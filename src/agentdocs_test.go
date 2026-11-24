@@ -32,6 +32,19 @@ var skillNames = []string{
 // copy of, so that an installed skill works without the repository.
 var sharedReferences = []string{"access.md", "concepts.md", "tools.md"}
 
+// nameSkills lists the skills that give a title and tags to a
+// transaction. They also have a copy of names.md: how to learn the
+// names and the tags of the user.
+var nameSkills = []string{"finux-import-statement", "finux-log-transactions", "finux-tidy-transactions"}
+
+// references lists the files of docs/agents that a skill has a copy of.
+func references(skill string) []string {
+	if slices.Contains(nameSkills, skill) {
+		return append(slices.Clone(sharedReferences), "names.md")
+	}
+	return sharedReferences
+}
+
 func updateDocs() bool { return os.Getenv("FINUX_UPDATE_DOCS") != "" }
 
 // toolReference writes the reference of the MCP tools from their schemas.
@@ -129,12 +142,12 @@ func TestAgentToolReferenceIsCurrent(t *testing.T) {
 }
 
 func TestAgentSkillReferencesAreCopies(t *testing.T) {
-	for _, name := range sharedReferences {
-		source, err := os.ReadFile(filepath.Join(agentDocs, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, skill := range skillNames {
+	for _, skill := range skillNames {
+		for _, name := range references(skill) {
+			source, err := os.ReadFile(filepath.Join(agentDocs, name))
+			if err != nil {
+				t.Fatal(err)
+			}
 			current(t, filepath.Join(agentSkills, skill, "references", name), string(source))
 		}
 	}
@@ -181,7 +194,7 @@ func TestAgentSkills(t *testing.T) {
 		if lines := strings.Count(string(content), "\n"); lines > 300 {
 			t.Errorf("%s: %d lines; move details to references/", path, lines)
 		}
-		for _, reference := range sharedReferences {
+		for _, reference := range references(skill) {
 			if !strings.Contains(string(content), "(references/"+reference+")") {
 				t.Errorf("%s: no link to references/%s", path, reference)
 			}

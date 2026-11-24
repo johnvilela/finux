@@ -1,6 +1,6 @@
 ---
 name: finux-import-statement
-description: Imports a bank statement or a credit card statement into Finux, the personal finance manager of the user, from a PDF, a CSV, an OFX file, a spreadsheet, a screenshot or pasted text. Use it for "import this statement", "load my bank extract", "add the transactions of this PDF", "import my card bill", "here is my statement". It extracts the rows, skips the transactions that Finux already has, proposes categories from the history, shows a draft, creates the transactions after the user approves and reconciles the result with the statement.
+description: Imports a bank statement or a credit card statement into Finux, the personal finance manager of the user, from a PDF, a CSV, an OFX file, a spreadsheet, a screenshot or pasted text. Use it for "import this statement", "load my bank extract", "add the transactions of this PDF", "import my card bill", "here is my statement". It extracts the rows, skips the transactions that Finux already has, gives each row a readable name, a category and tags from what it learned before, asks about the rows it does not know, shows a draft, creates the transactions after the user approves and reconciles the result with the statement.
 ---
 
 # Import a statement into Finux
@@ -15,6 +15,9 @@ duplicates, and prove the result with the totals of the statement.
 - The rules of money, dates, transfers and bills are in
   [references/concepts.md](references/concepts.md). The arguments of each
   tool are in [references/tools.md](references/tools.md).
+- The names and the tags that the user gave before are in ai-memory.
+  [references/names.md](references/names.md) tells how to read them, how
+  to ask about a line you do not know, and how to save the answer.
 - A statement has private data. Do not repeat account numbers, document
   numbers or addresses in your replies, and do not put them in a title or
   a description.
@@ -148,18 +151,28 @@ similar title is a probable duplicate: put it in a list of doubts for the
 user. Two rows of the statement that are equal are two transactions:
 match each one against a different Finux transaction.
 
-### 5. Give each row a title, a category and a type
+### 5. Give each row a title, a category, tags and a type
 
-- Title: the merchant in clean words, at most 60 characters. Remove
-  codes, card numbers and city names from the raw text
-  (`PAG*MERCADOLIVRE 0423 SAO PAULO` becomes `Mercado Livre`). When
+A statement prints raw lines (`PAY LAMEI 21/11`). The user must be able
+to read each title later. Follow
+[references/names.md](references/names.md): read the rules, match each
+row, and make the questions for the rows that are not sure.
+
+- Title: the title of the rule that matches. Without a rule, the
+  merchant in clean words, at most 60 characters: remove codes, card
+  numbers and city names from the raw text
+  (`PAG*MERCADOLIVRE 0423 SAO PAULO` becomes `Mercado Livre`), and when
   `transaction_suggestions` has a title for the same merchant, use that
-  exact title.
-- Category: the category that the same title has in the history
-  (`transaction_list` with `search`), then the best match by meaning from
-  `category_list`. For a row you cannot place, use `OTHER`.
+  exact title. For a line that is cut or is a code, do not invent a
+  title: ask, with a name you suggest.
+- Category: the category of the rule, then the category that the same
+  title has in the history (`transaction_list` with `search`), then the
+  best match by meaning from `category_list`. For a row you cannot
+  place, use `OTHER`.
 - Type: expense or income from the direction. A grey category needs it.
-- Tags: only the tags the same title had before.
+- Tags: the tags of the rule, then the tags the same title had before.
+  For a row with no tags, suggest tags as names.md tells; a suggestion
+  needs a yes.
 - Virtual card: in a credit card statement that marks the purchases of a
   virtual card (a section or a label such as "cartão virtual"), send
   `virtual: true` for these rows. Do not guess it from the merchant.
@@ -169,11 +182,19 @@ match each one against a different Finux transaction.
 Show a summary first: rows in the statement, rows dropped and why, rows
 already in Finux, rows to create, and the totals in and out of the rows to
 create. Then the table of the rows to create: date, title, value, type,
-category. Then the doubts: probable duplicates, rows in `OTHER`, text you
-could not read. For more than 40 rows, show the table in groups by
+category, tags, and where the name came from (`rule`, `new name`). Then
+the questions about the names: the rows with no rule that you cannot
+read, each with the raw text and the name, the category and the tags you
+suggest. Then the other doubts: probable duplicates, rows in `OTHER`,
+tags that are only a suggestion, text you could not read. For more than 40 rows, show the table in groups by
 category or offer the full table as a file.
 
 Wait for the user to approve or to correct. Create nothing before that.
+A row that keeps a raw title after the answers stays in the doubts of the
+report.
+
+Then save the names, the categories and the tags that the user gave or
+approved as rules, as names.md tells. Show the rules you save.
 
 ### 7. Create
 

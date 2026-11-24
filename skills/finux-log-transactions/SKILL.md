@@ -15,6 +15,9 @@ approves a draft before you write.
 - The rules of money, dates, types and bills are in
   [references/concepts.md](references/concepts.md). The arguments of each
   tool are in [references/tools.md](references/tools.md).
+- The names and the tags that the user gave before are in ai-memory.
+  [references/names.md](references/names.md) tells how to read them, how
+  to ask about a name you do not know, and how to save the answer.
 
 ## Steps
 
@@ -23,22 +26,37 @@ approves a draft before you write.
 Call `account_list`, `credit_card_list`, `category_list`, `goal_list`,
 `schedule_list` and `transaction_suggestions`. Keep the results: they give the codes, the
 currencies, the goals, and the titles and tags the user already uses.
+Read the rules of names too, as names.md tells.
 
 ### 2. Make a draft for each transaction
 
 | Field | How to find it |
 | --- | --- |
-| `title` | Short name of the merchant or the item, at most 60 characters. When `transaction_suggestions` has a title for the same thing, use that exact title |
+| `title` | Short name of the merchant or the item, at most 60 characters. See below |
 | `value` | The amount, positive, as a decimal string in the currency of the account |
 | `date` | What the user says ("yesterday", "on the 5th"). Default: today. Send `YYYY-MM-DD` |
 | `account` | The account or the credit card that paid. See below |
 | `category` | The category that fits. See below |
 | `type` | Only for a grey category, or to make the direction clear |
-| `tags` | Only tags the user gives, or tags the same title had before |
+| `tags` | Tags the user gives, the tags of the rule, or tags the same title had before. See below |
 | `description` | Details that do not fit the title. Usually empty |
 | `goal` | Only when the user says the money is for a goal. See below |
 | `virtual` | `true` only for a purchase on a credit card that the user says was made with a virtual card |
 | `installments` | Only for a purchase or an income in monthly parts. See below |
+
+**Title.** The title must be a name the user can read later. When the
+text is a raw line of a bank (a notification, a line the user pasted,
+`PAY LAMEI 21/11`), look for a rule that matches and use its title, its
+category and its tags. Without a rule, use the exact title that
+`transaction_suggestions` has for the same thing. When you cannot tell
+what the line is, do not invent a title: ask, and suggest a name. When
+the user answers, save the rule, as names.md tells.
+
+**Tags.** Suggest tags for each draft: the tags of the rule, then the
+tags the same title had before, then one or two tags the user already
+has that fit. Mark a tag that is only a suggestion; write it only after
+a yes. When the user gives the same tags to a name two times, or says
+"always", save them in the rule.
 
 **Account or credit card.** Use what the user names ("on the Visa", "from
 Nubank", "cash"). Without a name, look at the last transactions with the
