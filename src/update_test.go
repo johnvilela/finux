@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"finux/src/storage"
+	"finux/src/telegram"
 )
 
 // versionedBinary builds the CLI with a version, as a release does.
@@ -510,4 +513,95 @@ func TestUpdateRefresh(t *testing.T) {
 	if status != 0 || !strings.Contains(stdout, "1 agent session still runs the old MCP server.") || !strings.Contains(stdout, "Start a new session") {
 		t.Fatalf("refresh with one MCP server: status %d, stdout %q", status, stdout)
 	}
+}
+
+func TestUpdateRefreshMigrates(t *testing.T) {
+	home := t.TempDir()
+	database := filepath.Join(home, "data", "finux.db")
+	path, _ := fakeSystemd(t)
+	env := []string{"HOME=" + home, "PATH=" + path, "FINUX_PROC=" + fakeProcesses(t), "FINUX_DB=" + database}
+	backups := func() []string {
+		found, _ := filepath.Glob(database + ".backup-*")
+		return found
+	}
+	// No database: the refresh creates none.
+	if stdout, stderr, status := finuxEnv(t, env, "update", "--refresh"); status != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("refresh without a database: status %d, stdout %q, stderr %q", status, stdout, stderr)
+	}
+	if _, err := os.Stat(database); err == nil {
+		t.Fatal("the refresh created a database")
+	}
+	// A database that is up to date gets no copy and no message.
+	if _, stderr, status := finuxEnv(t, env, "init"); status != 0 {
+		t.Fatalf("init: %s", stderr)
+	}
+	if stdout, stderr, status := finuxEnv(t, env, "update", "--refresh"); status != 0 || stdout != "" || stderr != "" || len(backups()) != 0 {
+		t.Fatalf("refresh of a current database: status %d, stdout %q, stderr %q, copies %v", status, stdout, stderr, backups())
+	}
+
+	// A database of an older version: the refresh keeps a copy and
+	// applies the migrations.
+	older := func() []byte {
+		t.Helper()
+		db, err := storage.Open(database)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Migrator().DropTable(&telegram.Pairing{}); err != nil {
+			t.Fatal(err)
+		}
+		closeDatabase(db)
+		content, err := os.ReadFile(database)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return content
+	}
+	before := older()
+	if stdout, _, status := finuxEnv(t, env, "config", "doctor"); status != 1 || !strings.Contains(stdout, "Migrations pending") {
+		t.Fatalf("the test database is not out of date: %q", stdout)
+	}
+	stdout, stderr, status := finuxEnv(t, env, "update", "--refresh")
+	copies := backups()
+	if status != 0 || stderr != "" || len(copies) != 1 {
+		t.Fatalf("refresh of an old database: status %d, stderr %q, copies %v", status, stderr, copies)
+	}
+	for _, text := range []string{"✓ Database updated: " + database + "\n", "Copy of the database: " + copies[0], "Delete it when the new version works for you."} {
+		if !strings.Contains(stdout, text) {
+			t.Errorf("refresh output lacks %q:\n%s", text, stdout)
+		}
+	}
+	if got, _ := os.ReadFile(copies[0]); string(got) != string(before) {
+		t.Error("the copy is not the database from before the migrations")
+	}
+	if mode(t, copies[0]) != mode(t, database) {
+		t.Errorf("the copy has the mode %v, the database %v", mode(t, copies[0]), mode(t, database))
+	}
+	if stdout, _, status := finuxEnv(t, env, "config", "doctor"); status != 0 {
+		t.Fatalf("the database is not up to date after the refresh: %q", stdout)
+	}
+
+	// When the migrations fail, the database is as it was and the status
+	// tells the failure.
+	os.Remove(copies[0])
+	before = older()
+	if err := os.Chmod(database, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, status = finuxEnv(t, env, "update", "--refresh")
+	if status != 1 || !strings.Contains(stderr, "finux: update: ") || !strings.Contains(stderr, "The database is as it was") || strings.Contains(stdout, "Database updated") {
+		t.Fatalf("refresh with failed migrations: status %d, stdout %q, stderr %q", status, stdout, stderr)
+	}
+	if got, _ := os.ReadFile(database); string(got) != string(before) || len(backups()) != 0 {
+		t.Fatalf("after failed migrations: database changed or copies left: %v", backups())
+	}
+}
+
+func mode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Mode().Perm()
 }

@@ -56,7 +56,9 @@ do not run those commands again:
   agent gets the new server and the new skills in a new session.
 
 `finux update --refresh` does these steps again without a new version, for
-example after you build the binary from source.
+example after you build the binary from source. It also applies the
+database migrations when the database is of an older version, with a copy
+of the database first.
 
 To uninstall, delete `~/.local/bin/finux`. Your data is in `~/.finux`.
 

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"finux/src/storage"
 	"finux/src/ui"
 )
 
@@ -48,6 +49,9 @@ the new binary in the place of this one. When it fails, the script puts the
 database back and this version stays.
 
 After the install, the new version refreshes what Finux installed:
+- It applies its database migrations, with a copy of the database first,
+  when the database is of an older version. After the install script this
+  step finds nothing to do.
 - It writes the skills again for each agent that has them (claude, codex,
   opencode). A skills folder you gave with --dir needs
   'finux config skills install --dir' again.
@@ -236,10 +240,55 @@ func update(check bool, io streams) error {
 	return nil
 }
 
-// refresh makes what Finux installed use this version: the skills of
-// the agents and the daemon. It tells about the MCP servers that it
-// cannot start again. A step that fails does not stop the next ones.
+// migrateDatabase applies the migrations of this version to a database
+// of an older one. It keeps a copy of the database first, beside it, and
+// puts the database back when the migrations fail. It does nothing
+// without a database, or with one that is up to date.
+func migrateDatabase(io streams) error {
+	path, err := databasePath()
+	if err != nil {
+		return err
+	}
+	db, err := storage.Open(path)
+	if errors.Is(err, storage.ErrNotInitialized) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	pending, err := storage.Pending(db, models...)
+	closeDatabase(db)
+	if err != nil || len(pending) == 0 {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("copy the database: %w", err)
+	}
+	backup := path + ".backup-" + time.Now().Format("20060102-150405")
+	if err := os.WriteFile(backup, content, info.Mode().Perm()); err != nil {
+		return fmt.Errorf("copy the database to %s: %w", backup, err)
+	}
+	if _, err := setupDatabase(path); err != nil {
+		if os.Rename(backup, path) != nil {
+			return fmt.Errorf("%w. The copy of the database from before is %s", err, backup)
+		}
+		return fmt.Errorf("%w. The database is as it was", err)
+	}
+	_, err = fmt.Fprint(io.stdout, ui.Success("Database updated: "+path)+"\n"+
+		ui.Hint("Copy of the database: "+backup)+"\n"+ui.Hint("Delete it when the new version works for you.")+"\n")
+	return err
+}
+
+// refresh makes what Finux installed use this version: the database,
+// the skills of the agents and the daemon. It tells about the MCP
+// servers that it cannot start again. A step that fails does not stop
+// the next ones.
 func refresh(io streams) error {
+	databaseErr := migrateDatabase(io)
 	changed, skillsErr := refreshSkills(io)
 	_, daemonErr := restartDaemon(io)
 	stdio, served := mcpProcesses()
@@ -260,5 +309,5 @@ func refresh(io streams) error {
 	for _, line := range lines {
 		fmt.Fprintln(io.stdout, ui.Hint(line))
 	}
-	return errors.Join(skillsErr, daemonErr)
+	return errors.Join(databaseErr, skillsErr, daemonErr)
 }
