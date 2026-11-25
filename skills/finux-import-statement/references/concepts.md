@@ -170,8 +170,8 @@ installments.
 - On a credit card, each part goes to the bill after the one before: the
   first part to the bill of its date, the second to the next bill. All the
   parts count in `used` from the first day, so the limit goes down by the
-  total. A purchase with `off_limit` is the exception: none of its parts
-  count in `used`.
+  total. A purchase with `off_limit` is the exception: a part counts
+  in `used` only from the day its bill is the current one.
 - On an account, a part changes the balance on its date.
 - Each part counts by itself in the totals and in the budgets, in the
   month of its date. So a purchase of 1200 in 10 parts is an expense of 120
@@ -229,11 +229,14 @@ transactions go to bills.
 - `used` is the total of the bills that are not paid, also the future
   bills that hold the parts of a purchase in installments. `available` is
   the limit less `used`.
-- A transaction with `off_limit: true` does not use the limit, for example
-  a purchase in installments that the shop finances through the card. It
-  is in its bill, in `spent` and `total` of the bill and in the payment,
-  but not in `used` and `available`. The field `off_limit` of the card is
-  the total of these transactions in the bills that are not paid. Set
+- A transaction with `off_limit: true` does not use the limit while its
+  bill is a future one, for example a purchase in installments that the
+  shop finances through the card: the bank takes each part from the limit
+  when its bill comes. It is in its bill, in `spent` and `total` of the
+  bill and in the payment. It counts in `used` and `available` when its
+  bill is the current one or an older one that is not paid, and not when
+  its bill is after the current one. The field `off_limit` of the card is
+  the total of these transactions in the bills after the current one. Set
   `off_limit` only when the user tells that a purchase does not use the
   limit. Only a transaction of a credit card can have it.
 - When a bill is paid in part, the rest goes to `carried` of the next
@@ -499,8 +502,8 @@ that the call created or changed.
 
 **Credit card:** `id`, `code`, `name`, `description`, `color`, `currency`,
 `archived`, `owner` (empty for a credit card of the user), `limit`, `used`,
-`available`, `off_limit` (the total outside the limit in the bills that are
-not paid; `used` does not count it), `closing_day`, `due_day`.
+`available`, `off_limit` (the total outside the limit in the bills after
+the current one; `used` does not count it), `closing_day`, `due_day`.
 
 **Bill:** `period` (`YYYY-MM`), `closes_on`, `due_on`, `status`, `carried`,
 `spent`, `total`. A paid bill also has `paid_on`, `paid`, `remaining` (the
@@ -508,7 +511,8 @@ value that went to the next bill) and `payment_id`. The open bill of
 `credit_card_show` also has `transactions`, and `virtual_total` when it has
 purchases made with a virtual card: the sum of these purchases, positive
 as `spent` is. A bill with transactions outside the limit also has
-`off_limit`: the part of `total` that does not use the limit.
+`off_limit`: the part of `total` with the mark. It uses the limit when
+the bill is not a future one.
 
 **Goal:** `id`, `code`, `title`, `description`, `type`, `currency`,
 `archived`, `target`, `progress`, `remaining`, `percent`, `status`,

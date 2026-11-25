@@ -1116,11 +1116,12 @@ func TestMCPOffLimit(t *testing.T) {
 	h.want(list, "1", "total")
 	h.want(list, "Market", "transactions", 0, "title")
 
-	// The bill has the purchase. The limit in use does not.
+	// The part in the open bill uses the limit. The parts in the future
+	// bills do not.
 	card := h.ok("credit_card_show", map[string]any{"credit_card": "VISA"})
-	h.want(card, "10000", "credit_card", "used", "minor")
-	h.want(card, "490000", "credit_card", "available", "minor")
-	h.want(card, "120000", "credit_card", "off_limit", "minor")
+	h.want(card, "22000", "credit_card", "used", "minor")
+	h.want(card, "478000", "credit_card", "available", "minor")
+	h.want(card, "108000", "credit_card", "off_limit", "minor")
 	h.want(card, "22000", "open_bill", "total", "minor")
 	h.want(card, "12000", "open_bill", "off_limit", "minor")
 

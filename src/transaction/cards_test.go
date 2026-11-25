@@ -428,6 +428,7 @@ func TestVirtualCard(t *testing.T) {
 
 func TestOffLimitCard(t *testing.T) {
 	f := newFixture(t)
+	t.Setenv("FINUX_TODAY", "2026-11-17")
 	// Only a transaction in a credit card can have the mark.
 	inAccount := f.draft("Repair", Expense, "INTER", "OTHER", 100)
 	inAccount.OffLimit = true
@@ -435,20 +436,28 @@ func TestOffLimitCard(t *testing.T) {
 	wantError(t, "off limit in an account", err, "only a credit card transaction can be outside the limit")
 
 	f.create(t, f.purchase("Market", "VISA", "FOOD", 10000, "2026-11-17"))
-	draft := f.purchase("Repair", "VISA", "OTHER", 30000, "2026-11-17")
+	// The purchase is in the bill after the current one.
+	draft := f.purchase("Repair", "VISA", "OTHER", 30000, "2026-11-26")
 	draft.OffLimit = true
 	repair := f.create(t, draft)
 	if stored, err := f.store.Find(repair.ID); err != nil || !repair.OffLimit || !stored.OffLimit || !DraftOf(stored.Transaction).OffLimit {
 		t.Fatalf("created = %+v, stored = %+v, %v", repair, stored, err)
 	}
 
-	// The bill has the purchase. The limit in use does not.
-	if bill := f.bill(t, repair.BillID); bill.Spent != 40000 || bill.Total() != 40000 || bill.OffLimit != 30000 {
+	// The bill has the purchase. The limit in use does not, while the
+	// bill is a future one.
+	if bill := f.bill(t, repair.BillID); bill.Spent != 30000 || bill.Total() != 30000 || bill.OffLimit != 30000 {
 		t.Fatalf("bill = %+v", bill)
 	}
 	if visa := f.visa(t); visa.Used != 10000 || visa.OffLimit != 30000 || visa.Available() != 490000 {
 		t.Fatalf("card used = %d, off limit = %d, available = %d", visa.Used, visa.OffLimit, visa.Available())
 	}
+	// The purchase uses the limit from the day its bill is the current one.
+	t.Setenv("FINUX_TODAY", "2026-11-26")
+	if visa := f.visa(t); visa.Used != 40000 || visa.OffLimit != 0 {
+		t.Fatalf("in the current bill: used = %d, off limit = %d", visa.Used, visa.OffLimit)
+	}
+	t.Setenv("FINUX_TODAY", "2026-11-17")
 
 	// An edit keeps the mark, and can take it away.
 	next := DraftOf(repair)
@@ -474,17 +483,18 @@ func TestOffLimitCard(t *testing.T) {
 	wantError(t, "off limit moved to an account", err, "only a credit card transaction")
 
 	// The payment of the bill has the purchase.
-	payment, err := f.store.PayBill(repair.BillID, f.account["INTER"], 0, "2026-12-01")
-	if err != nil || payment.Amount != -40000 {
+	payment, err := f.store.PayBill(repair.BillID, f.account["INTER"], 0, "2027-01-02")
+	if err != nil || payment.Amount != -30000 {
 		t.Fatalf("payment = %+v, %v", payment, err)
 	}
-	if visa := f.visa(t); visa.Used != 0 || visa.OffLimit != 0 {
+	if visa := f.visa(t); visa.Used != 10000 || visa.OffLimit != 0 {
 		t.Fatalf("after the payment: used = %d, off limit = %d", visa.Used, visa.OffLimit)
 	}
 }
 
 func TestOffLimitInstallments(t *testing.T) {
 	f := newFixture(t)
+	t.Setenv("FINUX_TODAY", "2026-11-17")
 	draft := f.purchase("Car repair", "VISA", "OTHER", 120000, "2026-11-17")
 	draft.OffLimit, draft.Installments = true, 10
 	car := f.parts(t, f.create(t, draft).ID)
@@ -497,9 +507,17 @@ func TestOffLimitInstallments(t *testing.T) {
 		}
 	}
 	marks(true)
-	if visa := f.visa(t); visa.Used != 0 || visa.OffLimit != 120000 {
+	// The part in the current bill uses the limit. The parts in the
+	// future bills do not.
+	if visa := f.visa(t); visa.Used != 12000 || visa.OffLimit != 108000 {
 		t.Fatalf("card used = %d, off limit = %d", visa.Used, visa.OffLimit)
 	}
+	// Two months later, the bills of the parts 2 and 3 are not future ones.
+	t.Setenv("FINUX_TODAY", "2027-01-10")
+	if visa := f.visa(t); visa.Used != 36000 || visa.OffLimit != 84000 {
+		t.Fatalf("two months later: used = %d, off limit = %d", visa.Used, visa.OffLimit)
+	}
+	t.Setenv("FINUX_TODAY", "2026-11-17")
 	if _, err := f.store.PayBill(car[0].BillID, f.account["INTER"], 0, "2026-12-01"); err != nil {
 		t.Fatal(err)
 	}

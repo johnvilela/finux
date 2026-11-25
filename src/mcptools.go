@@ -105,7 +105,7 @@ type cardJSON struct {
 	Used      cashJSON `json:"used"`
 	Available cashJSON `json:"available"`
 	// OffLimit is the total of the transactions outside the limit in the
-	// bills that are not paid. Used does not count it.
+	// bills after the current one. Used does not count it.
 	OffLimit   cashJSON `json:"off_limit"`
 	ClosingDay int      `json:"closing_day"`
 	DueDay     int      `json:"due_day"`
@@ -137,8 +137,8 @@ type billJSON struct {
 	// VirtualTotal is the sum of the transactions made with a virtual
 	// card. It is only in an open bill that has them.
 	VirtualTotal *cashJSON `json:"virtual_total,omitempty"`
-	// OffLimit is the part of the total that is outside the limit of the
-	// card. It is only in a bill that has such transactions.
+	// OffLimit is the part of the total with the mark of a transaction
+	// outside the limit. It is only in a bill that has such transactions.
 	OffLimit *cashJSON `json:"off_limit,omitempty"`
 }
 
@@ -991,7 +991,7 @@ func transactionTools() []mcp.Tool {
 		InstallmentValue *string `json:"installment_value,omitempty" mcp:"With installments: the amount of one part, in place of value"`
 		FirstInstallment *int    `json:"first_installment,omitempty" mcp:"With installments, for a purchase that is already in progress: the first part to create. date is then the date of that part. Default: 1"`
 		Virtual          *bool   `json:"virtual,omitempty" mcp:"true when the person paid with a virtual card of the credit card. Only for a transaction of a credit card. Default: false"`
-		OffLimit         *bool   `json:"off_limit,omitempty" mcp:"true when the transaction does not use the limit of the credit card, for example a purchase that the shop finances. It stays in its bill. Only for a transaction of a credit card. With installments, all the parts get it. Default: false"`
+		OffLimit         *bool   `json:"off_limit,omitempty" mcp:"true when the transaction does not use the limit of the credit card before its bill is the current one, for example a purchase in installments that the shop finances. It stays in its bill. Only for a transaction of a credit card. With installments, all the parts get it. Default: false"`
 	}
 	type editArguments struct {
 		ID               uint    `json:"id" mcp:"Id of the transaction"`

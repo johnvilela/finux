@@ -100,9 +100,9 @@ type Transaction struct {
 	// credit card. Only a transaction of a credit card can have it.
 	Virtual bool
 	// OffLimit tells that the transaction does not use the limit of the
-	// credit card. It stays in its bill. Only a transaction of a credit
-	// card can have it, and all the parts of a transaction in
-	// installments have the same value.
+	// credit card while its bill is a future one. It stays in its bill.
+	// Only a transaction of a credit card can have it, and all the parts
+	// of a transaction in installments have the same value.
 	OffLimit bool
 	// Date is the day of the transaction as YYYY-MM-DD.
 	Date string `gorm:"size:10;index"`
@@ -378,6 +378,9 @@ func StatusOn(date, today string) string {
 	}
 	return StatusCleared
 }
+
+// The credit cards use the same date of today as the transactions.
+func init() { card.Clock = Today }
 
 // Today returns the current local date as YYYY-MM-DD. The FINUX_TODAY
 // environment variable replaces it, for tests and demonstrations.

@@ -66,7 +66,8 @@ func transactionsHelp() string {
   --virtual             The person paid with a virtual card of the credit card.
                         In edit, --virtual=false takes the mark away
   --off-limit           The transaction of the credit card does not use the
-                        limit. In edit, --off-limit=false takes the mark away
+                        limit while its bill is a future one. In edit,
+                        --off-limit=false takes the mark away
 
 ` + green.Render("Options for add, for an expense or an income in installments:") + `
   --installments <number>       Number of monthly parts, from 2 to ` + strconv.Itoa(transaction.MaxInstallments) + `
@@ -110,7 +111,8 @@ value is the total: the parts are equal and the cents that remain go to the
 first part. --date is the date of the first part that add creates; each part
 after it is one month later. On a credit card each part goes to the bill
 after the one before, and all the parts use the limit from the first day,
-unless the purchase has --off-limit. On an account a part changes the balance
+unless the purchase has --off-limit: then each part uses the limit only from
+the day its bill is the current one. On an account a part changes the balance
 on its date. The list shows the part after the title, such as 3/10.
 
 Without --all or --next, edit and delete change one part only, and the other
@@ -132,9 +134,11 @@ the card shows the total of these transactions. A transaction that goes to an
 account loses the mark.
 
 --off-limit marks a transaction of a credit card that does not use the limit
-of the card, for example a purchase that the shop finances. The transaction
-stays in its bill and in the payment of the bill. The lists show [off limit]
-after its title, and the card shows the total outside its limit. The mark
+of the card before its bill, for example a purchase in installments that the
+shop finances. Each part uses the limit from the day its bill is the current
+one; the parts in the bills after it do not. The transaction stays in its
+bill and in the payment of the bill. The lists show [off limit] after its
+title, and the card shows the total outside its limit. The mark
 belongs to the purchase: a change of the mark of one part goes to all the
 parts, with or without --all or --next, also when a part is in a paid bill. A
 transaction that goes to an account loses the mark.

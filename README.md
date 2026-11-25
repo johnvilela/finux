@@ -641,8 +641,10 @@ installments, all the parts have the mark.
 
 ### Transactions outside the limit
 
-Some purchases do not use the limit of the card, for example a purchase in
-installments that the shop finances through the card. Add `--off-limit`:
+Some purchases do not take their full value from the limit of the card, for
+example a purchase in installments that the shop finances through the card:
+the bank takes each part from the limit only when its bill comes. Add
+`--off-limit`:
 
 ```sh
 ./bin/finux tx add --title "Car repair" --value 1200 --account VISA --category TRANS --installments 10 --off-limit
@@ -651,9 +653,12 @@ installments that the shop finances through the card. Add `--off-limit`:
 ```
 
 - The transaction stays in its bill, in the total of the bill and in the
-  payment. Only `Used` and `Available` of the card leave it out.
+  payment.
+- A part in the current bill, or in an older bill that is not paid, uses the
+  limit. A part in a bill after the current one does not: `Used` and
+  `Available` of the card leave it out.
 - `finux cc VISA` shows `Off limit`: the total of these transactions in the
-  bills that are not paid. The lists show `[off limit]` after the title.
+  bills after the current one. The lists show `[off limit]` after the title.
 - The mark belongs to the purchase. A change of the mark of one part goes to
   all the parts, with or without `--all` or `--next`, also when a part is in
   a paid bill.

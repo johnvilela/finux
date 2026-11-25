@@ -91,9 +91,9 @@ Check each of these and report the ones that are true, in this order:
    70%, and above 90% say that the next purchases can be refused. `used`
    counts all the parts of the purchases in installments, also the ones
    in future bills: say how much of `used` is parts to come. `used` does
-   not count the purchases with `off_limit`: when `off_limit` of the card
-   is not zero, say that this value is debt in the bills but not in the
-   limit.
+   not count the parts to come of the purchases with `off_limit`: when
+   `off_limit` of the card is not zero, say that this value is debt in
+   the future bills but not in the limit.
 5. **Negative accounts:** each account with a balance below zero.
 6. **Installments to come:** read `transaction_list` with `date` of each
    of the next three months. The transactions with `installment` are

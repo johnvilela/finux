@@ -46,9 +46,10 @@ future bills, which `credit_card_bills` lists with the status `open`.
 These bills are not due: do not report them as debts to pay now. Their
 totals are in `used`, so the limit already counts the whole purchase.
 
-A purchase with `off_limit: true` does not use the limit: it is in its
-bill and in the payment, but not in `used`. The card has `off_limit`, the
-total of these purchases in the bills that are not paid. When it is not
+A purchase with `off_limit: true` does not use the limit while its bill
+is a future one: a part counts in `used` only from the day its bill is
+the current one. The card has `off_limit`, the total of these purchases
+in the bills after the current one. When it is not
 zero, report it apart from the limit in use, and say that the bills
 have it.
 When the user asks "how much do I still owe on installments", add the

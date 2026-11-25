@@ -191,7 +191,7 @@ No arguments.
 | `goal` | string | no | Code or id of the goal the transaction counts toward. The goal must have the currency of the account |
 | `installment_value` | string | no | With installments: the amount of one part, in place of value |
 | `installments` | integer | no | For an expense or an income in installments: the number of monthly parts, from 2 to 120. The tool creates one transaction for each part |
-| `off_limit` | boolean | no | true when the transaction does not use the limit of the credit card, for example a purchase that the shop finances. It stays in its bill. Only for a transaction of a credit card. With installments, all the parts get it. Default: false |
+| `off_limit` | boolean | no | true when the transaction does not use the limit of the credit card before its bill is the current one, for example a purchase in installments that the shop finances. It stays in its bill. Only for a transaction of a credit card. With installments, all the parts get it. Default: false |
 | `received` | string | no | For a transfer between accounts of different currencies: the amount the other account receives |
 | `tags` | string | no | Tags divided by spaces, for example "market weekly". Use transaction_suggestions to find the tags in use |
 | `to` | string | no | For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer |

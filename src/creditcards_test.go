@@ -260,7 +260,7 @@ func TestVirtualCardTransactions(t *testing.T) {
 func TestOffLimitCardTransactions(t *testing.T) {
 	h := newCardsHome(t)
 	h.purchase("Market", "100", "17/11/2026")
-	if got := h.ok("tx", "a", "--title", "Repair", "--value", "300", "--account", "VISA", "--category", "FOOD", "--date", "16/11/2026", "--off-limit"); got != "✓ Transaction 2 created\n" {
+	if got := h.ok("tx", "a", "--title", "Repair", "--value", "300", "--account", "VISA", "--category", "FOOD", "--date", "26/11/2026", "--off-limit"); got != "✓ Transaction 2 created\n" {
 		t.Fatalf("add output = %q", got)
 	}
 	// Only a credit card has a limit.
@@ -279,8 +279,8 @@ func TestOffLimitCardTransactions(t *testing.T) {
 		t.Fatalf("list --off-limit=false =\n%s", got)
 	}
 
-	// The bill has the purchase. The limit in use does not.
-	h.has(h.ok("cc", "VISA"), "Used       R$ 100,00\n", "Available  R$ 4.900,00\n", "Off limit  R$ 300,00\n", "Repair [off limit]", "Total  R$ 400,00\n")
+	// The purchase is in a future bill: it does not use the limit.
+	h.has(h.ok("cc", "VISA"), "Used       R$ 100,00\n", "Available  R$ 4.900,00\n", "Off limit  R$ 300,00\n")
 
 	// An edit takes the mark away, and gives it.
 	h.ok("tx", "e", "2", "--off-limit=false")
@@ -302,7 +302,8 @@ func TestOffLimitCardTransactions(t *testing.T) {
 	if got := h.ok("tx", "l", "--off-limit"); !strings.Contains(got, "10 transactions\n") || !strings.Contains(got, "Car 2/10 [off limit]") {
 		t.Fatalf("parts with the mark =\n%s", got)
 	}
-	h.has(h.ok("cc", "VISA"), "Used       R$ 300,00\n", "Off limit  R$ 1.200,00\n")
+	// The part in the current bill uses the limit.
+	h.has(h.ok("cc", "VISA"), "Used       R$ 420,00\n", "Off limit  R$ 1.080,00\n", "Car [off limit]")
 	h.ok("tx", "e", "5", "--off-limit=false")
 	if got := h.ok("tx", "l", "--off-limit"); !strings.Contains(got, "No transactions") && !strings.Contains(got, "0 transactions") {
 		t.Fatalf("parts after the change of one part =\n%s", got)

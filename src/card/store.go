@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"finux/src/code"
 
@@ -133,9 +134,16 @@ func (s *Store) Find(reference string, includeArchived bool) (Card, error) {
 	return found[0], nil
 }
 
+// Clock returns the date of today as YYYY-MM-DD. The transaction
+// package gives it its clock, which FINUX_TODAY can replace.
+var Clock = func() string { return time.Now().Format(isoDate) }
+
 // usage fills the Used and the OffLimit of cards from their bills that
-// are not paid: Used is their total less the transactions outside the
-// limit. A value carried from a paid bill counts in Used in full.
+// are not paid. A transaction outside the limit does not count in Used
+// while its bill is a future one: the bank takes each part from the
+// limit when its bill becomes the current one. OffLimit is the total of
+// these transactions in the future bills. A value carried from a paid
+// bill counts in Used in full.
 func (s *Store) usage(cards []Card) error {
 	if len(cards) == 0 {
 		return nil
@@ -147,10 +155,18 @@ func (s *Store) usage(cards []Card) error {
 	if err := s.spent(bills); err != nil {
 		return err
 	}
+	today := Clock()
+	current := map[uint]string{}
+	for _, card := range cards {
+		current[card.ID], _, _ = card.Cycle(today)
+	}
 	used, offLimit := map[uint]int64{}, map[uint]int64{}
 	for _, bill := range bills {
-		used[bill.CardID] += bill.Total() - bill.OffLimit
-		offLimit[bill.CardID] += bill.OffLimit
+		used[bill.CardID] += bill.Total()
+		if period, known := current[bill.CardID]; known && bill.Period > period {
+			used[bill.CardID] -= bill.OffLimit
+			offLimit[bill.CardID] += bill.OffLimit
+		}
 	}
 	for i := range cards {
 		cards[i].Used, cards[i].OffLimit = used[cards[i].ID], offLimit[cards[i].ID]
