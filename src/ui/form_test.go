@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 )
 
@@ -39,7 +40,8 @@ func TestFormCreateFlow(t *testing.T) {
 		{[]tea.Msg{keyEnter}, FieldDescription},
 		{append(text("main"), keyTab), FieldCurrency},
 		{[]tea.Msg{keyRight, keyRight, keyTab}, FieldBalance},
-		{append(text("1234,56"), keyTab), FieldColor},
+		{append(text("1234,56"), keyTab), FieldOwner},
+		{[]tea.Msg{keyTab}, FieldColor},
 	}
 	for _, step := range steps {
 		model = send(t, model, step.keys...)
@@ -152,11 +154,11 @@ func TestFormEditMode(t *testing.T) {
 		t.Fatalf("edit view shows fixed fields or no title:\n%s", view)
 	}
 	var order []Field
-	for range 4 {
+	for range 5 {
 		order = append(order, form(t, model).Focus())
 		model = send(t, model, keyTab)
 	}
-	want := []Field{FieldName, FieldCode, FieldDescription, FieldColor}
+	want := []Field{FieldName, FieldCode, FieldDescription, FieldOwner, FieldColor}
 	for i := range want {
 		if order[i] != want[i] {
 			t.Fatalf("field order = %v, want %v", order, want)
@@ -180,7 +182,7 @@ func TestFormPresetFieldsAreSkipped(t *testing.T) {
 	if f.Focus() != FieldCode || f.Value(FieldCode) != "WISE" {
 		t.Fatalf("focus = %v, code = %q; want code field with WISE", f.Focus(), f.Value(FieldCode))
 	}
-	model = send(t, model, keyTab, keyTab, keyEnter)
+	model = send(t, model, keyTab, keyTab, keyTab, keyEnter)
 	f = form(t, model)
 	want := account.Account{Name: "Wise", Code: "WISE", Currency: "EUR", Color: "teal", OpeningBalance: 1000}
 	if !f.Submitted() || f.Account() != want {
@@ -342,5 +344,39 @@ func TestFormCreateKeepsTheOrder(t *testing.T) {
 	model = send(t, model, keyTab)
 	if f := form(t, model); f.Focus() != FieldName || f.Error() == "" {
 		t.Fatalf("tab with an empty name: focus %v, error %q", f.Focus(), f.Error())
+	}
+}
+
+func TestFormHasTheOwner(t *testing.T) {
+	initial := sampleAccounts()[0]
+	var model tea.Model = NewForm(FormOptions{Initial: initial, Edit: true, Taken: free})
+	if view := plain(form(t, model).View().Content); !strings.Contains(view, "Owner") {
+		t.Fatalf("account form lacks the owner:\n%s", view)
+	}
+	model = send(t, model, keyTab, keyTab, keyTab)
+	if got := form(t, model).Focus(); got != FieldOwner {
+		t.Fatalf("fourth field = %v, want the owner", got)
+	}
+	model = send(t, model, append(text(" Ana "), keySave)...)
+	if got := form(t, model).Account(); got.Owner != "Ana" {
+		t.Fatalf("account owner = %q", got.Owner)
+	}
+
+	visa := card.Card{Name: "Visa", Code: "VISA", Color: "blue", Currency: "BRL", Limit: 100000, ClosingDay: 25, DueDay: 5, Owner: "Ana"}
+	model = NewCardForm(CardFormOptions{Initial: visa, Limit: "1000", Edit: true, Taken: free})
+	if got := form(t, model).Value(FieldOwner); got != "Ana" {
+		t.Fatalf("card form owner = %q", got)
+	}
+	model = send(t, model, keySave)
+	if got := form(t, model).Card(); got.Owner != "Ana" {
+		t.Fatalf("card owner = %q", got.Owner)
+	}
+	model = NewCategoryForm(CategoryFormOptions{Taken: free})
+	if view := plain(form(t, model).View().Content); strings.Contains(view, "Owner") {
+		t.Fatalf("category form has an owner:\n%s", view)
+	}
+	model = NewForm(FormOptions{Initial: initial, Edit: true, Preset: []Field{FieldOwner}, Taken: free})
+	if view := plain(form(t, model).View().Content); strings.Contains(view, "Owner") {
+		t.Fatalf("form shows a preset owner:\n%s", view)
 	}
 }

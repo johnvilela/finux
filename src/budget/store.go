@@ -162,6 +162,18 @@ func (s *Store) Find(reference string, includeArchived bool, today string) (Budg
 // database from before a module does not have the tables of that module.
 type tables struct {
 	transactions, accounts, cards, categories bool
+	// accountOwner and cardOwner tell that the accounts and the cards
+	// have the column of the owner.
+	accountOwner, cardOwner bool
+}
+
+// mine is the condition that leaves out the accounts or the cards of
+// other persons, for a table that has the column of the owner.
+func mine(hasOwner bool) string {
+	if !hasOwner {
+		return ""
+	}
+	return " AND owner = ''"
 }
 
 func (s *Store) tables() tables {
@@ -171,6 +183,8 @@ func (s *Store) tables() tables {
 		accounts:     migrator.HasTable("accounts"),
 		cards:        migrator.HasTable("cards"),
 		categories:   migrator.HasTable("categories"),
+		accountOwner: migrator.HasTable("accounts") && migrator.HasColumn("accounts", "owner"),
+		cardOwner:    migrator.HasTable("cards") && migrator.HasColumn("cards", "owner"),
 	}
 }
 
@@ -211,7 +225,8 @@ func (s *Store) load(budgets []Budget, until string) error {
 }
 
 // spent returns what counts on a budget for each day from one date to
-// another: expenses less incomes. The transactions, accounts, cards and
+// another: expenses less incomes. A transaction in an account or a card
+// of another person does not count. The transactions, accounts, cards and
 // categories tables belong to other packages.
 func (s *Store) spent(has tables, budget Budget, from, to string) (map[string]int64, error) {
 	if !has.transactions {
@@ -230,11 +245,11 @@ func (s *Store) spent(has tables, budget Budget, from, to string) (map[string]in
 	var places []string
 	var currencies []any
 	if has.accounts {
-		places = append(places, "account_id IN (SELECT id FROM accounts WHERE currency = ?)")
+		places = append(places, "account_id IN (SELECT id FROM accounts WHERE currency = ?"+mine(has.accountOwner)+")")
 		currencies = append(currencies, budget.Currency)
 	}
 	if has.cards {
-		places = append(places, "card_id IN (SELECT id FROM cards WHERE currency = ?)")
+		places = append(places, "card_id IN (SELECT id FROM cards WHERE currency = ?"+mine(has.cardOwner)+")")
 		currencies = append(currencies, budget.Currency)
 	}
 	if len(places) == 0 {

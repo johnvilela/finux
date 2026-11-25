@@ -61,7 +61,7 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	if got := must(nil); !strings.Contains(got, "\n  seed              Add sample data to the development database\n") {
 		t.Fatalf("dev help lacks the seed command:\n%s", got)
 	}
-	created := "✓ Development database created: " + database + " (8 accounts, 2 credit cards, 3 goals, 3 budgets, 4 schedules, 30 transactions)\n"
+	created := "✓ Development database created: " + database + " (9 accounts, 3 credit cards, 3 goals, 3 budgets, 4 schedules, 30 transactions)\n"
 	if got := must(nil, "seed"); got != created {
 		t.Fatalf("first seed = %q, want %q", got, created)
 	}
@@ -69,7 +69,7 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 		t.Fatalf("doctor in dev build = %q", got)
 	}
 	first := must(nil, "ac", "--all")
-	for _, want := range []string{"INTER", "NUBAN", "WISE", "BRL", "USD", "EUR", "BTC", "(archived)", "8 accounts\n", "-R$ "} {
+	for _, want := range []string{"INTER", "NUBAN", "WISE", "BRL", "USD", "EUR", "BTC", "(archived)", "9 accounts\n", "Conta Ana", "OWNER", "-R$ "} {
 		if !strings.Contains(first, want) {
 			t.Errorf("seeded list lacks %q:\n%s", want, first)
 		}
@@ -138,10 +138,10 @@ func TestDevBuildSeedsItsOwnDatabase(t *testing.T) {
 	// and transactions. CASH has one transaction, which goes with it.
 	must(nil, "ac", "add", "--name", "Temporary", "--currency", "USD", "--code", "TEMP")
 	must(nil, "ac", "d", "CASH", "--hard", "--yes")
-	total := 8
+	total := 9
 	for _, want := range []string{
-		"3 accounts and 5 transactions added; 11 accounts and 34 transactions in total",
-		"3 accounts and 5 transactions added; 14 accounts and 39 transactions in total",
+		"3 accounts and 5 transactions added; 12 accounts and 34 transactions in total",
+		"3 accounts and 5 transactions added; 15 accounts and 39 transactions in total",
 	} {
 		total += 3
 		if got := must(nil, "seed"); got != "✓ Development database updated: "+database+" ("+want+")\n" {

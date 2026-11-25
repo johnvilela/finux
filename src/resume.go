@@ -26,6 +26,7 @@ func resumeHelp() string {
 		green.Render("Options:") + `
   --month <month>   Month of the incomes and expenses, MM/YYYY or YYYY/MM
                     (default: the month of today)
+  --all             Include the accounts and the credit cards of other persons
   -h, --help        Show this help
 
 The resume shows, for each currency, the incomes, the expenses and the top
@@ -41,6 +42,12 @@ as they are today, also with --month.
 ones that come until the end of this month. 'After' is the total of the
 balances of a currency after all of them. An occurrence on a credit card
 is not in a balance. See 'finux sc --help'.
+
+An account or a credit card with an owner belongs to another person (see
+'finux ac --help'). The resume leaves out its balance, its bills, its
+transactions and its schedules. With --all they count, and the name of the
+person shows next to the account and the bill. The budgets and the goals
+never count them.
 `
 }
 
@@ -51,11 +58,15 @@ func runResume(args []string, io streams) int {
 		}
 	}
 	var month string
-	_, given, err := parse("resume", args, func(f *flag.FlagSet) { f.StringVar(&month, "month", "", "") }, 0)
+	var all bool
+	_, given, err := parse("resume", args, func(f *flag.FlagSet) {
+		f.StringVar(&month, "month", "", "")
+		f.BoolVar(&all, "all", false, "")
+	}, 0)
 	if err != nil {
 		return exitStatus(io, "resume", err)
 	}
-	resume := ui.Resume{Today: today()}
+	resume := ui.Resume{Today: today(), All: all}
 	resume.Month = resume.Today[:len("2006-01")]
 	if given["month"] {
 		if resume.Month, err = card.ParsePeriod(month); err != nil {
@@ -148,6 +159,9 @@ func gatherScheduled(db *gorm.DB, resume *ui.Resume) error {
 		return err
 	}
 	for _, view := range views {
+		if !resume.All && !view.Account.Mine() {
+			continue
+		}
 		for _, date := range view.Pending(resume.ScheduledUntil) {
 			resume.Scheduled = append(resume.Scheduled, ui.ResumeOccurrence{View: view, Date: date})
 		}
@@ -158,17 +172,21 @@ func gatherScheduled(db *gorm.DB, resume *ui.Resume) error {
 	return nil
 }
 
-// gatherResume reads what the resume shows. The resume has its month
-// and the date of today.
+// gatherResume reads what the resume shows. The resume has its month,
+// the date of today and All, which adds the accounts and the credit
+// cards of other persons.
 func gatherResume(db *gorm.DB, resume *ui.Resume) error {
 	resume.Days = monthDays(resume.Month, resume.Today)
-	views, err := transaction.NewStore(db).List(transaction.Filter{Period: resume.Month})
+	views, err := transaction.NewStore(db).List(transaction.Filter{Period: resume.Month, Mine: !resume.All})
 	if err != nil {
 		return err
 	}
 	resume.Flows = monthFlows(views)
 	if resume.Accounts, err = account.NewStore(db).List(false, resume.Today); err != nil {
 		return err
+	}
+	if !resume.All {
+		resume.Accounts = account.Mine(resume.Accounts)
 	}
 	if err := gatherScheduled(db, resume); err != nil {
 		return err
@@ -177,6 +195,9 @@ func gatherResume(db *gorm.DB, resume *ui.Resume) error {
 	owners, err := cards.List(false)
 	if err != nil {
 		return err
+	}
+	if !resume.All {
+		owners = card.Mine(owners)
 	}
 	for _, owner := range owners {
 		bills, err := cards.Bills(owner.ID)

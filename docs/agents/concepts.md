@@ -48,6 +48,30 @@ An archived account leaves the lists and takes no new transactions, but it
 keeps its transactions; it can be restored. A permanent delete also deletes
 its transactions and cannot be undone.
 
+### Accounts and credit cards of other persons
+
+An account or a credit card can have an `owner`: the name of the person it
+belongs to, for example the partner of the user. An empty `owner` means it
+belongs to the user. The user records these to follow the money of that
+person, not to mix it with their own.
+
+- `account_list`, `credit_card_list`, `transaction_list` and its `totals`
+  leave out the accounts, the credit cards and the transactions of other
+  persons. Send `include_others: true` to get them. Do this only when the
+  user asks for all persons or for that person.
+- `transaction_list` with `account` returns the transactions of that
+  account or credit card in any case.
+- A tool that takes one account or one credit card (`account_show`,
+  `credit_card_show`, `credit_card_bills`, `credit_card_pay`,
+  `transaction_add`) works for any owner.
+- A budget and a goal never count a transaction in an account or a credit
+  card of another person.
+- A transfer from an account of the user to an account of another person
+  lowers the balance of the user, and it is not an expense.
+- When you report a sum of balances or of bills, do not add the ones of
+  other persons unless the user asks. When you add them, say so and give
+  the name of the person.
+
 ## Categories
 
 Each transaction has one category. The color of a category gives the types
@@ -430,7 +454,8 @@ only wants an item out of the way.
 Money fields are money objects, as in [Money](#money).
 
 **Account:** `id`, `code`, `name`, `description`, `color`, `currency`,
-`archived`, `opening_balance`, `balance`.
+`archived`, `owner` (empty for an account of the user), `opening_balance`,
+`balance`.
 
 **Category:** `id`, `code`, `name`, `description`, `color`, `accepts`.
 
@@ -458,7 +483,8 @@ transaction in installments they also return `transactions`: all the parts
 that the call created or changed.
 
 **Credit card:** `id`, `code`, `name`, `description`, `color`, `currency`,
-`archived`, `limit`, `used`, `available`, `closing_day`, `due_day`.
+`archived`, `owner` (empty for a credit card of the user), `limit`, `used`,
+`available`, `closing_day`, `due_day`.
 
 **Bill:** `period` (`YYYY-MM`), `closes_on`, `due_on`, `status`, `carried`,
 `spent`, `total`. A paid bill also has `paid_on`, `paid`, `remaining` (the

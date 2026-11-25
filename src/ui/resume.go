@@ -28,6 +28,9 @@ type Resume struct {
 	// Month is the month of the incomes and expenses, as YYYY-MM. Today
 	// is the current date as YYYY-MM-DD.
 	Month, Today string
+	// All tells that the resume counts the accounts and the credit
+	// cards of other persons.
+	All bool
 	// Days is the number of days of the month up to today: all of them
 	// for a month that ended, and 0 for a month that did not start.
 	Days int
@@ -135,6 +138,23 @@ type ResumeBill struct {
 	Bill card.Bill
 }
 
+// withOwner adds the name of another person to a name or a code: "Conta
+// Ana (Ana)". The text of the user has no mark.
+func withOwner(text, owner string) string {
+	if owner == "" {
+		return text
+	}
+	return text + " (" + owner + ")"
+}
+
+// ownerMark is the dim name of another person after a row.
+func ownerMark(owner string) string {
+	if owner == "" {
+		return ""
+	}
+	return "  " + styleDim.Render(cut(owner, 16))
+}
+
 // monthName shows a YYYY-MM month as "November 2026".
 func monthName(month string) string {
 	parsed, err := time.Parse("2006-01", month)
@@ -204,7 +224,7 @@ func ResumeView(resume Resume, plain bool) string {
 	if len(resume.Accounts) > 0 {
 		rows := make([][]string, len(resume.Accounts))
 		for i, current := range resume.Accounts {
-			rows[i] = []string{current.Code, current.Name, money.Format(current.Balance(), current.Currency)}
+			rows[i] = []string{current.Code, withOwner(current.Name, current.Owner), money.Format(current.Balance(), current.Currency)}
 		}
 		out += "\nAccounts\n" + plainTable([]string{"CODE", "NAME", "BALANCE"}, rows, 2)
 		currencies, sums := resume.totals()
@@ -239,7 +259,7 @@ func ResumeView(resume Resume, plain bool) string {
 		rows := make([][]string, len(resume.Bills))
 		for i, pending := range resume.Bills {
 			rows[i] = []string{
-				pending.Card.Code, card.FormatPeriod(pending.Bill.Period), pending.Bill.StatusOn(resume.Today),
+				withOwner(pending.Card.Code, pending.Card.Owner), card.FormatPeriod(pending.Bill.Period), pending.Bill.StatusOn(resume.Today),
 				transaction.FormatDate(pending.Bill.DueOn), money.Format(pending.Bill.Total(), pending.Card.Currency),
 			}
 		}
@@ -345,7 +365,7 @@ func styledResume(resume Resume) string {
 			if current.Balance() < 0 {
 				balance = styleError.Render(balance)
 			}
-			out += indent + spread(swatch(current.Color, "●")+" "+pad(current.Code, codeWidth)+"  "+cut(current.Name, 30), balance) + "\n"
+			out += indent + spread(swatch(current.Color, "●")+" "+pad(current.Code, codeWidth)+"  "+cut(current.Name, 30)+ownerMark(current.Owner), balance) + "\n"
 		}
 		currencies, sums := resume.totals()
 		for _, currency := range currencies {
@@ -382,7 +402,7 @@ func styledResume(resume Resume) string {
 		for _, pending := range resume.Bills {
 			status := pending.Bill.StatusOn(resume.Today)
 			left := swatch(pending.Card.Color, "●") + " " + pad(pending.Card.Code, codeWidth) + "  " + card.FormatPeriod(pending.Bill.Period) + "  " +
-				statusStyle(status).Render(pad(status, statusWidth)) + styleDim.Render("due "+transaction.FormatDate(pending.Bill.DueOn))
+				statusStyle(status).Render(pad(status, statusWidth)) + styleDim.Render("due "+transaction.FormatDate(pending.Bill.DueOn)) + ownerMark(pending.Card.Owner)
 			out += indent + spread(left, money.Format(pending.Bill.Total(), pending.Card.Currency)) + "\n"
 		}
 	}

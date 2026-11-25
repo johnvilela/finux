@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"finux/src/account"
+	"finux/src/card"
 	"finux/src/category"
 	"finux/src/storage"
 	"finux/src/transaction"
@@ -201,5 +202,51 @@ func TestSetupDatabaseAddsTheVirtualCardColumn(t *testing.T) {
 	}
 	if !transactionsReady(db) {
 		t.Fatal("the setup did not add the column")
+	}
+}
+
+func TestSetupDatabaseAddsTheOwnerColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "finux.db")
+	if _, err := setupDatabase(path); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A database from before the owners has no column for them, and it
+	// has accounts and credit cards.
+	old := account.Account{Name: "Banco Inter", Code: "INTER", Color: "orange", Currency: "BRL"}
+	if err := account.NewStore(db).Create(&old); err != nil {
+		t.Fatal(err)
+	}
+	visa := card.Card{Name: "Visa", Code: "VISA", Color: "blue", Currency: "BRL", ClosingDay: 25, DueDay: 5}
+	if err := card.NewStore(db).Create(&visa); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []any{&account.Account{}, &card.Card{}} {
+		if err := db.Migrator().DropColumn(model, "owner"); err != nil {
+			t.Fatal(err)
+		}
+		if transactionsReady(db) {
+			t.Fatalf("a database without the owner of %T is ready", model)
+		}
+		if _, err := setupDatabase(path); err != nil {
+			t.Fatal(err)
+		}
+		if !transactionsReady(db) {
+			t.Fatalf("the setup did not add the owner of %T", model)
+		}
+	}
+	found, err := account.NewStore(db).Find("INTER", false, "2026-11-17")
+	if err != nil || !found.Mine() {
+		t.Fatalf("old account after the setup: %+v, %v", found, err)
+	}
+	if found, err := card.NewStore(db).Find("VISA", false); err != nil || !found.Mine() {
+		t.Fatalf("old card after the setup: %+v, %v", found, err)
+	}
+	var mine int64
+	if err := db.Table("accounts").Where("owner = ''").Count(&mine).Error; err != nil || mine != 1 {
+		t.Fatalf("accounts with an empty owner = %d, %v", mine, err)
 	}
 }

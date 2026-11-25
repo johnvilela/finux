@@ -53,6 +53,7 @@ var seedAccounts = []struct {
 	{account: account.Account{Name: "Revolut", Code: "REVOL", Color: "sky", Currency: "EUR", OpeningBalance: 12040}},
 	{account: account.Account{Name: "Cold Wallet", Code: "BTC", Description: "Hardware wallet", Color: "yellow", Currency: "BTC", OpeningBalance: 12345678}},
 	{account: account.Account{Name: "Old Bank", Code: "OLD", Description: "Closed account", Color: "slate", Currency: "USD"}, archived: true},
+	{account: account.Account{Name: "Conta Ana", Code: "ANA", Description: "Account of another person", Color: "pink", Currency: "BRL", OpeningBalance: 150000, Owner: "Ana"}},
 }
 
 // seedBatch is the number of accounts a seed adds to a database that
@@ -135,6 +136,7 @@ var seedBudgets = []struct {
 var seedCards = []card.Card{
 	{Name: "Visa Gold", Code: "VISA", Description: "Main credit card", Color: "blue", Currency: "BRL", Limit: 800000},
 	{Name: "Amex", Code: "AMEX", Description: "Travel", Color: "teal", Currency: "USD", Limit: 200000, ClosingDay: 3, DueDay: 10},
+	{Name: "Master Ana", Code: "MANA", Description: "Credit card of another person", Color: "pink", Currency: "BRL", Limit: 300000, ClosingDay: 25, DueDay: 5, Owner: "Ana"},
 }
 
 // seedPurchases are the transactions of the credit cards. With the

@@ -21,6 +21,10 @@ type Filter struct {
 	Tags []string
 	// Period is the start of a YYYY-MM-DD date: a year, a month or a day.
 	Period string
+	// Mine leaves out the transactions in an account or a credit card
+	// of another person. A filter with an Account shows that account in
+	// any case.
+	Mine bool
 	// Prefix accepts the start of a code, a type or a tag. The search
 	// input uses it, so the list changes while the user types.
 	Prefix bool
@@ -51,7 +55,8 @@ func (f Filter) Match(v View) bool {
 		f.Type != "" && !f.same(v.Type, f.Type),
 		f.Goal != "" && (v.Goal == nil || !f.same(v.Goal.Code, f.Goal)),
 		f.Virtual != "" && strings.HasPrefix(virtualWord(!v.Virtual), strings.ToLower(f.Virtual)),
-		!strings.HasPrefix(v.Date, f.Period):
+		!strings.HasPrefix(v.Date, f.Period),
+		f.Mine && f.Account == "" && !v.Account.Mine():
 		return false
 	}
 	tags := v.TagList()

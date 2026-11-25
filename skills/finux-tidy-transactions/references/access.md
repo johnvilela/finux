@@ -44,8 +44,8 @@ Rules for the CLI:
 | `database_reseed` | No command. Add a base category that is missing with `finux ct add`, for example `finux ct add --name Other --code OTHER --color grey` |
 | `account_list` | `finux ac list [--all]` |
 | `account_show` | `finux ac show <code>` |
-| `account_add` | `finux ac add --name <text> --currency <code> [--code <code>] [--description <text>] [--balance <amount>] [--color <name>]` |
-| `account_edit` | `finux ac edit <code> [--name] [--code] [--description] [--color]` |
+| `account_add` | `finux ac add --name <text> --currency <code> [--code <code>] [--description <text>] [--balance <amount>] [--color <name>] [--owner <name>]` |
+| `account_edit` | `finux ac edit <code> [--name] [--code] [--description] [--color] [--owner <name>]` |
 | `account_archive` | `finux ac delete <code> --yes` |
 | `account_restore` | `finux ac restore <code>` |
 | `account_delete` | `finux ac delete <code> --hard --yes` |
@@ -54,7 +54,7 @@ Rules for the CLI:
 | `category_add` | `finux ct add --name <text> --color <red\|green\|grey> [--code <code>] [--description <text>]` |
 | `category_edit` | `finux ct edit <code> [--name] [--code] [--description] [--color]` |
 | `category_delete` | `finux ct delete <code> --yes` |
-| `transaction_list` | `finux tx list [--category <code>] [--tag <tags>] [--search <text>] [--date <date>] [--account <code>] [--type <type>] [--goal <code>] [--virtual[=false]]` |
+| `transaction_list` | `finux tx list [--category <code>] [--tag <tags>] [--search <text>] [--date <date>] [--account <code>] [--type <type>] [--goal <code>] [--virtual[=false]] [--all]` |
 | `transaction_show` | `finux tx show <id>` |
 | `transaction_add` | `finux tx add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--description <text>] [--tags <tags>] [--date <date>] [--to <code>] [--received <amount>] [--goal <code>] [--installments <number>] [--installment-value <amount>] [--from <number>] [--virtual]` |
 | `transaction_edit` | `finux tx edit <id> [--title] [--description] [--value] [--type] [--category] [--tags] [--account] [--date] [--goal <code\|none>] [--virtual[=false]] [--installment-value <amount>] [--all\|--next]` |
@@ -64,8 +64,8 @@ Rules for the CLI:
 | `credit_card_list` | `finux cc list [--all]` |
 | `credit_card_show` | `finux cc show <code>` |
 | `credit_card_bills` | `finux cc bills <code>` |
-| `credit_card_add` | `finux cc add --name <text> --currency <code> --limit <amount> --closing <day> --due <day> [--code <code>] [--description <text>] [--color <name>]` |
-| `credit_card_edit` | `finux cc edit <code> [--name] [--code] [--description] [--color] [--limit] [--closing] [--due]` |
+| `credit_card_add` | `finux cc add --name <text> --currency <code> --limit <amount> --closing <day> --due <day> [--code <code>] [--description <text>] [--color <name>] [--owner <name>]` |
+| `credit_card_edit` | `finux cc edit <code> [--name] [--code] [--description] [--color] [--limit] [--closing] [--due] [--owner <name>]` |
 | `credit_card_pay` | `finux cc pay <code> --from <account> [--value <amount>] [--date <date>] [--bill <MM/YYYY>]` |
 | `credit_card_unpay` | `finux cc unpay <code> [--bill <MM/YYYY>] --yes` |
 | `credit_card_archive` | `finux cc delete <code> --yes` |

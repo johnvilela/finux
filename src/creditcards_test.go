@@ -256,3 +256,35 @@ func TestVirtualCardTransactions(t *testing.T) {
 		t.Fatalf("parts after --next =\n%s", got)
 	}
 }
+
+func TestCreditCardsOfAnotherPerson(t *testing.T) {
+	h := newCardsHome(t)
+	if got := h.ok("cc", "add", "--name", "Master Ana", "--currency", "BRL", "--limit", "1000", "--closing", "25", "--due", "5", "--code", "MANA", "--owner", "Ana"); got != "✓ Credit card MANA created\n" {
+		t.Fatalf("add with owner = %q", got)
+	}
+	const mine = "" +
+		"CODE  NAME       CLOSES  DUE  LIMIT        USED       AVAILABLE\n" +
+		"VISA  Visa Gold  25      5    R$ 5.000,00  R$ 0,00  R$ 5.000,00\n" +
+		"1 credit card\n"
+	if got := h.ok("cc"); got != mine {
+		t.Fatalf("list =\n%s\nwant\n%s", got, mine)
+	}
+	const all = "" +
+		"CODE  NAME        OWNER  CLOSES  DUE  LIMIT        USED       AVAILABLE\n" +
+		"MANA  Master Ana  Ana    25      5    R$ 1.000,00  R$ 0,00  R$ 1.000,00\n" +
+		"VISA  Visa Gold          25      5    R$ 5.000,00  R$ 0,00  R$ 5.000,00\n" +
+		"2 credit cards\n"
+	if got := h.ok("cc", "list", "--all"); got != all {
+		t.Fatalf("list --all =\n%s\nwant\n%s", got, all)
+	}
+	h.has(h.ok("cc", "MANA"), "Owner      Ana\n")
+	if got := h.ok("cc", "VISA"); strings.Contains(got, "Owner") {
+		t.Fatalf("show of my card has an owner:\n%s", got)
+	}
+	h.ok("cc", "e", "MANA", "--owner", "")
+	h.has(h.ok("cc"), "2 credit cards\n")
+	h.ok("cc", "e", "MANA", "--owner", "Ana")
+	h.has(h.ok("cc"), "1 credit card\n")
+	h.fail(2, "owner must have at most 40 characters", "cc", "e", "MANA", "--owner", strings.Repeat("a", 41))
+	h.has(h.ok("cc", "help"), "--owner <name>")
+}

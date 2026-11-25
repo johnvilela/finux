@@ -198,7 +198,7 @@ func scheduleViews(db *gorm.DB, schedules []schedule.Schedule) ([]ui.ScheduleVie
 		}
 		if index := slices.IndexFunc(cards, func(c card.Card) bool { return c.ID == current.CardID }); index >= 0 && view.OnCard {
 			owner := cards[index]
-			view.Account = account.Account{Name: owner.Name, Code: owner.Code, Color: owner.Color, Currency: owner.Currency, DeletedAt: owner.DeletedAt}
+			view.Account = account.Account{Name: owner.Name, Code: owner.Code, Color: owner.Color, Currency: owner.Currency, Owner: owner.Owner, DeletedAt: owner.DeletedAt}
 		}
 		if index := slices.IndexFunc(categories, func(c category.Category) bool { return c.ID == current.CategoryID }); index >= 0 {
 			view.Category = categories[index]

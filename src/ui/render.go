@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,7 +25,16 @@ func AccountTable(accounts []account.Account, plain bool) string {
 		return "No accounts yet. Run 'finux ac add'.\n"
 	}
 	headers := []string{"CODE", "NAME", "CURRENCY", "BALANCE"}
-	const balanceColumn = 3
+	owned := false
+	for _, current := range accounts {
+		owned = owned || !current.Mine()
+	}
+	// The owner column shows only when an account of another person is
+	// in the list.
+	if owned {
+		headers = []string{"CODE", "NAME", "OWNER", "CURRENCY", "BALANCE"}
+	}
+	balanceColumn := len(headers) - 1
 	rows := make([][]string, len(accounts))
 	for i, current := range accounts {
 		name := current.Name
@@ -36,6 +46,9 @@ func AccountTable(accounts []account.Account, plain bool) string {
 			code = swatch(current.Color, "●") + " " + code
 		}
 		rows[i] = []string{code, name, current.Currency, money.Format(current.Balance(), current.Currency)}
+		if owned {
+			rows[i] = slices.Insert(rows[i], 2, current.Owner)
+		}
 	}
 	count := fmt.Sprintf("%d accounts", len(accounts))
 	if len(accounts) == 1 {
@@ -108,6 +121,9 @@ func AccountCard(current account.Account, plain bool) string {
 		{"Created", current.CreatedAt.Local().Format(timeLayout)},
 		{"Updated", current.UpdatedAt.Local().Format(timeLayout)},
 	}
+	if !current.Mine() {
+		fields = slices.Insert(fields, 1, [2]string{"Owner", current.Owner})
+	}
 	if current.Archived() {
 		fields = append(fields, [2]string{"Status", "archived"})
 	}
@@ -139,6 +155,9 @@ func styledCard(current account.Account) string {
 	badge := lipgloss.NewStyle().Bold(true).Padding(0, 1).
 		Foreground(lipgloss.Color("#000000")).Background(tint).Render(current.Code)
 	header := badge + "  " + styleBold.Render(current.Name)
+	if !current.Mine() {
+		header += "  " + styleDim.Render(current.Owner)
+	}
 	if current.Archived() {
 		header += "  " + styleDim.Render("ARCHIVED")
 	}

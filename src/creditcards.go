@@ -38,7 +38,8 @@ func creditCardsHelp() string {
   help, --help, -h             Show this help
 
 ` + green.Render("Options for list:") + `
-  --all                 Include archived credit cards
+  --all                 Include archived credit cards and the credit cards of
+                        other persons
 
 ` + green.Render("Options for add:") + `
   --name <text>         Name of the credit card
@@ -51,9 +52,10 @@ func creditCardsHelp() string {
   --due <day>           Day of the month the bill is due, 1 to 31
   --color <name>        ` + strings.Join(account.ColorKeys()[:8], ", ") + `,
                         ` + strings.Join(account.ColorKeys()[8:], ", ") + `
+  --owner <name>        Person the credit card belongs to (default: you)
 
 ` + green.Render("Options for edit:") + `
-  --name, --code, --description, --color, --limit, --closing, --due
+  --name, --code, --description, --color, --limit, --closing, --due, --owner
 
 ` + green.Render("Options for pay:") + `
   --from <code>         Account that pays the bill
@@ -89,6 +91,8 @@ payment first ('finux cc unpay' or 'finux tx delete' of the payment).
 New closing and due days apply to the bills that do not exist yet.
 A permanent delete keeps each payment in its account, as an expense of the
 category OTHER.
+A credit card with an owner belongs to another person. The lists, the resume,
+the budgets and the goals leave it out. Use --owner "" to make it yours.
 `
 }
 
@@ -235,6 +239,9 @@ func (c *creditCardsCommand) list(args []string) error {
 	if err != nil {
 		return err
 	}
+	if !all {
+		cards = card.Mine(cards)
+	}
 	if len(cards) == 0 || !c.interactive {
 		return c.print(ui.CardTable(cards, c.plain))
 	}
@@ -287,8 +294,8 @@ func (c *creditCardsCommand) bills(args []string) error {
 
 // cardFlags holds the text of the options of add and edit.
 type cardFlags struct {
-	name, code, description, currency, limit, color string
-	closing, due                                    int
+	name, code, description, currency, limit, color, owner string
+	closing, due                                           int
 }
 
 func (v *cardFlags) define(flags *flag.FlagSet, create bool) {
@@ -299,6 +306,7 @@ func (v *cardFlags) define(flags *flag.FlagSet, create bool) {
 	flags.IntVar(&v.closing, "closing", 0, "")
 	flags.IntVar(&v.due, "due", 0, "")
 	flags.StringVar(&v.color, "color", "", "")
+	flags.StringVar(&v.owner, "owner", "", "")
 	if create {
 		flags.StringVar(&v.currency, "currency", "", "")
 	}
@@ -330,6 +338,10 @@ func (v *cardFlags) apply(command string, given map[string]bool, current *card.C
 		if current.Currency = strings.ToUpper(strings.TrimSpace(v.currency)); !money.Valid(current.Currency) {
 			err = fmt.Errorf("unknown currency %q: use one of %s", current.Currency, strings.Join(money.Codes(), ", "))
 		}
+	}
+	if err == nil && given["owner"] {
+		current.Owner = strings.TrimSpace(v.owner)
+		err = account.CheckOwner(current.Owner)
 	}
 	if err == nil && given["closing"] {
 		current.ClosingDay = v.closing
@@ -378,7 +390,7 @@ func (c *creditCardsCommand) add(args []string) error {
 		var preset []ui.Field
 		for flagName, field := range map[string]ui.Field{
 			"name": ui.FieldName, "code": ui.FieldCode, "description": ui.FieldDescription, "currency": ui.FieldCurrency,
-			"closing": ui.FieldClosing, "due": ui.FieldDue, "color": ui.FieldColor,
+			"closing": ui.FieldClosing, "due": ui.FieldDue, "color": ui.FieldColor, "owner": ui.FieldOwner,
 		} {
 			if given[flagName] {
 				preset = append(preset, field)
@@ -435,7 +447,7 @@ func (c *creditCardsCommand) edit(args []string) error {
 		return err
 	}
 	if len(given) == 0 && !c.interactive {
-		return usageError("edit: give --name, --code, --description, --color, --limit, --closing or --due when input is not a terminal")
+		return usageError("edit: give --name, --code, --description, --color, --limit, --closing, --due or --owner when input is not a terminal")
 	}
 	current, err := c.resolve("edit", reference(positional), "Edit credit card", scopeActive)
 	if err != nil {

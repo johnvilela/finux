@@ -53,13 +53,15 @@ const (
 	FieldRollover
 	// FieldTags is the tags of a note.
 	FieldTags
+	// FieldOwner is the person an account or a credit card belongs to.
+	FieldOwner
 	FieldColor
 	fieldCount
 )
 
 var fieldLabels = [fieldCount]string{
 	"Name", "Code", "Description", "Type", "Currency", "Opening balance", "Limit", "Target",
-	"Categories", "Period", "Start date", "Closing day", "Due day", "Final date", "Rollover", "Tags", "Color",
+	"Categories", "Period", "Start date", "Closing day", "Due day", "Final date", "Rollover", "Tags", "Owner", "Color",
 }
 
 // goalFields are the fields only a goal form has. A budget form has the
@@ -151,16 +153,18 @@ type Form struct {
 	budget   *budget.Budget
 	// categories are the choices of the categories field of a budget;
 	// picked tells which ones count and cursor is the one under the keys.
-	categories  []category.Category
-	picked      []bool
-	cursor      int
-	rollover    int
-	today       string
-	colors      []formColor
-	edit        bool
-	fields      []Field
-	focus       int
-	inputs      [fieldCount]textinput.Model
+	categories []category.Category
+	picked     []bool
+	cursor     int
+	rollover   int
+	today      string
+	colors     []formColor
+	edit       bool
+	fields     []Field
+	focus      int
+	inputs     [fieldCount]textinput.Model
+	// owned tells that the form has the owner field.
+	owned       bool
 	currency    int
 	color       int
 	codeTouched bool
@@ -192,7 +196,7 @@ func NewForm(options FormOptions) Form {
 	if options.Edit {
 		hidden[FieldCurrency], hidden[FieldBalance] = true, true
 	}
-	f := Form{title: title, initial: options.Initial, edit: options.Edit, taken: options.Taken, colors: paletteColors()}
+	f := Form{title: title, initial: options.Initial, edit: options.Edit, taken: options.Taken, colors: paletteColors(), owned: true}
 	for i, code := range money.Codes() {
 		if code == options.Initial.Currency {
 			f.currency = i
@@ -203,6 +207,7 @@ func NewForm(options FormOptions) Form {
 		FieldCode:        options.Initial.Code,
 		FieldDescription: options.Initial.Description,
 		FieldBalance:     options.Balance,
+		FieldOwner:       options.Initial.Owner,
 	}, "Banco Inter", "INTER")
 	return f
 }
@@ -248,7 +253,7 @@ func NewCardForm(options CardFormOptions) Form {
 		hidden[field] = true
 	}
 	initial := options.Initial
-	f := Form{title: title, card: &initial, edit: options.Edit, taken: options.Taken, colors: paletteColors()}
+	f := Form{title: title, card: &initial, edit: options.Edit, taken: options.Taken, colors: paletteColors(), owned: true}
 	for i, code := range money.Codes() {
 		if code == initial.Currency {
 			f.currency = i
@@ -267,6 +272,7 @@ func NewCardForm(options CardFormOptions) Form {
 		FieldLimit:       options.Limit,
 		FieldClosing:     day(initial.ClosingDay),
 		FieldDue:         day(initial.DueDay),
+		FieldOwner:       initial.Owner,
 	}, "Visa Gold", "VISA")
 	return f
 }
@@ -458,6 +464,8 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 	}
 	// Only a note has tags.
 	hidden[FieldTags] = hidden[FieldTags] || f.note == nil
+	// Only an account and a credit card have an owner.
+	hidden[FieldOwner] = hidden[FieldOwner] || !f.owned
 	for field := FieldName; field < fieldCount; field++ {
 		if !hidden[field] {
 			f.fields = append(f.fields, field)
@@ -473,6 +481,7 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 		FieldClosing: "day of the month, 1 to 31", FieldDue: "day of the month, 1 to 31",
 		FieldDate: "optional, DD/MM/YYYY", FieldStart: "optional, DD/MM/YYYY",
 		FieldEvery: "month, 2 weeks, 15 days; empty for one time",
+		FieldOwner: "optional, a person other than you",
 	}
 	for _, field := range textFields {
 		input := textinput.New()
@@ -494,6 +503,7 @@ func (f *Form) build(hidden map[Field]bool, color string, values map[Field]strin
 	f.inputs[FieldStart].CharLimit = 10
 	f.inputs[FieldEvery].CharLimit = 16
 	f.inputs[FieldTags].CharLimit = 120
+	f.inputs[FieldOwner].CharLimit = account.OwnerSize
 	if f.note != nil {
 		f.inputs[FieldDescription].CharLimit = note.MaxText
 	}
@@ -542,7 +552,7 @@ func (f Form) Value(field Field) string {
 // textFields are the fields the user types in.
 var textFields = []Field{
 	FieldName, FieldCode, FieldDescription, FieldBalance, FieldLimit, FieldTarget, FieldEvery, FieldStart, FieldClosing, FieldDue, FieldDate,
-	FieldTags,
+	FieldTags, FieldOwner,
 }
 
 // Error returns the validation message of the focused field, or "".
@@ -561,6 +571,7 @@ func (f Form) Account() account.Account {
 	result.Code = f.Value(FieldCode)
 	result.Description = strings.TrimSpace(f.Value(FieldDescription))
 	result.Color = f.Value(FieldColor)
+	result.Owner = strings.TrimSpace(f.Value(FieldOwner))
 	if !f.edit {
 		result.Currency = f.Value(FieldCurrency)
 		result.OpeningBalance = f.balance()
@@ -593,6 +604,7 @@ func (f Form) Card() card.Card {
 	result.Code = f.Value(FieldCode)
 	result.Description = strings.TrimSpace(f.Value(FieldDescription))
 	result.Color = f.Value(FieldColor)
+	result.Owner = strings.TrimSpace(f.Value(FieldOwner))
 	if !f.edit {
 		result.Currency = f.Value(FieldCurrency)
 	}

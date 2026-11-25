@@ -169,6 +169,10 @@ func reminders(db *gorm.DB, store *telegram.Store) ([]string, error) {
 				continue
 			}
 			name := fmt.Sprintf("The bill %s of %s", card.FormatPeriod(bill.Period), owner.Code)
+			// The user also pays the bills of other persons: say whose it is.
+			if !owner.Mine() {
+				name += " (" + owner.Owner + ")"
+			}
 			total, pay := money.Format(bill.Total(), owner.Currency), fmt.Sprintf(" Send /cc pay %s.", owner.Code)
 			key := fmt.Sprintf("bill:%d:", bill.ID)
 			switch status := bill.StatusOn(now); {

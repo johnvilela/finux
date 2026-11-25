@@ -60,6 +60,10 @@ the transactions inside the range.
   length, for the comparison. The `totals` and one read of the pages are
   enough.
 - `account_list` for the balances of today.
+- The lists and the totals leave out the accounts, the credit cards and
+  the transactions of other persons (the ones with an `owner`). Send
+  `include_others: true` only when the user asks for all persons, and
+  then report that person apart, with the name.
 - `credit_card_list`, and `credit_card_show` for each card, for the open
   bill and the bills that wait for a payment.
 - `goal_list` for the goals and their progress.

@@ -223,7 +223,8 @@ func (c *budgetsCommand) gather(current budget.Budget, date string, history int)
 			return details, err
 		}
 	}
-	views, err := transaction.NewStore(c.db).List(transaction.Filter{})
+	// A transaction of another person does not count on a budget.
+	views, err := transaction.NewStore(c.db).List(transaction.Filter{Mine: true})
 	if err != nil {
 		return details, err
 	}
@@ -251,7 +252,7 @@ func scheduledFor(db *gorm.DB, current budget.Budget, period budget.Usage, incom
 	}
 	var total int64
 	for _, view := range views {
-		if !current.Counts(view.Type, view.CategoryID, income[view.CategoryID], view.Account.Currency) {
+		if !view.Account.Mine() || !current.Counts(view.Type, view.CategoryID, income[view.CategoryID], view.Account.Currency) {
 			continue
 		}
 		for _, date := range view.Pending(period.To) {

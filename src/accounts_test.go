@@ -199,3 +199,46 @@ func TestAccountsHelp(t *testing.T) {
 		t.Fatalf("help created the data directory: %v", err)
 	}
 }
+
+func TestAccountsOfAnotherPerson(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "data")
+	succeed(t, home, "init")
+	succeed(t, home, "ac", "a", "--name", "Nubank", "--currency", "BRL", "--code", "NU", "--balance", "100")
+	if got := succeed(t, home, "ac", "a", "--name", "Conta Ana", "--currency", "BRL", "--code", "ANA", "--balance", "50", "--owner", " Ana "); got != "✓ Account ANA created\n" {
+		t.Fatalf("add with owner = %q", got)
+	}
+	const mine = "" +
+		"CODE  NAME    CURRENCY    BALANCE\n" +
+		"NU    Nubank  BRL       R$ 100,00\n" +
+		"1 account\n"
+	if got := succeed(t, home, "ac"); got != mine {
+		t.Fatalf("list =\n%s\nwant\n%s", got, mine)
+	}
+	const all = "" +
+		"CODE  NAME       OWNER  CURRENCY    BALANCE\n" +
+		"ANA   Conta Ana  Ana    BRL        R$ 50,00\n" +
+		"NU    Nubank            BRL       R$ 100,00\n" +
+		"2 accounts\n"
+	if got := succeed(t, home, "ac", "list", "--all"); got != all {
+		t.Fatalf("list --all =\n%s\nwant\n%s", got, all)
+	}
+	if got := succeed(t, home, "ac", "ANA"); !strings.Contains(got, "Owner     Ana\n") {
+		t.Fatalf("show lacks the owner:\n%s", got)
+	}
+	if got := succeed(t, home, "ac", "NU"); strings.Contains(got, "Owner") {
+		t.Fatalf("show of my account has an owner:\n%s", got)
+	}
+
+	succeed(t, home, "ac", "e", "NU", "--owner", "Bia")
+	if got := succeed(t, home, "ac"); got != "No accounts yet. Run 'finux ac add'.\n" {
+		t.Fatalf("list with no account of mine = %q", got)
+	}
+	succeed(t, home, "ac", "e", "NU", "--owner", "")
+	if got := succeed(t, home, "ac"); got != mine {
+		t.Fatalf("list after the owner is cleared =\n%s", got)
+	}
+	fail(t, home, 2, "owner must have at most 40 characters", "ac", "e", "NU", "--owner", strings.Repeat("a", 41))
+	if got := succeed(t, home, "ac", "help"); !strings.Contains(got, "--owner <name>") {
+		t.Fatalf("help lacks --owner:\n%s", got)
+	}
+}

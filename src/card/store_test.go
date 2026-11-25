@@ -172,3 +172,33 @@ func TestStoreBills(t *testing.T) {
 		t.Fatalf("Bill(99) error = %v, want ErrBillNotFound", err)
 	}
 }
+
+func TestStoreKeepsTheOwner(t *testing.T) {
+	store, _ := newStore(t)
+	mine := create(t, store, "Visa Gold", "VISA")
+	if !mine.Mine() {
+		t.Fatalf("a card without an owner is not mine: %+v", mine)
+	}
+	hers := Card{Name: "Master Ana", Code: "MANA", Color: "pink", Currency: "BRL", Limit: 1000, ClosingDay: 25, DueDay: 5, Owner: "  Ana "}
+	if err := store.Create(&hers); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Find("MANA", false)
+	if err != nil || got.Owner != "Ana" || got.Mine() {
+		t.Fatalf("after create: %+v, %v", got, err)
+	}
+	all, err := store.List(false)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("List = %+v, %v", all, err)
+	}
+	if own := Mine(all); len(own) != 1 || own[0].Code != "VISA" {
+		t.Fatalf("Mine = %+v", own)
+	}
+	got.Owner = ""
+	if err := store.Update(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = store.Find("MANA", false); err != nil || !got.Mine() {
+		t.Fatalf("after the owner is cleared: %+v, %v", got, err)
+	}
+}

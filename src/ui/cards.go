@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -43,7 +44,16 @@ func CardTable(cards []card.Card, plain bool) string {
 		return "No credit cards yet. Run 'finux cc add'.\n"
 	}
 	headers := []string{"CODE", "NAME", "CLOSES", "DUE", "LIMIT", "USED", "AVAILABLE"}
-	const firstAmount, availableColumn = 4, 6
+	owned := false
+	for _, current := range cards {
+		owned = owned || !current.Mine()
+	}
+	// The owner column shows only when a card of another person is in
+	// the list.
+	if owned {
+		headers = slices.Insert(headers, 2, "OWNER")
+	}
+	firstAmount, availableColumn := len(headers)-3, len(headers)-1
 	rows := make([][]string, len(cards))
 	for i, current := range cards {
 		name := current.Name
@@ -58,6 +68,9 @@ func CardTable(cards []card.Card, plain bool) string {
 			label, name, strconv.Itoa(current.ClosingDay), strconv.Itoa(current.DueDay),
 			money.Format(current.Limit, current.Currency), money.Format(current.Used, current.Currency),
 			money.Format(current.Available(), current.Currency),
+		}
+		if owned {
+			rows[i] = slices.Insert(rows[i], 2, current.Owner)
 		}
 	}
 	count := fmt.Sprintf("%d credit cards", len(cards))
@@ -201,6 +214,9 @@ func CardDetailsView(details CardDetails, plain bool) string {
 		{"Color", current.Color},
 		{"Created", current.CreatedAt.Local().Format(timeLayout)},
 		{"Updated", current.UpdatedAt.Local().Format(timeLayout)},
+	}
+	if !current.Mine() {
+		fields = slices.Insert(fields, 1, [2]string{"Owner", current.Owner})
 	}
 	if current.Archived() {
 		fields = append(fields, [2]string{"Status", "archived"})

@@ -91,3 +91,82 @@ func TestResumeHidesTheBillsAfterTheCurrentOne(t *testing.T) {
 		}
 	}
 }
+
+// otherPersonHome adds to newCardsHome the account ANA and the credit
+// card MANA of another person, with transactions of the two persons.
+func otherPersonHome(t *testing.T) cardsHome {
+	t.Helper()
+	h := newCardsHome(t)
+	h.ok("ac", "a", "--name", "Conta Ana", "--currency", "BRL", "--code", "ANA", "--balance", "1000", "--owner", "Ana")
+	h.ok("cc", "add", "--name", "Master Ana", "--currency", "BRL", "--limit", "1000", "--closing", "25", "--due", "5", "--code", "MANA", "--owner", "Ana")
+	add := func(title, value, account, category, date string, more ...string) {
+		t.Helper()
+		h.ok(append([]string{"tx", "a", "--title", title, "--value", value, "--account", account, "--category", category, "--date", date}, more...)...)
+	}
+	h.ok("bg", "add", "--title", "Food", "--limit", "800", "--currency", "BRL", "--categories", "FOOD", "--every", "month", "--code", "FOOD")
+	h.ok("gl", "add", "--title", "Trip to Japan", "--type", "save", "--target", "10000", "--currency", "BRL", "--due", "30/06/2027", "--code", "TRIP")
+	add("Salary", "3000", "NU", "SAL", "05/11/2026")
+	add("Market", "300", "NU", "FOOD", "10/11/2026")
+	add("Dinner", "100", "VISA", "FOOD", "15/11/2026")
+	add("Her market", "70", "ANA", "FOOD", "11/11/2026")
+	add("Her dinner", "90", "MANA", "FOOD", "12/11/2026")
+	add("Mine saved", "400", "NU", "SAL", "06/11/2026", "--goal", "TRIP")
+	add("Hers saved", "250", "ANA", "SAL", "06/11/2026", "--goal", "TRIP")
+	return h
+}
+
+func TestResumeLeavesOutOtherPersons(t *testing.T) {
+	h := otherPersonHome(t)
+	out := h.ok("resume")
+	h.has(out, "Income      R$ 3.400,00\n", "Expenses    R$ 400,00\n",
+		"NU    Nubank  R$ 8.100,00\n", "Total BRL  R$ 8.100,00\n",
+		"VISA  12/2026  open    05/12/2026  R$ 100,00\n",
+		"FOOD  Food   ok      50%  R$ 400,00  R$ 800,00\n",
+		"TRIP  Trip to Japan  active  30/06/2027  4%  R$ 400,00  R$ 10.000,00\n")
+	for _, absent := range []string{"ANA", "Ana", "MANA"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("resume has %q:\n%s", absent, out)
+		}
+	}
+
+	all := h.ok("resume", "--all")
+	h.has(all, "Income      R$ 3.650,00\n", "Expenses    R$ 560,00\n",
+		"ANA   Conta Ana (Ana)  R$ 1.180,00\n", "NU    Nubank           R$ 8.100,00\n", "Total BRL  R$ 9.280,00\n",
+		"MANA (Ana)  12/2026  open    05/12/2026   R$ 90,00\n", "VISA        12/2026  open    05/12/2026  R$ 100,00\n",
+		// The budgets and the goals never count the other persons.
+		"FOOD  Food   ok      50%  R$ 400,00  R$ 800,00\n",
+		"TRIP  Trip to Japan  active  30/06/2027  4%  R$ 400,00  R$ 10.000,00\n")
+	h.has(h.ok("resume", "--help"), "--all")
+	if got := h.ok("rs", "--all", "--month", "11/2026"); got != all {
+		t.Fatalf("rs --all --month = %q, want the same as resume --all", got)
+	}
+}
+
+func TestTransactionsLeaveOutOtherPersons(t *testing.T) {
+	h := otherPersonHome(t)
+	list := h.ok("tx", "list")
+	h.has(list, "Market", "Dinner", "Salary", "Mine saved", "4 transactions\n")
+	for _, absent := range []string{"Her market", "Her dinner", "Hers saved"} {
+		if strings.Contains(list, absent) {
+			t.Errorf("tx list has %q:\n%s", absent, list)
+		}
+	}
+	h.has(h.ok("tx", "list", "--all"), "Her market", "Her dinner", "Hers saved", "Market", "7 transactions\n")
+	h.has(h.ok("tx", "list", "--account", "ANA"), "Her market", "Hers saved", "2 transactions\n")
+	h.has(h.ok("tx", "list", "--account", "MANA"), "Her dinner", "1 transaction\n")
+	if got := h.ok("tx", "list", "--category", "FOOD"); strings.Contains(got, "Her") {
+		t.Errorf("tx list --category has a transaction of another person:\n%s", got)
+	}
+	h.has(h.ok("tx", "--help"), "--all                 Include the transactions of other persons")
+
+	budget := h.ok("bg", "FOOD")
+	h.has(budget, "Market", "Dinner")
+	if strings.Contains(budget, "Her") {
+		t.Errorf("budget details have a transaction of another person:\n%s", budget)
+	}
+	goal := h.ok("gl", "TRIP")
+	h.has(goal, "R$ 400,00", "Mine saved")
+	if strings.Contains(goal, "Hers saved") {
+		t.Errorf("goal details have a transaction of another person:\n%s", goal)
+	}
+}

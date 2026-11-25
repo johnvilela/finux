@@ -203,3 +203,24 @@ func TestDaemonServesMCP(t *testing.T) {
 		t.Fatalf("log:\n%s", log)
 	}
 }
+
+func TestDaemonRemindsOfTheBillsOfOtherPersons(t *testing.T) {
+	home, f := remindersHome(t), newFakeTelegram(t)
+	at := func(args ...string) { on(t, home, "2026-11-17", args...) }
+	at("cc", "add", "--name", "Master Ana", "--code", "MANA", "--currency", "BRL", "--limit", "1000", "--closing", "25", "--due", "5", "--owner", "Ana")
+	// Her bill of November is late. Her expense does not count on the budget.
+	at("tx", "add", "--title", "Her market", "--value", "80", "--account", "MANA", "--category", "FOOD", "--date", "20/10/2026")
+	at("tx", "add", "--title", "Her dinner", "--value", "40", "--account", "MANA", "--category", "FOOD", "--date", "17/11/2026")
+	succeed(t, home, "config", "set", "telegram-reminders", "on")
+	stop := startDaemon(t, home, f)
+	defer stop()
+	got := f.messages(3)
+	want := []string{
+		"Budget FOOD: 90% spent, R$ 5,00 left until 30/11/2026",
+		"Schedule RENT (Rent) is due since 17/11/2026. Send /sc pay RENT or /sc skip RENT.",
+		"The bill 11/2026 of MANA (Ana) is late: R$ 80,00 was due on 05/11/2026. Send /cc pay MANA.",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("reminders = %q", got)
+	}
+}

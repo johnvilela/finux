@@ -233,7 +233,7 @@ func TestTransactionsUsageErrors(t *testing.T) {
 		args []string
 	}{
 		"unknown flag":             {"-currency", with("--currency", "BRL")},
-		"unknown flag alone":       {"-all", []string{"tx", "--all"}},
+		"unknown flag alone":       {"-nope", []string{"tx", "--nope"}},
 		"add with nothing":         {"--title", []string{"tx", "a"}},
 		"add without title":        {"--title", []string{"tx", "add", "--value", "1", "--account", "INTER", "--category", "FOOD"}},
 		"add without value":        {"--value", []string{"tx", "add", "--title", "X", "--account", "INTER", "--category", "FOOD"}},

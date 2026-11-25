@@ -27,13 +27,13 @@ func accountsHelp() string {
   <code|id>                    Show the details of an account
   show <code|id>               Same as <code|id>
   add, a [options]             Create an account
-  edit, e [code|id] [options]  Change the name, code, description or color
+  edit, e [code|id] [options]  Change the name, code, description, color or owner
   delete, d [code|id]          Archive an account
   restore, r [code|id]         Restore an archived account
   help, --help, -h             Show this help
 
 ` + green.Render("Options for list:") + `
-  --all                 Include archived accounts
+  --all                 Include archived accounts and the accounts of other persons
 
 ` + green.Render("Options for add:") + `
   --name <text>         Name of the account
@@ -43,9 +43,10 @@ func accountsHelp() string {
   --balance <amount>    Opening balance, for example 1234.56 (default: 0)
   --color <name>        ` + strings.Join(account.ColorKeys()[:8], ", ") + `,
                         ` + strings.Join(account.ColorKeys()[8:], ", ") + `
+  --owner <name>        Person the account belongs to (default: you)
 
 ` + green.Render("Options for edit:") + `
-  --name, --code, --description, --color
+  --name, --code, --description, --color, --owner
 
 ` + green.Render("Options for delete:") + `
   --hard                Delete permanently, with the transactions of the account;
@@ -59,6 +60,8 @@ account with the code L.
 An archived account keeps its transactions. A permanent delete also deletes
 them. The other side of each transfer stays in its account as an expense or
 an income of the category OTHER.
+An account with an owner belongs to another person. The lists, the resume,
+the budgets and the goals leave it out. Use --owner "" to make it yours.
 `
 }
 
@@ -100,6 +103,9 @@ func runAccounts(args []string, io streams) int {
 		return command.fail(err)
 	}
 	defer closeDatabase(db)
+	if !db.Migrator().HasColumn(&account.Account{}, "owner") {
+		return command.fail(errOutdated)
+	}
 	announceAutomatic(db, io)
 	command.db, command.store = db, account.NewStore(db)
 	return command.fail(handler(rest))
@@ -176,6 +182,9 @@ func (c *accountsCommand) list(args []string) error {
 	if err != nil {
 		return err
 	}
+	if !all {
+		accounts = account.Mine(accounts)
+	}
 	if len(accounts) == 0 || !c.interactive {
 		return c.print(ui.AccountTable(accounts, c.plain))
 	}
@@ -231,6 +240,9 @@ func checkFlags(command string, draft account.Account, given map[string]bool) er
 	if err == nil && given["currency"] && !money.Valid(draft.Currency) {
 		err = fmt.Errorf("unknown currency %q: use one of %s", draft.Currency, strings.Join(money.Codes(), ", "))
 	}
+	if err == nil && given["owner"] {
+		err = account.CheckOwner(draft.Owner)
+	}
 	if err != nil {
 		return usageError(command + ": " + err.Error())
 	}
@@ -247,6 +259,7 @@ func (c *accountsCommand) add(args []string) error {
 		f.StringVar(&draft.Currency, "currency", "", "")
 		f.StringVar(&balance, "balance", "", "")
 		f.StringVar(&draft.Color, "color", "", "")
+		f.StringVar(&draft.Owner, "owner", "", "")
 	}, 0)
 	if err != nil {
 		return err
@@ -255,6 +268,7 @@ func (c *accountsCommand) add(args []string) error {
 	draft.Code = code.Normalize(draft.Code)
 	draft.Currency = strings.ToUpper(strings.TrimSpace(draft.Currency))
 	draft.Color = strings.ToLower(strings.TrimSpace(draft.Color))
+	draft.Owner = strings.TrimSpace(draft.Owner)
 	if err := checkFlags("add", draft, given); err != nil {
 		return err
 	}
@@ -281,7 +295,7 @@ func (c *accountsCommand) add(args []string) error {
 		var preset []ui.Field
 		for flagName, field := range map[string]ui.Field{
 			"name": ui.FieldName, "code": ui.FieldCode, "description": ui.FieldDescription,
-			"currency": ui.FieldCurrency, "color": ui.FieldColor,
+			"currency": ui.FieldCurrency, "color": ui.FieldColor, "owner": ui.FieldOwner,
 		} {
 			if given[flagName] {
 				preset = append(preset, field)
@@ -328,6 +342,7 @@ func (c *accountsCommand) edit(args []string) error {
 		f.StringVar(&changes.Code, "code", "", "")
 		f.StringVar(&changes.Description, "description", "", "")
 		f.StringVar(&changes.Color, "color", "", "")
+		f.StringVar(&changes.Owner, "owner", "", "")
 	}, 1)
 	if err != nil {
 		return err
@@ -335,11 +350,12 @@ func (c *accountsCommand) edit(args []string) error {
 	changes.Name = strings.TrimSpace(changes.Name)
 	changes.Code = code.Normalize(changes.Code)
 	changes.Color = strings.ToLower(strings.TrimSpace(changes.Color))
+	changes.Owner = strings.TrimSpace(changes.Owner)
 	if err := checkFlags("edit", changes, given); err != nil {
 		return err
 	}
 	if len(given) == 0 && !c.interactive {
-		return usageError("edit: give --name, --code, --description or --color when input is not a terminal")
+		return usageError("edit: give --name, --code, --description, --color or --owner when input is not a terminal")
 	}
 	current, err := c.resolve("edit", reference(positional), "Edit account", scopeActive)
 	if err != nil {
@@ -369,6 +385,9 @@ func (c *accountsCommand) edit(args []string) error {
 	}
 	if given["color"] {
 		current.Color = changes.Color
+	}
+	if given["owner"] {
+		current.Owner = changes.Owner
 	}
 	if err := c.store.Update(&current); err != nil {
 		return err

@@ -32,6 +32,7 @@ func (s *Store) prepare(account *Account) error {
 	account.Name = strings.TrimSpace(account.Name)
 	account.Description = strings.TrimSpace(account.Description)
 	account.Code = code.Normalize(account.Code)
+	account.Owner = strings.TrimSpace(account.Owner)
 	if err := account.Validate(); err != nil {
 		return err
 	}
@@ -71,13 +72,13 @@ func (s *Store) Create(account *Account) error {
 	return s.db.Create(account).Error
 }
 
-// Update saves the name, code, description and color of an account.
+// Update saves the name, code, description, color and owner of an account.
 // Currency and opening balance do not change after creation.
 func (s *Store) Update(account *Account) error {
 	if err := s.prepare(account); err != nil {
 		return err
 	}
-	return s.db.Model(account).Select("Name", "Code", "Description", "Color").Updates(account).Error
+	return s.db.Model(account).Select("Name", "Code", "Description", "Color", "Owner").Updates(account).Error
 }
 
 // List returns accounts ordered by name. Archived accounts are included

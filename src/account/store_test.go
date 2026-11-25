@@ -3,6 +3,7 @@ package account
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"finux/src/storage"
@@ -166,5 +167,40 @@ func TestStoreArchiveRestoreDelete(t *testing.T) {
 		if err := action(4242); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%s of missing id error = %v, want ErrNotFound", name, err)
 		}
+	}
+}
+
+func TestStoreKeepsTheOwner(t *testing.T) {
+	store := newStore(t)
+	mine := create(t, store, "Banco Inter", "INTER")
+	if !mine.Mine() {
+		t.Fatalf("an account without an owner is not mine: %+v", mine)
+	}
+	hers := Account{Name: "Conta Ana", Code: "ANA", Color: "pink", Currency: "BRL", Owner: "  Ana "}
+	if err := store.Create(&hers); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Find("ANA", false, "2026-11-17")
+	if err != nil || got.Owner != "Ana" || got.Mine() {
+		t.Fatalf("after create: %+v, %v", got, err)
+	}
+	all, err := store.List(false, "2026-11-17")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("List = %+v, %v", all, err)
+	}
+	if own := Mine(all); len(own) != 1 || own[0].Code != "INTER" {
+		t.Fatalf("Mine = %+v", own)
+	}
+
+	got.Owner = ""
+	if err := store.Update(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = store.Find("ANA", false, "2026-11-17"); err != nil || !got.Mine() {
+		t.Fatalf("after the owner is cleared: %+v, %v", got, err)
+	}
+	long := Account{Name: "Long", Code: "LONG", Color: "pink", Currency: "BRL", Owner: strings.Repeat("a", 41)}
+	if err := store.Create(&long); err == nil {
+		t.Fatal("an owner of 41 characters is accepted")
 	}
 }

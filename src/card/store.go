@@ -35,6 +35,7 @@ func (s *Store) prepare(card *Card) error {
 	card.Name = strings.TrimSpace(card.Name)
 	card.Description = strings.TrimSpace(card.Description)
 	card.Code = code.Normalize(card.Code)
+	card.Owner = strings.TrimSpace(card.Owner)
 	if err := card.Validate(); err != nil {
 		return err
 	}
@@ -73,14 +74,14 @@ func (s *Store) Create(card *Card) error {
 	return s.db.Create(card).Error
 }
 
-// Update saves the name, code, description, color, limit and days of a
-// credit card. The currency does not change after creation. New days
+// Update saves the name, code, description, color, limit, days and
+// owner of a credit card. The currency does not change after creation. New days
 // apply only to the bills that do not exist yet.
 func (s *Store) Update(card *Card) error {
 	if err := s.prepare(card); err != nil {
 		return err
 	}
-	return s.db.Model(card).Select("Name", "Code", "Description", "Color", "Limit", "ClosingDay", "DueDay").Updates(card).Error
+	return s.db.Model(card).Select("Name", "Code", "Description", "Color", "Limit", "ClosingDay", "DueDay", "Owner").Updates(card).Error
 }
 
 // List returns credit cards ordered by name. Archived cards are

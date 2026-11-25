@@ -46,6 +46,7 @@ func transactionsHelp() string {
   --virtual             Transactions made with a virtual card of a credit card;
                         --virtual=false gives the other ones
   --type <type>         ` + strings.Join(transaction.Types(), ", ") + `, ` + transaction.Payment + `
+  --all                 Include the transactions of other persons
 
 ` + green.Render("Options for add and edit:") + `
   --title <text>        Title, at most ` + strconv.Itoa(transaction.MaxTitle) + ` characters
@@ -91,6 +92,10 @@ Delete asks for confirmation.
 In the list, the search input finds transactions by title. It also reads
 filters: #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes or virtual:no, and a
 date such as 2026, 2026-11 or 17/11/2026.
+
+The list leaves out the transactions in an account or a credit card of
+another person (see 'finux ac --help'). Use --all for all of them, or
+--account for the ones of one account.
 
 A transfer is two transactions, one in each account. A change or a delete of
 one of them also changes or deletes the other. A transfer keeps its type and
@@ -152,7 +157,8 @@ func transactionsReady(db *gorm.DB) bool {
 		migrator.HasColumn(&transaction.Transaction{}, "status") && migrator.HasColumn(&card.Bill{}, "status") &&
 		migrator.HasTable(&schedule.Schedule{}) && migrator.HasColumn(&schedule.Schedule{}, "currency") && migrator.HasColumn(&transaction.Transaction{}, "schedule_id") &&
 		migrator.HasTable(&setting.Setting{}) && migrator.HasTable(&transaction.Correction{}) && migrator.HasTable(&note.Note{}) &&
-		migrator.HasTable(&budget.Budget{}) && migrator.HasTable(&budget.Link{})
+		migrator.HasTable(&budget.Budget{}) && migrator.HasTable(&budget.Link{}) &&
+		migrator.HasColumn(&account.Account{}, "owner") && migrator.HasColumn(&card.Card{}, "owner")
 }
 
 func runTransactions(args []string, io streams) int {
@@ -289,7 +295,7 @@ func (c *transactionsCommand) findCategory(ref string) (category.Category, error
 
 func (c *transactionsCommand) list(args []string) error {
 	var categoryRef, tags, search, date, accountRef, kind, goalRef string
-	var virtual bool
+	var virtual, all bool
 	_, given, err := parse("list", args, func(f *flag.FlagSet) {
 		f.StringVar(&categoryRef, "category", "", "")
 		f.StringVar(&tags, "tag", "", "")
@@ -299,14 +305,19 @@ func (c *transactionsCommand) list(args []string) error {
 		f.StringVar(&kind, "type", "", "")
 		f.StringVar(&goalRef, "goal", "", "")
 		f.BoolVar(&virtual, "virtual", false, "")
+		f.BoolVar(&all, "all", false, "")
 	}, 0)
 	if err != nil {
 		return err
 	}
+	// The option --all is not a filter: an empty result with it alone
+	// is an empty list.
+	delete(given, "all")
 	filter, err := c.filter(listFlags{category: categoryRef, tags: tags, search: search, date: date, account: accountRef, kind: kind, goal: goalRef, virtual: virtual}, given)
 	if err != nil {
 		return err
 	}
+	filter.Mine = !all
 	views, err := c.store.List(filter)
 	if err != nil {
 		return err

@@ -32,11 +32,12 @@ No arguments.
 
 ### `account_list`
 
-*Read.* List the accounts with their balances. The balance is the opening balance plus the transactions of the account that have a date up to today.
+*Read.* List the accounts with their balances. The balance is the opening balance plus the transactions of the account that have a date up to today. An account with an owner belongs to another person: the list leaves it out unless include_others is true.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `include_archived` | boolean | no | Also return the archived ones |
+| `include_others` | boolean | no | Also return the ones of other persons (the ones with an owner) |
 
 ### `account_show`
 
@@ -58,10 +59,11 @@ No arguments.
 | `code` | string | no | Short code, 1 to 5 letters and digits. Default: made from the name |
 | `color` | string | no | Color. Default: the first color no account uses. One of: `red`, `orange`, `amber`, `yellow`, `lime`, `green`, `emerald`, `teal`, `cyan`, `sky`, `blue`, `indigo`, `violet`, `purple`, `pink`, `slate` |
 | `description` | string | no | Description |
+| `owner` | string | no | Name of the person the account belongs to, when it is not the user. Default: the user |
 
 ### `account_edit`
 
-*Change.* Change the name, the code, the description or the color of an account. Give only the arguments to change. The currency and the opening balance cannot change.
+*Change.* Change the name, the code, the description, the color or the owner of an account. Give only the arguments to change. The currency and the opening balance cannot change.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -70,6 +72,7 @@ No arguments.
 | `color` | string | no | New color. One of: `red`, `orange`, `amber`, `yellow`, `lime`, `green`, `emerald`, `teal`, `cyan`, `sky`, `blue`, `indigo`, `violet`, `purple`, `pink`, `slate` |
 | `description` | string | no | New description |
 | `name` | string | no | New name |
+| `owner` | string | no | Name of the person the account belongs to. An empty string makes it an account of the user |
 
 ### `account_archive`
 
@@ -148,7 +151,7 @@ No arguments.
 
 ### `transaction_list`
 
-*Read.* List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset.
+*Read.* List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset. The list and the totals leave out the transactions in the accounts and the credit cards of other persons unless include_others is true.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -156,6 +159,7 @@ No arguments.
 | `category` | string | no | Only the transactions of this category (code or id) |
 | `date` | string | no | A year (2026), a month (2026-11 or 11/2026) or a date (2026-11-17) |
 | `goal` | string | no | Only the transactions linked to this goal (code or id) |
+| `include_others` | boolean | no | Also return and count the transactions in the accounts and the credit cards of other persons. With account, the transactions of that account come in any case |
 | `limit` | integer | no | Most transactions to return. Default: 100 |
 | `offset` | integer | no | Number of transactions to skip, to read the next page. Default: 0 |
 | `search` | string | no | Only the transactions whose title contains this text |
@@ -243,11 +247,12 @@ No arguments.
 
 ### `credit_card_list`
 
-*Read.* List the credit cards with the limit, the used value (the total of the bills that are not paid) and the available value.
+*Read.* List the credit cards with the limit, the used value (the total of the bills that are not paid) and the available value. A credit card with an owner belongs to another person: the list leaves it out unless include_others is true.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
 | `include_archived` | boolean | no | Also return the archived ones |
+| `include_others` | boolean | no | Also return the ones of other persons (the ones with an owner) |
 
 ### `credit_card_show`
 
@@ -279,6 +284,7 @@ No arguments.
 | `code` | string | no | Short code, 1 to 5 letters and digits, different from the codes of the accounts. Default: made from the name |
 | `color` | string | no | Color. Default: the first color no credit card uses. One of: `red`, `orange`, `amber`, `yellow`, `lime`, `green`, `emerald`, `teal`, `cyan`, `sky`, `blue`, `indigo`, `violet`, `purple`, `pink`, `slate` |
 | `description` | string | no | Description |
+| `owner` | string | no | Name of the person the credit card belongs to, when it is not the user. Default: the user |
 
 ### `credit_card_edit`
 
@@ -294,6 +300,7 @@ No arguments.
 | `due_day` | integer | no | New due day, 1 to 31. It applies to the bills that do not exist yet |
 | `limit` | string | no | New credit limit as a decimal string |
 | `name` | string | no | New name |
+| `owner` | string | no | Name of the person the credit card belongs to. An empty string makes it a credit card of the user |
 
 ### `credit_card_pay`
 

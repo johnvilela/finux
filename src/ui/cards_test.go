@@ -344,7 +344,8 @@ func TestCardFormCreateFlow(t *testing.T) {
 		{append(text("40"), keyTab), FieldClosing, "Closing day must be from 1 to 31"},
 		{[]tea.Msg{keyBack, keyBack, tea.KeyPressMsg{Code: '2', Text: "2"}, tea.KeyPressMsg{Code: '5', Text: "5"}, keyTab}, FieldDue, ""},
 		{append(text("x"), keyTab), FieldDue, "Due day must be from 1 to 31"},
-		{[]tea.Msg{keyBack, tea.KeyPressMsg{Code: '5', Text: "5"}, keyTab}, FieldColor, ""},
+		{[]tea.Msg{keyBack, tea.KeyPressMsg{Code: '5', Text: "5"}, keyTab}, FieldOwner, ""},
+		{[]tea.Msg{keyTab}, FieldColor, ""},
 	}
 	for index, step := range steps {
 		model = send(t, model, step.keys...)

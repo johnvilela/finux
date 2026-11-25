@@ -133,13 +133,14 @@ func (s *Store) progress(goals []Goal) error {
 		Links                  int64
 	}
 	// A transfer is two rows. The row that leaves its account stands for
-	// the transfer.
+	// the transfer. A transaction in an account or a card of another
+	// person does not count.
 	err := s.db.Table("transactions").Select(`goal_id,
 		SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) AS income,
 		SUM(CASE WHEN type = 'expense' THEN -amount ELSE 0 END) AS expense,
 		SUM(CASE WHEN type = 'transfer' AND amount < 0 THEN -amount ELSE 0 END) AS moved,
 		SUM(CASE WHEN type = 'transfer' AND amount > 0 THEN 0 ELSE 1 END) AS links`).
-		Where("goal_id <> 0").Group("goal_id").Scan(&sums).Error
+		Where("goal_id <> 0" + s.mine()).Group("goal_id").Scan(&sums).Error
 	if err != nil {
 		return err
 	}
@@ -156,6 +157,19 @@ func (s *Store) progress(goals []Goal) error {
 		}
 	}
 	return nil
+}
+
+// mine is the condition that leaves out the transactions in the
+// accounts and the cards of other persons. The accounts and cards tables
+// belong to other packages; an older database has no owner in them.
+func (s *Store) mine() string {
+	condition, migrator := "", s.db.Migrator()
+	for table, column := range map[string]string{"accounts": "account_id", "cards": "card_id"} {
+		if migrator.HasTable(table) && migrator.HasColumn(table, "owner") {
+			condition += " AND " + column + " NOT IN (SELECT id FROM " + table + " WHERE owner <> '')"
+		}
+	}
+	return condition
 }
 
 // Archive marks a goal as archived. Its transactions keep the link.

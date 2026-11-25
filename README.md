@@ -285,10 +285,10 @@ money.
 
 ```text
 finux ac                             List accounts; select one to see its details
-finux ac list --all                  The same, with archived accounts
+finux ac list --all                  The same, with archived accounts and the accounts of other persons
 finux ac <code|id>                   Show the details of an account
 finux ac add [options]               Create an account
-finux ac edit [code|id] [options]    Change the name, code, description or color
+finux ac edit [code|id] [options]    Change the name, code, description, color or owner
 finux ac delete [code|id]            Archive an account
 finux ac delete [code|id] --hard     Delete an account permanently
 finux ac restore [code|id]           Restore an archived account
@@ -317,9 +317,11 @@ currency and an opening balance.
   date changes the balance when its day comes.
 - **Color**: one of 16 colors: red, orange, amber, yellow, lime, green, emerald,
   teal, cyan, sky, blue, indigo, violet, purple, pink, slate.
+- **Owner**: optional. The name of the person the account belongs to, when it
+  is not you. See [Other persons](#other-persons).
 
 `finux ac add` and `finux ac edit` open a form. Options such as `--name`,
-`--code`, `--description`, `--currency`, `--balance` and `--color` give the
+`--code`, `--description`, `--currency`, `--balance`, `--color` and `--owner` give the
 values on the command line. With `--name` and `--currency`, `add` does not open
 the form:
 
@@ -343,6 +345,39 @@ A credit card bill that the account paid stays paid.
 When input or output is not a terminal, Finux does not open forms, selectors or
 prompts: give the values as options. `finux ac` then prints a plain table, and
 details are plain text without borders.
+
+### Other persons
+
+You can record the accounts and the credit cards of another person, for
+example when you pay the bills of your partner. Give the name of the person
+with `--owner`:
+
+```sh
+./bin/finux ac add --name "Conta Ana" --code ANA --currency BRL --owner Ana
+./bin/finux cc add --name "Master Ana" --code MANA --currency BRL --limit 3000 --closing 25 --due 5 --owner Ana
+./bin/finux tx add --title Market --value 70 --account MANA --category FOOD
+```
+
+An account or a credit card without an owner is yours. Finux keeps the ones
+of other persons out of your numbers:
+
+- `finux ac` and `finux cc` do not list them. `--all` lists them, with an
+  `OWNER` column.
+- `finux resume` leaves out their balances, their bills, their transactions
+  and their schedules. `finux resume --all` counts them and shows the name of
+  the person next to each one.
+- `finux tx` does not list their transactions. `finux tx --all` lists all,
+  and `finux tx --account MANA` lists the ones of one account or card.
+- The budgets and the goals never count their transactions.
+- The Telegram reminders of the bills keep them, with the name of the person.
+
+A command with a code works for any owner: `finux ac ANA`, `finux cc MANA`,
+`finux cc bills MANA`, `finux cc pay MANA --from INTER`. `--owner ""` in
+`edit` makes the account or the credit card yours.
+
+A transfer from your account to an account of another person, and the payment
+of a bill of that person from your account, lower your balance. They are not
+expenses.
 
 ## Categories
 
@@ -515,6 +550,7 @@ and create a new one.
 ./bin/finux tx --account INTER
 ./bin/finux tx --type expense
 ./bin/finux tx --virtual              # made with a virtual card; --virtual=false gives the others
+./bin/finux tx --all                  # also the transactions of other persons
 ```
 
 The interactive list reads like a bank statement: one line for each transaction
@@ -534,7 +570,7 @@ their bills.
 
 ```text
 finux cc                             List credit cards; select one to see its details
-finux cc list --all                  The same, with archived credit cards
+finux cc list --all                  The same, with archived credit cards and the ones of other persons
 finux cc <code|id>                   Show a credit card and the transactions of its open bill
 finux cc add [options]               Create a credit card
 finux cc edit [code|id] [options]    Change a credit card
@@ -562,6 +598,7 @@ starts empty.
 - **Closing day** and **due day**: days of the month, 1 to 31. A month with
   fewer days uses its last day. New days apply to the bills that do not exist
   yet.
+- **Owner**: optional, as for an account. See [Other persons](#other-persons).
 
 ```sh
 ./bin/finux cc add --name "Visa Gold" --code VISA --currency BRL --limit 5000 --closing 25 --due 5
@@ -754,6 +791,8 @@ budget of one week, month or year starts on the first day of this week
 - Only transactions in the currency of the budget count.
 - A transfer and the payment of a credit card bill (`finux cc pay`) do not
   count. A purchase with a card counts on the day of the purchase.
+- A transaction in an account or a credit card of another person does not
+  count. See [Other persons](#other-persons).
 
 A period is `ok`, then `near` when it spent 80% of its amount or more, then
 `over`. A budget that did not start is `upcoming`; one whose end date
@@ -892,6 +931,7 @@ The resume is the summary of your finances on the date of today.
 ```sh
 ./bin/finux resume                  # the month of today; alias: rs
 ./bin/finux rs --month 10/2026      # the incomes and expenses of another month
+./bin/finux rs --all                # with the accounts and the cards of other persons
 ```
 
 For each currency, it shows the incomes, the expenses, the net amount, the

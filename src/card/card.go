@@ -35,9 +35,13 @@ type Card struct {
 	// with fewer days uses its last day.
 	ClosingDay int
 	DueDay     int
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	DeletedAt  gorm.DeletedAt `gorm:"index"`
+	// Owner is the person the card belongs to. It is empty for a card
+	// of the user. The lists and the totals leave out the cards of
+	// other persons unless the user asks for them.
+	Owner     string `gorm:"size:40;not null;default:''"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
 	// Used is the total of the bills that are not paid. The store fills
 	// it; it is not a column.
 	Used int64 `gorm:"-"`
@@ -45,6 +49,20 @@ type Card struct {
 
 // Available returns the part of the limit that is free.
 func (c Card) Available() int64 { return c.Limit - c.Used }
+
+// Mine reports whether the card belongs to the user.
+func (c Card) Mine() bool { return c.Owner == "" }
+
+// Mine returns the cards that belong to the user.
+func Mine(cards []Card) []Card {
+	mine := make([]Card, 0, len(cards))
+	for _, current := range cards {
+		if current.Mine() {
+			mine = append(mine, current)
+		}
+	}
+	return mine
+}
 
 // Archived reports whether the card is soft-deleted.
 func (c Card) Archived() bool { return c.DeletedAt.Valid }
@@ -77,7 +95,10 @@ func (c Card) Validate() error {
 	if err := CheckDay("closing day", c.ClosingDay); err != nil {
 		return err
 	}
-	return CheckDay("due day", c.DueDay)
+	if err := CheckDay("due day", c.DueDay); err != nil {
+		return err
+	}
+	return account.CheckOwner(c.Owner)
 }
 
 // dayOf returns the given day of a month, or the last day of the month

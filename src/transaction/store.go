@@ -457,7 +457,7 @@ func (s *Store) remove(id uint) error {
 // asAccount shows a credit card as an account, for the screens that
 // show where a transaction is.
 func asAccount(owner card.Card) account.Account {
-	return account.Account{Name: owner.Name, Code: owner.Code, Color: owner.Color, Currency: owner.Currency, DeletedAt: owner.DeletedAt}
+	return account.Account{Name: owner.Name, Code: owner.Code, Color: owner.Color, Currency: owner.Currency, Owner: owner.Owner, DeletedAt: owner.DeletedAt}
 }
 
 // views adds the accounts, the cards, the bills and the categories to
@@ -691,13 +691,19 @@ func (s *Store) PurgeAccount(deleted account.Account, other category.Category) e
 	})
 }
 
-// ByGoal returns the transactions linked to a goal, the newest first.
+// ByGoal returns the transactions that count toward a goal, the newest
+// first. A transaction in an account or a card of another person does
+// not count.
 func (s *Store) ByGoal(goalID uint) ([]View, error) {
 	var transactions []Transaction
 	if err := s.db.Where("goal_id = ?", goalID).Order("date DESC, id DESC").Find(&transactions).Error; err != nil {
 		return nil, err
 	}
-	return s.views(transactions)
+	views, err := s.views(transactions)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(views, func(view View) bool { return !view.Account.Mine() }), nil
 }
 
 // BySchedule returns the transactions that a schedule created, the

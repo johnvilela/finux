@@ -50,13 +50,16 @@ func cash(amount int64, currency string) cashJSON {
 }
 
 type accountJSON struct {
-	ID             uint     `json:"id"`
-	Code           string   `json:"code"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description"`
-	Color          string   `json:"color"`
-	Currency       string   `json:"currency"`
-	Archived       bool     `json:"archived"`
+	ID          uint   `json:"id"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Color       string `json:"color"`
+	Currency    string `json:"currency"`
+	Archived    bool   `json:"archived"`
+	// Owner is the person the account belongs to. It is empty for an
+	// account of the user.
+	Owner          string   `json:"owner"`
 	OpeningBalance cashJSON `json:"opening_balance"`
 	Balance        cashJSON `json:"balance"`
 }
@@ -64,7 +67,7 @@ type accountJSON struct {
 func accountResult(a account.Account) accountJSON {
 	return accountJSON{
 		ID: a.ID, Code: a.Code, Name: a.Name, Description: a.Description, Color: a.Color, Currency: a.Currency,
-		Archived: a.Archived(), OpeningBalance: cash(a.OpeningBalance, a.Currency), Balance: cash(a.Balance(), a.Currency),
+		Archived: a.Archived(), Owner: a.Owner, OpeningBalance: cash(a.OpeningBalance, a.Currency), Balance: cash(a.Balance(), a.Currency),
 	}
 }
 
@@ -88,24 +91,27 @@ func categoryResult(c category.Category) categoryJSON {
 }
 
 type cardJSON struct {
-	ID          uint     `json:"id"`
-	Code        string   `json:"code"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Color       string   `json:"color"`
-	Currency    string   `json:"currency"`
-	Archived    bool     `json:"archived"`
-	Limit       cashJSON `json:"limit"`
-	Used        cashJSON `json:"used"`
-	Available   cashJSON `json:"available"`
-	ClosingDay  int      `json:"closing_day"`
-	DueDay      int      `json:"due_day"`
+	ID          uint   `json:"id"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Color       string `json:"color"`
+	Currency    string `json:"currency"`
+	Archived    bool   `json:"archived"`
+	// Owner is the person the credit card belongs to. It is empty for a
+	// credit card of the user.
+	Owner      string   `json:"owner"`
+	Limit      cashJSON `json:"limit"`
+	Used       cashJSON `json:"used"`
+	Available  cashJSON `json:"available"`
+	ClosingDay int      `json:"closing_day"`
+	DueDay     int      `json:"due_day"`
 }
 
 func cardResult(c card.Card) cardJSON {
 	return cardJSON{
 		ID: c.ID, Code: c.Code, Name: c.Name, Description: c.Description, Color: c.Color, Currency: c.Currency,
-		Archived: c.Archived(), Limit: cash(c.Limit, c.Currency), Used: cash(c.Used, c.Currency),
+		Archived: c.Archived(), Owner: c.Owner, Limit: cash(c.Limit, c.Currency), Used: cash(c.Used, c.Currency),
 		Available: cash(c.Available(), c.Currency), ClosingDay: c.ClosingDay, DueDay: c.DueDay,
 	}
 }
@@ -474,6 +480,13 @@ type listArguments struct {
 	IncludeArchived bool `json:"include_archived,omitempty" mcp:"Also return the archived ones"`
 }
 
+// placeListArguments are the arguments of the lists of accounts and of
+// credit cards.
+type placeListArguments struct {
+	IncludeArchived bool `json:"include_archived,omitempty" mcp:"Also return the archived ones"`
+	IncludeOthers   bool `json:"include_others,omitempty" mcp:"Also return the ones of other persons (the ones with an owner)"`
+}
+
 func newAccountsCommand(db *gorm.DB) *accountsCommand {
 	return &accountsCommand{streams: quiet, db: db, store: account.NewStore(db)}
 }
@@ -504,6 +517,7 @@ func accountTools() []mcp.Tool {
 		Description *string `json:"description,omitempty" mcp:"Description"`
 		Balance     *string `json:"balance,omitempty" mcp:"Opening balance as a decimal string, for example \"1234.56\". It can be negative. Default: 0"`
 		Color       *string `json:"color,omitempty" mcp:"Color. Default: the first color no account uses" enum:"red,orange,amber,yellow,lime,green,emerald,teal,cyan,sky,blue,indigo,violet,purple,pink,slate"`
+		Owner       *string `json:"owner,omitempty" mcp:"Name of the person the account belongs to, when it is not the user. Default: the user"`
 	}
 	type editArguments struct {
 		Account     string  `json:"account" mcp:"Code or id of the account"`
@@ -511,17 +525,21 @@ func accountTools() []mcp.Tool {
 		Code        *string `json:"code,omitempty" mcp:"New code, 1 to 5 letters and digits"`
 		Description *string `json:"description,omitempty" mcp:"New description"`
 		Color       *string `json:"color,omitempty" mcp:"New color" enum:"red,orange,amber,yellow,lime,green,emerald,teal,cyan,sky,blue,indigo,violet,purple,pink,slate"`
+		Owner       *string `json:"owner,omitempty" mcp:"Name of the person the account belongs to. An empty string makes it an account of the user"`
 	}
 	type deleteArguments struct {
 		Account string `json:"account" mcp:"Code or id of the account"`
 		Confirm bool   `json:"confirm,omitempty" mcp:"Set to true to delete. Without it the tool only tells what it will delete."`
 	}
 	return []mcp.Tool{
-		reads(tool("account_list", "List the accounts with their balances. The balance is the opening balance plus the transactions of the account that have a date up to today.",
-			func(db *gorm.DB, a listArguments) (any, error) {
+		reads(tool("account_list", "List the accounts with their balances. The balance is the opening balance plus the transactions of the account that have a date up to today. An account with an owner belongs to another person: the list leaves it out unless include_others is true.",
+			func(db *gorm.DB, a placeListArguments) (any, error) {
 				accounts, err := account.NewStore(db).List(a.IncludeArchived, today())
 				if err != nil {
 					return nil, err
+				}
+				if !a.IncludeOthers {
+					accounts = account.Mine(accounts)
 				}
 				results := make([]accountJSON, len(accounts))
 				for i, current := range accounts {
@@ -547,8 +565,9 @@ func accountTools() []mcp.Tool {
 				draft := account.Account{
 					Name: strings.TrimSpace(a.Name), Code: code.Normalize(text(a.Code)), Description: text(a.Description),
 					Currency: strings.ToUpper(strings.TrimSpace(a.Currency)), Color: strings.ToLower(strings.TrimSpace(text(a.Color))),
+					Owner: strings.TrimSpace(text(a.Owner)),
 				}
-				sent := given(map[string]bool{"name": true, "currency": true, "code": a.Code != nil, "color": a.Color != nil})
+				sent := given(map[string]bool{"name": true, "currency": true, "code": a.Code != nil, "color": a.Color != nil, "owner": a.Owner != nil})
 				err := checkFlags("add", draft, sent)
 				if err != nil {
 					return nil, err
@@ -573,14 +592,17 @@ func accountTools() []mcp.Tool {
 				}
 				return c.reload(draft.ID)
 			}),
-		tool("account_edit", "Change the name, the code, the description or the color of an account. Give only the arguments to change. The currency and the opening balance cannot change.",
+		tool("account_edit", "Change the name, the code, the description, the color or the owner of an account. Give only the arguments to change. The currency and the opening balance cannot change.",
 			func(db *gorm.DB, a editArguments) (any, error) {
 				c := newAccountsCommand(db)
-				sent := given(map[string]bool{"name": a.Name != nil, "code": a.Code != nil, "description": a.Description != nil, "color": a.Color != nil})
+				sent := given(map[string]bool{"name": a.Name != nil, "code": a.Code != nil, "description": a.Description != nil, "color": a.Color != nil, "owner": a.Owner != nil})
 				if len(sent) == 0 {
-					return nil, errors.New("give at least one of name, code, description, color")
+					return nil, errors.New("give at least one of name, code, description, color, owner")
 				}
-				changes := account.Account{Name: strings.TrimSpace(text(a.Name)), Code: code.Normalize(text(a.Code)), Color: strings.ToLower(strings.TrimSpace(text(a.Color)))}
+				changes := account.Account{
+					Name: strings.TrimSpace(text(a.Name)), Code: code.Normalize(text(a.Code)), Color: strings.ToLower(strings.TrimSpace(text(a.Color))),
+					Owner: strings.TrimSpace(text(a.Owner)),
+				}
 				if err := checkFlags("edit", changes, sent); err != nil {
 					return nil, err
 				}
@@ -602,6 +624,9 @@ func accountTools() []mcp.Tool {
 				}
 				if a.Color != nil {
 					current.Color = changes.Color
+				}
+				if a.Owner != nil {
+					current.Owner = changes.Owner
 				}
 				if err := c.store.Update(&current); err != nil {
 					return nil, err
@@ -921,16 +946,17 @@ func totals(views []transaction.View) []totalJSON {
 
 func transactionTools() []mcp.Tool {
 	type listArguments struct {
-		Category *string `json:"category,omitempty" mcp:"Only the transactions of this category (code or id)"`
-		Tags     *string `json:"tags,omitempty" mcp:"Only the transactions that have all these tags, for example \"market weekly\""`
-		Search   *string `json:"search,omitempty" mcp:"Only the transactions whose title contains this text"`
-		Date     *string `json:"date,omitempty" mcp:"A year (2026), a month (2026-11 or 11/2026) or a date (2026-11-17)"`
-		Account  *string `json:"account,omitempty" mcp:"Only the transactions of this account or credit card (code or id)"`
-		Type     *string `json:"type,omitempty" mcp:"Only the transactions of this type" enum:"expense,income,transfer,payment"`
-		Goal     *string `json:"goal,omitempty" mcp:"Only the transactions linked to this goal (code or id)"`
-		Virtual  *bool   `json:"virtual,omitempty" mcp:"true: only the transactions made with a virtual card of a credit card. false: only the other ones"`
-		Limit    *int    `json:"limit,omitempty" mcp:"Most transactions to return. Default: 100"`
-		Offset   *int    `json:"offset,omitempty" mcp:"Number of transactions to skip, to read the next page. Default: 0"`
+		Category      *string `json:"category,omitempty" mcp:"Only the transactions of this category (code or id)"`
+		Tags          *string `json:"tags,omitempty" mcp:"Only the transactions that have all these tags, for example \"market weekly\""`
+		Search        *string `json:"search,omitempty" mcp:"Only the transactions whose title contains this text"`
+		Date          *string `json:"date,omitempty" mcp:"A year (2026), a month (2026-11 or 11/2026) or a date (2026-11-17)"`
+		Account       *string `json:"account,omitempty" mcp:"Only the transactions of this account or credit card (code or id)"`
+		Type          *string `json:"type,omitempty" mcp:"Only the transactions of this type" enum:"expense,income,transfer,payment"`
+		Goal          *string `json:"goal,omitempty" mcp:"Only the transactions linked to this goal (code or id)"`
+		Virtual       *bool   `json:"virtual,omitempty" mcp:"true: only the transactions made with a virtual card of a credit card. false: only the other ones"`
+		IncludeOthers bool    `json:"include_others,omitempty" mcp:"Also return and count the transactions in the accounts and the credit cards of other persons. With account, the transactions of that account come in any case"`
+		Limit         *int    `json:"limit,omitempty" mcp:"Most transactions to return. Default: 100"`
+		Offset        *int    `json:"offset,omitempty" mcp:"Number of transactions to skip, to read the next page. Default: 0"`
 	}
 	type showArguments struct {
 		ID uint `json:"id" mcp:"Id of the transaction"`
@@ -973,7 +999,7 @@ func transactionTools() []mcp.Tool {
 		Scope   *string `json:"scope,omitempty" mcp:"For a transaction in installments: one deletes this part only, next deletes this part and the parts after it, all deletes all the parts. Default: one" enum:"one,next,all"`
 	}
 	return []mcp.Tool{
-		reads(tool("transaction_list", "List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset.",
+		reads(tool("transaction_list", "List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset. The list and the totals leave out the transactions in the accounts and the credit cards of other persons unless include_others is true.",
 			func(db *gorm.DB, a listArguments) (any, error) {
 				c := agentTransactionsCommand(db)
 				sent := given(map[string]bool{"category": a.Category != nil, "tag": a.Tags != nil, "date": a.Date != nil, "account": a.Account != nil, "type": a.Type != nil, "goal": a.Goal != nil, "virtual": a.Virtual != nil})
@@ -981,6 +1007,7 @@ func transactionTools() []mcp.Tool {
 				if err != nil {
 					return nil, err
 				}
+				filter.Mine = !a.IncludeOthers
 				views, err := c.store.List(filter)
 				if err != nil {
 					return nil, err
@@ -1188,6 +1215,7 @@ func creditCardTools() []mcp.Tool {
 		Code        *string `json:"code,omitempty" mcp:"Short code, 1 to 5 letters and digits, different from the codes of the accounts. Default: made from the name"`
 		Description *string `json:"description,omitempty" mcp:"Description"`
 		Color       *string `json:"color,omitempty" mcp:"Color. Default: the first color no credit card uses" enum:"red,orange,amber,yellow,lime,green,emerald,teal,cyan,sky,blue,indigo,violet,purple,pink,slate"`
+		Owner       *string `json:"owner,omitempty" mcp:"Name of the person the credit card belongs to, when it is not the user. Default: the user"`
 	}
 	type editArguments struct {
 		CreditCard  string  `json:"credit_card" mcp:"Code or id of the credit card"`
@@ -1198,6 +1226,7 @@ func creditCardTools() []mcp.Tool {
 		Limit       *string `json:"limit,omitempty" mcp:"New credit limit as a decimal string"`
 		ClosingDay  *int    `json:"closing_day,omitempty" mcp:"New closing day, 1 to 31. It applies to the bills that do not exist yet"`
 		DueDay      *int    `json:"due_day,omitempty" mcp:"New due day, 1 to 31. It applies to the bills that do not exist yet"`
+		Owner       *string `json:"owner,omitempty" mcp:"Name of the person the credit card belongs to. An empty string makes it a credit card of the user"`
 	}
 	type payArguments struct {
 		CreditCard string  `json:"credit_card" mcp:"Code or id of the credit card"`
@@ -1220,11 +1249,14 @@ func creditCardTools() []mcp.Tool {
 		return c.resolve("show", ref, "", scopeAll)
 	}
 	return []mcp.Tool{
-		reads(tool("credit_card_list", "List the credit cards with the limit, the used value (the total of the bills that are not paid) and the available value.",
-			func(db *gorm.DB, a listArguments) (any, error) {
+		reads(tool("credit_card_list", "List the credit cards with the limit, the used value (the total of the bills that are not paid) and the available value. A credit card with an owner belongs to another person: the list leaves it out unless include_others is true.",
+			func(db *gorm.DB, a placeListArguments) (any, error) {
 				cards, err := card.NewStore(db).List(a.IncludeArchived)
 				if err != nil {
 					return nil, err
+				}
+				if !a.IncludeOthers {
+					cards = card.Mine(cards)
 				}
 				results := make([]cardJSON, len(cards))
 				for i, current := range cards {
@@ -1282,11 +1314,11 @@ func creditCardTools() []mcp.Tool {
 				c := newCreditCardsCommand(db)
 				values := cardFlags{
 					name: a.Name, currency: a.Currency, limit: a.Limit, closing: a.ClosingDay, due: a.DueDay,
-					code: text(a.Code), description: text(a.Description), color: text(a.Color),
+					code: text(a.Code), description: text(a.Description), color: text(a.Color), owner: text(a.Owner),
 				}
 				sent := given(map[string]bool{
 					"name": true, "currency": true, "limit": true, "closing": true, "due": true,
-					"code": a.Code != nil, "description": a.Description != nil, "color": a.Color != nil,
+					"code": a.Code != nil, "description": a.Description != nil, "color": a.Color != nil, "owner": a.Owner != nil,
 				})
 				var draft card.Card
 				err := values.apply("add", sent, &draft)
@@ -1313,14 +1345,14 @@ func creditCardTools() []mcp.Tool {
 				c := newCreditCardsCommand(db)
 				values := cardFlags{
 					name: text(a.Name), code: text(a.Code), description: text(a.Description), color: text(a.Color),
-					limit: text(a.Limit), closing: number(a.ClosingDay), due: number(a.DueDay),
+					limit: text(a.Limit), closing: number(a.ClosingDay), due: number(a.DueDay), owner: text(a.Owner),
 				}
 				sent := given(map[string]bool{
 					"name": a.Name != nil, "code": a.Code != nil, "description": a.Description != nil, "color": a.Color != nil,
-					"limit": a.Limit != nil, "closing": a.ClosingDay != nil, "due": a.DueDay != nil,
+					"limit": a.Limit != nil, "closing": a.ClosingDay != nil, "due": a.DueDay != nil, "owner": a.Owner != nil,
 				})
 				if len(sent) == 0 {
-					return nil, errors.New("give at least one of name, code, description, color, limit, closing_day, due_day")
+					return nil, errors.New("give at least one of name, code, description, color, limit, closing_day, due_day, owner")
 				}
 				current, err := find(c, a.CreditCard)
 				if err != nil {

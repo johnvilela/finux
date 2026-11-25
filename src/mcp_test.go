@@ -1238,3 +1238,44 @@ func TestMCPNotes(t *testing.T) {
 	h.want(h.ok("note_delete", map[string]any{"id": 3, "confirm": true}), "true", "deleted")
 	h.want(h.ok("note_list", map[string]any{"status": "all"}), "3", "total")
 }
+
+func TestMCPOtherPersons(t *testing.T) {
+	h := newMCPHome(t)
+	h.want(h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "5000"}), "", "account", "owner")
+	h.want(h.ok("account_add", map[string]any{"name": "Conta Ana", "currency": "BRL", "code": "ANA", "owner": " Ana "}), "Ana", "account", "owner")
+	card := map[string]any{"name": "Visa", "currency": "BRL", "limit": "5000", "closing_day": 25, "due_day": 5, "code": "VISA"}
+	h.want(h.ok("credit_card_add", card), "", "credit_card", "owner")
+	card["name"], card["code"], card["owner"] = "Master Ana", "MANA", "Ana"
+	h.want(h.ok("credit_card_add", card), "Ana", "credit_card", "owner")
+	h.fail("owner must have at most 40 characters", "account_edit", map[string]any{"account": "NU", "owner": strings.Repeat("a", 41)})
+
+	count := func(result map[string]any, key string) int { return len(result[key].([]any)) }
+	if list := h.ok("account_list", nil); count(list, "accounts") != 1 || at(t, list, "accounts", 0, "code") != "NU" {
+		t.Fatalf("my accounts = %v", list)
+	}
+	if list := h.ok("account_list", map[string]any{"include_others": true}); count(list, "accounts") != 2 {
+		t.Fatalf("all accounts = %v", list)
+	}
+	if list := h.ok("credit_card_list", nil); count(list, "credit_cards") != 1 || at(t, list, "credit_cards", 0, "code") != "VISA" {
+		t.Fatalf("my credit cards = %v", list)
+	}
+	if list := h.ok("credit_card_list", map[string]any{"include_others": true}); count(list, "credit_cards") != 2 {
+		t.Fatalf("all credit cards = %v", list)
+	}
+	h.want(h.ok("account_show", map[string]any{"account": "ANA"}), "Ana", "account", "owner")
+
+	h.ok("transaction_add", map[string]any{"title": "Market", "value": "30", "account": "NU", "category": "FOOD"})
+	h.ok("transaction_add", map[string]any{"title": "Her market", "value": "70", "account": "ANA", "category": "FOOD"})
+	h.ok("transaction_add", map[string]any{"title": "Her dinner", "value": "90", "account": "MANA", "category": "FOOD"})
+	mine := h.ok("transaction_list", nil)
+	h.want(mine, "1", "total")
+	h.want(mine, "30.00", "totals", 0, "expense", "decimal")
+	all := h.ok("transaction_list", map[string]any{"include_others": true})
+	h.want(all, "3", "total")
+	h.want(all, "190.00", "totals", 0, "expense", "decimal")
+	h.want(h.ok("transaction_list", map[string]any{"account": "ANA"}), "1", "total")
+
+	h.want(h.ok("account_edit", map[string]any{"account": "ANA", "owner": ""}), "", "account", "owner")
+	h.want(h.ok("credit_card_edit", map[string]any{"credit_card": "MANA", "owner": ""}), "", "credit_card", "owner")
+	h.want(h.ok("transaction_list", nil), "3", "total")
+}

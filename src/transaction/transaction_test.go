@@ -158,6 +158,27 @@ func TestFilterMatch(t *testing.T) {
 			t.Errorf("%s: Match = %v, want %v", name, got, tc.want)
 		}
 	}
+	// A transaction of another person shows only when the filter does
+	// not ask for mine, or names its account.
+	hers := market
+	hers.Account.Code, hers.Account.Owner = "ANA", "Ana"
+	for name, tc := range map[string]struct {
+		filter Filter
+		want   bool
+	}{
+		"all":            {Filter{}, true},
+		"mine":           {Filter{Mine: true}, false},
+		"mine, account":  {Filter{Mine: true, Account: "ANA"}, true},
+		"mine, other":    {Filter{Mine: true, Account: "INTER"}, false},
+		"mine, category": {Filter{Mine: true, Category: "FOOD"}, false},
+	} {
+		if got := tc.filter.Match(hers); got != tc.want {
+			t.Errorf("of another person, %s: Match = %v, want %v", name, got, tc.want)
+		}
+	}
+	if !(Filter{Mine: true}).Match(market) {
+		t.Error("the filter for mine drops my transaction")
+	}
 }
 
 func TestParseSearch(t *testing.T) {

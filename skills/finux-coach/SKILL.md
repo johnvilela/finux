@@ -57,6 +57,10 @@ plainly. This skill reads data; it changes nothing.
 
 - `account_list`, `credit_card_list`, and `credit_card_show` for each
   card.
+- The lists and the totals leave out the accounts, the credit cards and
+  the transactions of other persons (the ones with an `owner`). Coach the
+  user on their own money. Send `include_others: true` only when the user
+  asks about that person.
 - `goal_list`, and `goal_show` for each active or overdue goal.
 - `note_list` for the open notes of the user: the decisions and the
   things to do. Tell the due ones first, and mind them in your advice.
