@@ -161,6 +161,7 @@ No arguments.
 | `goal` | string | no | Only the transactions linked to this goal (code or id) |
 | `include_others` | boolean | no | Also return and count the transactions in the accounts and the credit cards of other persons. With account, the transactions of that account come in any case |
 | `limit` | integer | no | Most transactions to return. Default: 100 |
+| `off_limit` | boolean | no | true: only the transactions of a credit card that are outside its limit. false: only the other ones |
 | `offset` | integer | no | Number of transactions to skip, to read the next page. Default: 0 |
 | `search` | string | no | Only the transactions whose title contains this text |
 | `tags` | string | no | Only the transactions that have all these tags, for example "market weekly" |
@@ -177,7 +178,7 @@ No arguments.
 
 ### `transaction_add`
 
-*Change.* Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give virtual for a purchase made with a virtual card of a credit card. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.
+*Change.* Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give virtual for a purchase made with a virtual card of a credit card. Give off_limit for a purchase that does not use the limit of the credit card. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -190,6 +191,7 @@ No arguments.
 | `goal` | string | no | Code or id of the goal the transaction counts toward. The goal must have the currency of the account |
 | `installment_value` | string | no | With installments: the amount of one part, in place of value |
 | `installments` | integer | no | For an expense or an income in installments: the number of monthly parts, from 2 to 120. The tool creates one transaction for each part |
+| `off_limit` | boolean | no | true when the transaction does not use the limit of the credit card, for example a purchase that the shop finances. It stays in its bill. Only for a transaction of a credit card. With installments, all the parts get it. Default: false |
 | `received` | string | no | For a transfer between accounts of different currencies: the amount the other account receives |
 | `tags` | string | no | Tags divided by spaces, for example "market weekly". Use transaction_suggestions to find the tags in use |
 | `to` | string | no | For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer |
@@ -210,6 +212,7 @@ No arguments.
 | `description` | string | no | New description, at most 200 characters |
 | `goal` | string | no | Code or id of the new goal. An empty string takes the goal away |
 | `installment_value` | string | no | With the scope next or all: the new amount of each part, in place of value |
+| `off_limit` | boolean | no | true when the transaction does not use the limit of the credit card; false takes the mark away. Only for a transaction of a credit card. For a transaction in installments the change goes to all the parts, with any scope, also to a part in a paid bill |
 | `scope` | string | no | For a transaction in installments: one changes this part only, next changes this part and the parts after it, all changes all the parts. With next or all, value is the new total of these parts and date is the new date of the first of them. Default: one. One of: `one`, `next`, `all` |
 | `tags` | string | no | New tags; they replace the tags of the transaction. An empty string removes all tags |
 | `title` | string | no | New title, at most 60 characters |

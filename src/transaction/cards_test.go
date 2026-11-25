@@ -425,3 +425,114 @@ func TestVirtualCard(t *testing.T) {
 		t.Fatalf("marks after a change of the next parts = %v %v %v", phone[0].Virtual, phone[1].Virtual, phone[2].Virtual)
 	}
 }
+
+func TestOffLimitCard(t *testing.T) {
+	f := newFixture(t)
+	// Only a transaction in a credit card can have the mark.
+	inAccount := f.draft("Repair", Expense, "INTER", "OTHER", 100)
+	inAccount.OffLimit = true
+	_, err := f.store.Create(inAccount)
+	wantError(t, "off limit in an account", err, "only a credit card transaction can be outside the limit")
+
+	f.create(t, f.purchase("Market", "VISA", "FOOD", 10000, "2026-11-17"))
+	draft := f.purchase("Repair", "VISA", "OTHER", 30000, "2026-11-17")
+	draft.OffLimit = true
+	repair := f.create(t, draft)
+	if stored, err := f.store.Find(repair.ID); err != nil || !repair.OffLimit || !stored.OffLimit || !DraftOf(stored.Transaction).OffLimit {
+		t.Fatalf("created = %+v, stored = %+v, %v", repair, stored, err)
+	}
+
+	// The bill has the purchase. The limit in use does not.
+	if bill := f.bill(t, repair.BillID); bill.Spent != 40000 || bill.Total() != 40000 || bill.OffLimit != 30000 {
+		t.Fatalf("bill = %+v", bill)
+	}
+	if visa := f.visa(t); visa.Used != 10000 || visa.OffLimit != 30000 || visa.Available() != 490000 {
+		t.Fatalf("card used = %d, off limit = %d, available = %d", visa.Used, visa.OffLimit, visa.Available())
+	}
+
+	// An edit keeps the mark, and can take it away.
+	next := DraftOf(repair)
+	next.Title = "Car repair"
+	if updated, err := f.store.Update(repair.ID, next); err != nil || !updated.OffLimit {
+		t.Fatalf("update that keeps the mark = %+v, %v", updated, err)
+	}
+	next.OffLimit = false
+	if _, err := f.store.Update(repair.ID, next); err != nil {
+		t.Fatal(err)
+	}
+	if visa := f.visa(t); visa.Used != 40000 || visa.OffLimit != 0 {
+		t.Fatalf("after the mark is gone: used = %d, off limit = %d", visa.Used, visa.OffLimit)
+	}
+	next.OffLimit = true
+	if _, err := f.store.Update(repair.ID, next); err != nil {
+		t.Fatal(err)
+	}
+	// A transaction with the mark cannot go to an account.
+	moved := next
+	moved.CardID, moved.AccountID = 0, f.account["INTER"]
+	_, err = f.store.Update(repair.ID, moved)
+	wantError(t, "off limit moved to an account", err, "only a credit card transaction")
+
+	// The payment of the bill has the purchase.
+	payment, err := f.store.PayBill(repair.BillID, f.account["INTER"], 0, "2026-12-01")
+	if err != nil || payment.Amount != -40000 {
+		t.Fatalf("payment = %+v, %v", payment, err)
+	}
+	if visa := f.visa(t); visa.Used != 0 || visa.OffLimit != 0 {
+		t.Fatalf("after the payment: used = %d, off limit = %d", visa.Used, visa.OffLimit)
+	}
+}
+
+func TestOffLimitInstallments(t *testing.T) {
+	f := newFixture(t)
+	draft := f.purchase("Car repair", "VISA", "OTHER", 120000, "2026-11-17")
+	draft.OffLimit, draft.Installments = true, 10
+	car := f.parts(t, f.create(t, draft).ID)
+	marks := func(want bool) {
+		t.Helper()
+		for _, part := range f.parts(t, car[0].ID) {
+			if part.OffLimit != want {
+				t.Fatalf("part %d: off limit = %v, want %v", part.Part, part.OffLimit, want)
+			}
+		}
+	}
+	marks(true)
+	if visa := f.visa(t); visa.Used != 0 || visa.OffLimit != 120000 {
+		t.Fatalf("card used = %d, off limit = %d", visa.Used, visa.OffLimit)
+	}
+	if _, err := f.store.PayBill(car[0].BillID, f.account["INTER"], 0, "2026-12-01"); err != nil {
+		t.Fatal(err)
+	}
+	if visa := f.visa(t); visa.Used != 0 || visa.OffLimit != 108000 {
+		t.Fatalf("after one payment: used = %d, off limit = %d", visa.Used, visa.OffLimit)
+	}
+
+	// The mark is of the purchase: a change of one part goes to all the
+	// parts. A paid bill does not stop it.
+	change := DraftOf(car[0])
+	change.OffLimit = false
+	if _, err := f.store.Update(car[0].ID, change); err != nil {
+		t.Fatalf("change of the mark of a part in a paid bill: %v", err)
+	}
+	marks(false)
+	if visa := f.visa(t); visa.Used != 108000 || visa.OffLimit != 0 {
+		t.Fatalf("after the mark is gone: used = %d, off limit = %d", visa.Used, visa.OffLimit)
+	}
+	change = DraftOf(car[4])
+	change.OffLimit = true
+	if _, err := f.store.UpdateParts(car[4].ID, Next, change, Changed{OffLimit: true}); err != nil {
+		t.Fatal(err)
+	}
+	marks(true)
+	change = DraftOf(car[0])
+	change.OffLimit = false
+	if _, err := f.store.UpdateParts(car[0].ID, All, change, Changed{OffLimit: true}); err != nil {
+		t.Fatalf("change of the mark of all the parts, one in a paid bill: %v", err)
+	}
+	marks(false)
+
+	// The other values of a part in a paid bill stay locked.
+	change.Title = "Changed"
+	_, err := f.store.Update(car[0].ID, change)
+	wantError(t, "title in a paid bill", err, "is paid")
+}

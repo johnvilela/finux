@@ -140,7 +140,8 @@ func greyCategory(db *gorm.DB, answers map[string]string) bool {
 }
 
 // onCard reports whether the place of the answers is a credit card.
-// Then the virtual card is a question: an account has none.
+// Then the virtual card and the limit are questions: an account has
+// none.
 func onCard(db *gorm.DB, answers map[string]string) bool {
 	cards, err := card.NewStore(db).List(false)
 	if err != nil {
@@ -170,6 +171,12 @@ var (
 			return []choice{{"No", "false"}, {"Yes", "true"}}, nil
 		},
 	}
+	stepOffLimit = step{
+		flag: "--off-limit", label: "Off limit", ask: "Outside the limit of the card?", when: onCard,
+		choices: func(*gorm.DB) ([]choice, error) {
+			return []choice{{"No", "false"}, {"Yes", "true"}}, nil
+		},
+	}
 	stepEvery = step{flag: "--every", label: "Period", choices: codes("week", "month", "year")}
 )
 
@@ -186,7 +193,7 @@ var guides = map[string]guide{
 	"transactions add": {"New transaction", []step{
 		{flag: "--title", label: "Title", ask: "Title?"},
 		{flag: "--value", label: "Value", ask: "Value?"},
-		stepPlace, stepVirtual, stepCategory, stepType,
+		stepPlace, stepVirtual, stepOffLimit, stepCategory, stepType,
 		{flag: "--date", label: "Date", ask: "Date? Press a button or send a date as DD/MM/YYYY.", choices: dateChoices},
 	}},
 	"accounts add": {"New account", []step{

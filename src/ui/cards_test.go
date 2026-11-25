@@ -118,6 +118,29 @@ func sampleDetails() CardDetails {
 	return CardDetails{Card: sampleCards()[0], Bill: bills[0], Transactions: samplePurchases(), Pending: bills[1:2], Today: "2026-11-17"}
 }
 
+func TestCardDetailsOffLimit(t *testing.T) {
+	details := sampleDetails()
+	for _, plainOutput := range []bool{true, false} {
+		if view := plain(CardDetailsView(details, plainOutput)); strings.Contains(strings.ToLower(view), "off limit") || strings.Contains(view, "outside the limit") {
+			t.Fatalf("a card with no transaction outside the limit shows it:\n%s", view)
+		}
+	}
+	details.Card.OffLimit = 30000
+	details.Transactions[1].OffLimit = true
+	bare := CardDetailsView(details, true)
+	for _, want := range []string{"Available  R$ 3.750,00\nOff limit  R$ 300,00\nClosing ", "Market [off limit]"} {
+		if !strings.Contains(bare, want) {
+			t.Errorf("plain details lack %q:\n%s", want, bare)
+		}
+	}
+	styled := plain(CardDetailsView(details, false))
+	for _, want := range []string{"R$ 1.250,00 used of R$ 5.000,00", "R$ 300,00 outside the limit", "Market off limit"} {
+		if !strings.Contains(styled, want) {
+			t.Errorf("styled details lack %q:\n%s", want, styled)
+		}
+	}
+}
+
 func TestCardDetailsPlain(t *testing.T) {
 	bare := CardDetailsView(sampleDetails(), true)
 	if strings.ContainsAny(bare, "╭│\x1b") {

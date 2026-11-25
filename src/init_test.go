@@ -205,6 +205,31 @@ func TestSetupDatabaseAddsTheVirtualCardColumn(t *testing.T) {
 	}
 }
 
+func TestSetupDatabaseAddsTheOffLimitColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "finux.db")
+	if _, err := setupDatabase(path); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A database from before the transactions outside the limit has no
+	// column for the mark.
+	if err := db.Migrator().DropColumn(&transaction.Transaction{}, "off_limit"); err != nil {
+		t.Fatal(err)
+	}
+	if transactionsReady(db) {
+		t.Fatal("a database without the column is ready")
+	}
+	if _, err := setupDatabase(path); err != nil {
+		t.Fatal(err)
+	}
+	if !transactionsReady(db) {
+		t.Fatal("the setup did not add the column")
+	}
+}
+
 func TestSetupDatabaseAddsTheOwnerColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "finux.db")
 	if _, err := setupDatabase(path); err != nil {

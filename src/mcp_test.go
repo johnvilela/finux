@@ -1097,6 +1097,48 @@ func TestMCPVirtualCard(t *testing.T) {
 	h.want(h.ok("transaction_edit", map[string]any{"id": 1, "virtual": true}), "true", "transaction", "virtual")
 }
 
+func TestMCPOffLimit(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "1000"})
+	h.ok("credit_card_add", map[string]any{"name": "Visa Gold", "currency": "BRL", "limit": "5000", "closing_day": 25, "due_day": 5, "code": "visa"})
+
+	market := h.ok("transaction_add", map[string]any{"title": "Market", "value": "100", "account": "VISA", "category": "FOOD"})
+	if _, has := market["transaction"].(map[string]any)["off_limit"]; has {
+		t.Fatalf("a transaction with no mark has off_limit: %v", market)
+	}
+	h.fail("only a credit card transaction", "transaction_add", map[string]any{"title": "Bread", "value": "5", "account": "NU", "category": "FOOD", "off_limit": true})
+	car := h.ok("transaction_add", map[string]any{"title": "Car repair", "value": "1200", "account": "VISA", "category": "FOOD", "installments": 10, "off_limit": true})
+	h.want(car, "true", "transactions", 9, "off_limit")
+
+	// The filter gives the transactions with the mark, or the other ones.
+	h.want(h.ok("transaction_list", map[string]any{"off_limit": true}), "10", "total")
+	list := h.ok("transaction_list", map[string]any{"off_limit": false})
+	h.want(list, "1", "total")
+	h.want(list, "Market", "transactions", 0, "title")
+
+	// The bill has the purchase. The limit in use does not.
+	card := h.ok("credit_card_show", map[string]any{"credit_card": "VISA"})
+	h.want(card, "10000", "credit_card", "used", "minor")
+	h.want(card, "490000", "credit_card", "available", "minor")
+	h.want(card, "120000", "credit_card", "off_limit", "minor")
+	h.want(card, "22000", "open_bill", "total", "minor")
+	h.want(card, "12000", "open_bill", "off_limit", "minor")
+
+	// A change of the mark of one part goes to all the parts.
+	edited := h.ok("transaction_edit", map[string]any{"id": 5, "off_limit": false})
+	if _, has := edited["transaction"].(map[string]any)["off_limit"]; has {
+		t.Fatalf("the edit did not take the mark away: %v", edited)
+	}
+	h.want(h.ok("transaction_list", map[string]any{"off_limit": true}), "0", "total")
+	card = h.ok("credit_card_show", map[string]any{"credit_card": "VISA"})
+	h.want(card, "130000", "credit_card", "used", "minor")
+	h.want(card, "0", "credit_card", "off_limit", "minor")
+	if _, has := card["open_bill"].(map[string]any)["off_limit"]; has {
+		t.Fatalf("a bill with no transaction outside the limit has off_limit: %v", card)
+	}
+	h.want(h.ok("transaction_edit", map[string]any{"id": 1, "off_limit": true}), "true", "transaction", "off_limit")
+}
+
 // The corrections tell an agent how the user changed the transactions
 // with a title, by hand or through the agent.
 func TestMCPCorrections(t *testing.T) {

@@ -45,6 +45,8 @@ func transactionsHelp() string {
   --goal <code>         Transactions linked to a goal
   --virtual             Transactions made with a virtual card of a credit card;
                         --virtual=false gives the other ones
+  --off-limit           Transactions of a credit card outside its limit;
+                        --off-limit=false gives the other ones
   --type <type>         ` + strings.Join(transaction.Types(), ", ") + `, ` + transaction.Payment + `
   --all                 Include the transactions of other persons
 
@@ -63,6 +65,8 @@ func transactionsHelp() string {
                         See 'finux goals --help'
   --virtual             The person paid with a virtual card of the credit card.
                         In edit, --virtual=false takes the mark away
+  --off-limit           The transaction of the credit card does not use the
+                        limit. In edit, --off-limit=false takes the mark away
 
 ` + green.Render("Options for add, for an expense or an income in installments:") + `
   --installments <number>       Number of monthly parts, from 2 to ` + strconv.Itoa(transaction.MaxInstallments) + `
@@ -90,8 +94,8 @@ In a terminal, the details of a transaction have the buttons Edit and Delete.
 Delete asks for confirmation.
 
 In the list, the search input finds transactions by title. It also reads
-filters: #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes or virtual:no, and a
-date such as 2026, 2026-11 or 17/11/2026.
+filters: #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes or virtual:no,
+offlimit:yes or offlimit:no, and a date such as 2026, 2026-11 or 17/11/2026.
 
 The list leaves out the transactions in an account or a credit card of
 another person (see 'finux ac --help'). Use --all for all of them, or
@@ -105,9 +109,9 @@ A transaction in installments is one transaction for each monthly part. The
 value is the total: the parts are equal and the cents that remain go to the
 first part. --date is the date of the first part that add creates; each part
 after it is one month later. On a credit card each part goes to the bill
-after the one before, and all the parts use the limit from the first day. On
-an account a part changes the balance on its date. The list shows the part
-after the title, such as 3/10.
+after the one before, and all the parts use the limit from the first day,
+unless the purchase has --off-limit. On an account a part changes the balance
+on its date. The list shows the part after the title, such as 3/10.
 
 Without --all or --next, edit and delete change one part only, and the other
 parts keep their numbers. With --all or --next, a title, a description, a
@@ -126,6 +130,14 @@ comes from 'finux cc pay' and it cannot change. See 'finux cc --help'.
 virtual card. The lists show [virtual] after its title, and the open bill of
 the card shows the total of these transactions. A transaction that goes to an
 account loses the mark.
+
+--off-limit marks a transaction of a credit card that does not use the limit
+of the card, for example a purchase that the shop finances. The transaction
+stays in its bill and in the payment of the bill. The lists show [off limit]
+after its title, and the card shows the total outside its limit. The mark
+belongs to the purchase: a change of the mark of one part goes to all the
+parts, with or without --all or --next, also when a part is in a paid bill. A
+transaction that goes to an account loses the mark.
 `
 }
 
@@ -154,6 +166,7 @@ func transactionsReady(db *gorm.DB) bool {
 		migrator.HasColumn(&transaction.Transaction{}, "card_id") && migrator.HasColumn(&transaction.Transaction{}, "bill_id") &&
 		migrator.HasTable(&goal.Goal{}) && migrator.HasColumn(&transaction.Transaction{}, "goal_id") &&
 		migrator.HasColumn(&transaction.Transaction{}, "installment_id") && migrator.HasColumn(&transaction.Transaction{}, "virtual") &&
+		migrator.HasColumn(&transaction.Transaction{}, "off_limit") &&
 		migrator.HasColumn(&transaction.Transaction{}, "status") && migrator.HasColumn(&card.Bill{}, "status") &&
 		migrator.HasTable(&schedule.Schedule{}) && migrator.HasColumn(&schedule.Schedule{}, "currency") && migrator.HasColumn(&transaction.Transaction{}, "schedule_id") &&
 		migrator.HasTable(&setting.Setting{}) && migrator.HasTable(&transaction.Correction{}) && migrator.HasTable(&note.Note{}) &&
@@ -295,7 +308,7 @@ func (c *transactionsCommand) findCategory(ref string) (category.Category, error
 
 func (c *transactionsCommand) list(args []string) error {
 	var categoryRef, tags, search, date, accountRef, kind, goalRef string
-	var virtual, all bool
+	var virtual, offLimit, all bool
 	_, given, err := parse("list", args, func(f *flag.FlagSet) {
 		f.StringVar(&categoryRef, "category", "", "")
 		f.StringVar(&tags, "tag", "", "")
@@ -305,6 +318,7 @@ func (c *transactionsCommand) list(args []string) error {
 		f.StringVar(&kind, "type", "", "")
 		f.StringVar(&goalRef, "goal", "", "")
 		f.BoolVar(&virtual, "virtual", false, "")
+		f.BoolVar(&offLimit, "off-limit", false, "")
 		f.BoolVar(&all, "all", false, "")
 	}, 0)
 	if err != nil {
@@ -313,7 +327,7 @@ func (c *transactionsCommand) list(args []string) error {
 	// The option --all is not a filter: an empty result with it alone
 	// is an empty list.
 	delete(given, "all")
-	filter, err := c.filter(listFlags{category: categoryRef, tags: tags, search: search, date: date, account: accountRef, kind: kind, goal: goalRef, virtual: virtual}, given)
+	filter, err := c.filter(listFlags{category: categoryRef, tags: tags, search: search, date: date, account: accountRef, kind: kind, goal: goalRef, virtual: virtual, offLimit: offLimit}, given)
 	if err != nil {
 		return err
 	}
@@ -376,8 +390,9 @@ func (c *transactionsCommand) details(view transaction.View) error {
 type listFlags struct {
 	category, tags, search, date, account, kind, goal string
 	// virtual selects the transactions made with a virtual card, or the
-	// other ones.
-	virtual bool
+	// other ones. offLimit does the same for the transactions outside
+	// the limit of a credit card.
+	virtual, offLimit bool
 }
 
 // filter makes the filter of a list from the options that were given.
@@ -429,6 +444,12 @@ func (c *transactionsCommand) filter(values listFlags, given map[string]bool) (t
 			filter.Virtual = "yes"
 		}
 	}
+	if given["off-limit"] {
+		filter.OffLimit = "no"
+		if values.offLimit {
+			filter.OffLimit = "yes"
+		}
+	}
 	return filter, nil
 }
 
@@ -452,8 +473,9 @@ type transactionFlags struct {
 	// first part to create.
 	installmentValue   string
 	installments, from int
-	// virtual tells that the person paid with a virtual card.
-	virtual bool
+	// virtual tells that the person paid with a virtual card. offLimit
+	// tells that the transaction does not use the limit of the card.
+	virtual, offLimit bool
 	// all and next give the scope of an edit: all the parts, or the part
 	// and the parts after it. parts is the number of parts of the scope.
 	all, next bool
@@ -473,6 +495,7 @@ func (v *transactionFlags) define(flags *flag.FlagSet, create bool) {
 	flags.StringVar(&v.goal, "goal", "", "")
 	flags.StringVar(&v.installmentValue, "installment-value", "", "")
 	flags.BoolVar(&v.virtual, "virtual", false, "")
+	flags.BoolVar(&v.offLimit, "off-limit", false, "")
 	if create {
 		flags.StringVar(&v.to, "to", "", "")
 		flags.StringVar(&v.received, "received", "", "")
@@ -505,7 +528,7 @@ func changedOf(given map[string]bool) transaction.Changed {
 	return transaction.Changed{
 		Title: given["title"], Description: given["description"], Type: given["type"], Category: given["category"],
 		Tags: given["tags"], Goal: given["goal"], Place: given["account"], Date: given["date"],
-		Value: given["value"] || given["installment-value"], Virtual: given["virtual"],
+		Value: given["value"] || given["installment-value"], Virtual: given["virtual"], OffLimit: given["off-limit"],
 	}
 }
 
@@ -736,6 +759,9 @@ func (c *transactionsCommand) newDraft(values transactionFlags, given map[string
 	if given["virtual"] {
 		draft.Virtual = values.virtual
 	}
+	if given["off-limit"] {
+		draft.OffLimit = values.offLimit
+	}
 	if given["received"] {
 		if draft.Received, err = amount("add", values.received, to.Currency); err != nil {
 			return draft, false, err
@@ -773,7 +799,7 @@ func (c *transactionsCommand) form(title string, draft transaction.Draft, values
 	var preset []ui.TxField
 	for name, field := range map[string]ui.TxField{
 		"title": ui.TxTitle, "description": ui.TxDescription, "value": ui.TxValue, "category": ui.TxCategory,
-		"tags": ui.TxTags, "account": ui.TxAccount, "date": ui.TxDate, "to": ui.TxTo, "received": ui.TxReceived, "goal": ui.TxGoal, "virtual": ui.TxVirtual,
+		"tags": ui.TxTags, "account": ui.TxAccount, "date": ui.TxDate, "to": ui.TxTo, "received": ui.TxReceived, "goal": ui.TxGoal, "virtual": ui.TxVirtual, "off-limit": ui.TxOffLimit,
 		"installments": ui.TxInstallments, "installment-value": ui.TxValue,
 	} {
 		if given[name] {
@@ -835,7 +861,7 @@ func (c *transactionsCommand) edit(args []string) error {
 	case len(given) == 0 && scoped:
 		return usageError("edit: give the options to change with --all or --next")
 	case len(given) == 0 && !c.interactive:
-		return usageError("edit: give --title, --description, --value, --type, --category, --tags, --account, --date, --goal or --virtual when input is not a terminal")
+		return usageError("edit: give --title, --description, --value, --type, --category, --tags, --account, --date, --goal, --virtual or --off-limit when input is not a terminal")
 	case given["value"] && given["installment-value"]:
 		return usageError("edit: give --value or --installment-value, not the two")
 	case given["installment-value"] && !scoped:
@@ -938,13 +964,16 @@ func (c *transactionsCommand) change(current transaction.View, draft, changes tr
 			return draft, usageError(fmt.Sprintf("edit: give --value: the account %s is in %s, not in %s", found.Code, found.Currency, currency))
 		}
 		draft.AccountID, draft.CardID, currency = found.ID, cardID, found.Currency
-		// Only a credit card has virtual cards.
+		// Only a credit card has virtual cards and a limit.
 		if cardID == 0 {
-			draft.Virtual = false
+			draft.Virtual, draft.OffLimit = false, false
 		}
 	}
 	if given["virtual"] {
 		draft.Virtual = values.virtual
+	}
+	if given["off-limit"] {
+		draft.OffLimit = values.offLimit
 	}
 	if given["value"] {
 		if draft.Value, err = amount("edit", values.value, currency); err != nil {

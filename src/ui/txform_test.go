@@ -357,7 +357,8 @@ func TestTransactionFormVirtualCard(t *testing.T) {
 	if view := plain(f.View().Content); f.Value(TxAccount) != "VISA" || f.Value(TxVirtual) != "no" || !strings.Contains(view, "Virtual card") {
 		t.Fatalf("account %q, virtual %q:\n%s", f.Value(TxAccount), f.Value(TxVirtual), view)
 	}
-	model = step(t, model, TxCategory, keyRight, keyTab)
+	model = step(t, model, TxOffLimit, keyRight, keyTab)
+	model = step(t, model, TxCategory, keyTab)
 	model = send(t, model, keySave)
 	f = txForm(t, model)
 	if got := f.Draft(); !f.Submitted() || !got.Virtual || got.CardID != 7 || got.AccountID != 0 {
@@ -437,4 +438,50 @@ func TestTransactionFormCreateKeepsTheOrder(t *testing.T) {
 	var model tea.Model = NewTransactionForm(txOptions())
 	first := txForm(t, model).Focus()
 	step(t, model, first, keyDown)
+}
+
+func TestTransactionFormOffLimit(t *testing.T) {
+	options := txOptions()
+	options.Cards = []card.Card{{ID: 7, Name: "Visa Gold", Code: "VISA", Color: "blue", Currency: "BRL"}}
+	var model tea.Model = NewTransactionForm(options)
+	// An account has no limit.
+	if view := plain(txForm(t, model).View().Content); strings.Contains(view, "Off limit") {
+		t.Fatalf("the form of an account shows the field:\n%s", view)
+	}
+	model = step(t, model, TxTitle, keyEnter)
+	model = step(t, model, TxValue, append(text("Repair"), keyTab)...)
+	model = step(t, model, TxInstallments, append(text("10"), keyTab)...)
+	model = step(t, model, TxAccount, keyTab)
+	model = step(t, model, TxVirtual, append(text("v"), keyTab)...)
+	// The field comes after the virtual card. It starts with no.
+	model = step(t, model, TxOffLimit, keyTab)
+	f := txForm(t, model)
+	if view := plain(f.View().Content); f.Value(TxOffLimit) != "no" || !strings.Contains(view, "Off limit") {
+		t.Fatalf("off limit %q:\n%s", f.Value(TxOffLimit), view)
+	}
+	model = step(t, model, TxCategory, keyRight, keyTab)
+	model = send(t, model, keySave)
+	f = txForm(t, model)
+	if got := f.Draft(); !f.Submitted() || !got.OffLimit || got.Virtual || got.CardID != 7 {
+		t.Fatalf("submitted %v, error %q, draft = %+v", f.Submitted(), f.Error(), got)
+	}
+
+	// An edit starts with the mark of the transaction. A change to an
+	// account takes the mark away.
+	options.Edit = true
+	options.Initial = transaction.Draft{Title: "Repair", Type: transaction.Expense, CardID: 7, CategoryID: 2, Date: "2026-11-17", OffLimit: true}
+	options.Value = "10"
+	model = NewTransactionForm(options)
+	if got := txForm(t, model).Value(TxOffLimit); got != "yes" {
+		t.Fatalf("off limit of the edit = %q", got)
+	}
+	model = step(t, model, TxTitle, keyEnter)
+	model = step(t, model, TxValue, keyTab)
+	model = step(t, model, TxAccount, keyTab)
+	model = step(t, model, TxCategory, append(text("i"), keyTab)...)
+	model = send(t, model, keySave)
+	f = txForm(t, model)
+	if got := f.Draft(); !f.Submitted() || got.OffLimit || got.AccountID != 1 || got.CardID != 0 {
+		t.Fatalf("submitted %v, error %q, draft = %+v", f.Submitted(), f.Error(), got)
+	}
 }

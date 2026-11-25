@@ -100,10 +100,13 @@ type cardJSON struct {
 	Archived    bool   `json:"archived"`
 	// Owner is the person the credit card belongs to. It is empty for a
 	// credit card of the user.
-	Owner      string   `json:"owner"`
-	Limit      cashJSON `json:"limit"`
-	Used       cashJSON `json:"used"`
-	Available  cashJSON `json:"available"`
+	Owner     string   `json:"owner"`
+	Limit     cashJSON `json:"limit"`
+	Used      cashJSON `json:"used"`
+	Available cashJSON `json:"available"`
+	// OffLimit is the total of the transactions outside the limit in the
+	// bills that are not paid. Used does not count it.
+	OffLimit   cashJSON `json:"off_limit"`
 	ClosingDay int      `json:"closing_day"`
 	DueDay     int      `json:"due_day"`
 }
@@ -112,7 +115,7 @@ func cardResult(c card.Card) cardJSON {
 	return cardJSON{
 		ID: c.ID, Code: c.Code, Name: c.Name, Description: c.Description, Color: c.Color, Currency: c.Currency,
 		Archived: c.Archived(), Owner: c.Owner, Limit: cash(c.Limit, c.Currency), Used: cash(c.Used, c.Currency),
-		Available: cash(c.Available(), c.Currency), ClosingDay: c.ClosingDay, DueDay: c.DueDay,
+		Available: cash(c.Available(), c.Currency), OffLimit: cash(c.OffLimit, c.Currency), ClosingDay: c.ClosingDay, DueDay: c.DueDay,
 	}
 }
 
@@ -134,12 +137,19 @@ type billJSON struct {
 	// VirtualTotal is the sum of the transactions made with a virtual
 	// card. It is only in an open bill that has them.
 	VirtualTotal *cashJSON `json:"virtual_total,omitempty"`
+	// OffLimit is the part of the total that is outside the limit of the
+	// card. It is only in a bill that has such transactions.
+	OffLimit *cashJSON `json:"off_limit,omitempty"`
 }
 
 func billResult(owner card.Card, bill card.Bill) billJSON {
 	result := billJSON{
 		Period: bill.Period, ClosesOn: bill.ClosesOn, DueOn: bill.DueOn, Status: bill.StatusOn(today()),
 		Carried: cash(bill.Carried, owner.Currency), Spent: cash(bill.Spent, owner.Currency), Total: cash(bill.Total(), owner.Currency),
+	}
+	if bill.OffLimit != 0 {
+		offLimit := cash(bill.OffLimit, owner.Currency)
+		result.OffLimit = &offLimit
 	}
 	if bill.IsPaid() {
 		paid, remaining := cash(bill.Paid, owner.Currency), cash(bill.Remaining, owner.Currency)
@@ -172,6 +182,9 @@ type transactionJSON struct {
 	Goal string `json:"goal,omitempty"`
 	// Virtual is true for a purchase made with a virtual card.
 	Virtual bool `json:"virtual,omitempty"`
+	// OffLimit is true for a transaction of a credit card that does not
+	// use the limit of the card.
+	OffLimit bool `json:"off_limit,omitempty"`
 	// Installment is the number of the part of a transaction in
 	// installments, Installments is the number of parts and InstallmentID
 	// is the same in all the parts.
@@ -266,7 +279,7 @@ func transactionResult(view transaction.View) transactionJSON {
 		ID: view.ID, Title: view.Title, Description: view.Description, Type: view.Type,
 		Amount: cash(view.Amount, view.Account.Currency), Currency: view.Account.Currency, Date: view.Date, Status: view.Status,
 		Tags: append([]string{}, view.TagList()...), Category: view.Category.Code, PairID: view.PairID,
-		Installment: view.Part, Installments: view.Parts, InstallmentID: view.InstallmentID, Virtual: view.Virtual,
+		Installment: view.Part, Installments: view.Parts, InstallmentID: view.InstallmentID, Virtual: view.Virtual, OffLimit: view.OffLimit,
 	}
 	if view.CardID == 0 {
 		result.Account = view.Account.Code
@@ -954,6 +967,7 @@ func transactionTools() []mcp.Tool {
 		Type          *string `json:"type,omitempty" mcp:"Only the transactions of this type" enum:"expense,income,transfer,payment"`
 		Goal          *string `json:"goal,omitempty" mcp:"Only the transactions linked to this goal (code or id)"`
 		Virtual       *bool   `json:"virtual,omitempty" mcp:"true: only the transactions made with a virtual card of a credit card. false: only the other ones"`
+		OffLimit      *bool   `json:"off_limit,omitempty" mcp:"true: only the transactions of a credit card that are outside its limit. false: only the other ones"`
 		IncludeOthers bool    `json:"include_others,omitempty" mcp:"Also return and count the transactions in the accounts and the credit cards of other persons. With account, the transactions of that account come in any case"`
 		Limit         *int    `json:"limit,omitempty" mcp:"Most transactions to return. Default: 100"`
 		Offset        *int    `json:"offset,omitempty" mcp:"Number of transactions to skip, to read the next page. Default: 0"`
@@ -977,6 +991,7 @@ func transactionTools() []mcp.Tool {
 		InstallmentValue *string `json:"installment_value,omitempty" mcp:"With installments: the amount of one part, in place of value"`
 		FirstInstallment *int    `json:"first_installment,omitempty" mcp:"With installments, for a purchase that is already in progress: the first part to create. date is then the date of that part. Default: 1"`
 		Virtual          *bool   `json:"virtual,omitempty" mcp:"true when the person paid with a virtual card of the credit card. Only for a transaction of a credit card. Default: false"`
+		OffLimit         *bool   `json:"off_limit,omitempty" mcp:"true when the transaction does not use the limit of the credit card, for example a purchase that the shop finances. It stays in its bill. Only for a transaction of a credit card. With installments, all the parts get it. Default: false"`
 	}
 	type editArguments struct {
 		ID               uint    `json:"id" mcp:"Id of the transaction"`
@@ -992,6 +1007,7 @@ func transactionTools() []mcp.Tool {
 		Scope            *string `json:"scope,omitempty" mcp:"For a transaction in installments: one changes this part only, next changes this part and the parts after it, all changes all the parts. With next or all, value is the new total of these parts and date is the new date of the first of them. Default: one" enum:"one,next,all"`
 		InstallmentValue *string `json:"installment_value,omitempty" mcp:"With the scope next or all: the new amount of each part, in place of value"`
 		Virtual          *bool   `json:"virtual,omitempty" mcp:"true when the person paid with a virtual card of the credit card; false takes the mark away. Only for a transaction of a credit card"`
+		OffLimit         *bool   `json:"off_limit,omitempty" mcp:"true when the transaction does not use the limit of the credit card; false takes the mark away. Only for a transaction of a credit card. For a transaction in installments the change goes to all the parts, with any scope, also to a part in a paid bill"`
 	}
 	type deleteArguments struct {
 		ID      uint    `json:"id" mcp:"Id of the transaction"`
@@ -1002,8 +1018,8 @@ func transactionTools() []mcp.Tool {
 		reads(tool("transaction_list", "List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset. The list and the totals leave out the transactions in the accounts and the credit cards of other persons unless include_others is true.",
 			func(db *gorm.DB, a listArguments) (any, error) {
 				c := agentTransactionsCommand(db)
-				sent := given(map[string]bool{"category": a.Category != nil, "tag": a.Tags != nil, "date": a.Date != nil, "account": a.Account != nil, "type": a.Type != nil, "goal": a.Goal != nil, "virtual": a.Virtual != nil})
-				filter, err := c.filter(listFlags{category: text(a.Category), tags: text(a.Tags), search: text(a.Search), date: text(a.Date), account: text(a.Account), kind: text(a.Type), goal: text(a.Goal), virtual: a.Virtual != nil && *a.Virtual}, sent)
+				sent := given(map[string]bool{"category": a.Category != nil, "tag": a.Tags != nil, "date": a.Date != nil, "account": a.Account != nil, "type": a.Type != nil, "goal": a.Goal != nil, "virtual": a.Virtual != nil, "off-limit": a.OffLimit != nil})
+				filter, err := c.filter(listFlags{category: text(a.Category), tags: text(a.Tags), search: text(a.Search), date: text(a.Date), account: text(a.Account), kind: text(a.Type), goal: text(a.Goal), virtual: a.Virtual != nil && *a.Virtual, offLimit: a.OffLimit != nil && *a.OffLimit}, sent)
 				if err != nil {
 					return nil, err
 				}
@@ -1026,20 +1042,20 @@ func transactionTools() []mcp.Tool {
 			func(db *gorm.DB, a showArguments) (any, error) {
 				return agentTransactionsCommand(db).one(a.ID)
 			})),
-		tool("transaction_add", "Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give virtual for a purchase made with a virtual card of a credit card. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.",
+		tool("transaction_add", "Create a transaction: an expense, an income or a transfer between two accounts. A transaction of a credit card goes to the bill of its date. To pay a bill of a credit card, use credit_card_pay. Give goal to count the transaction toward a goal. Give virtual for a purchase made with a virtual card of a credit card. Give off_limit for a purchase that does not use the limit of the credit card. Give installments for an expense or an income in monthly parts: the result then has all the parts in transactions.",
 			func(db *gorm.DB, a addArguments) (any, error) {
 				c := agentTransactionsCommand(db)
 				values := transactionFlags{
 					title: a.Title, value: text(a.Value), account: a.Account, category: text(a.Category), kind: text(a.Type),
 					description: text(a.Description), tags: text(a.Tags), date: text(a.Date), to: text(a.To), received: text(a.Received),
 					goal: text(a.Goal), installmentValue: text(a.InstallmentValue), installments: number(a.Installments), from: number(a.FirstInstallment),
-					virtual: a.Virtual != nil && *a.Virtual,
+					virtual: a.Virtual != nil && *a.Virtual, offLimit: a.OffLimit != nil && *a.OffLimit,
 				}
 				sent := given(map[string]bool{
 					"title": true, "value": a.Value != nil, "account": true, "category": a.Category != nil, "type": a.Type != nil,
 					"description": a.Description != nil, "tags": a.Tags != nil, "date": a.Date != nil, "to": a.To != nil, "received": a.Received != nil,
 					"goal": a.Goal != nil, "installments": a.Installments != nil, "installment-value": a.InstallmentValue != nil,
-					"from": a.FirstInstallment != nil, "virtual": a.Virtual != nil,
+					"from": a.FirstInstallment != nil, "virtual": a.Virtual != nil, "off-limit": a.OffLimit != nil,
 				})
 				if a.Value == nil && a.InstallmentValue == nil {
 					return nil, errors.New("give value or installment_value")
@@ -1071,16 +1087,18 @@ func transactionTools() []mcp.Tool {
 					title: text(a.Title), description: text(a.Description), value: text(a.Value), kind: text(a.Type),
 					category: text(a.Category), tags: text(a.Tags), account: text(a.Account), date: text(a.Date), goal: text(a.Goal),
 					installmentValue: text(a.InstallmentValue), virtual: a.Virtual != nil && *a.Virtual,
+					offLimit: a.OffLimit != nil && *a.OffLimit,
 				}
 				values.all, values.next = scopeFlags(a.Scope)
 				sent := given(map[string]bool{
 					"title": a.Title != nil, "description": a.Description != nil, "value": a.Value != nil, "type": a.Type != nil,
 					"category": a.Category != nil, "tags": a.Tags != nil, "account": a.Account != nil, "date": a.Date != nil,
 					"goal": a.Goal != nil, "installment-value": a.InstallmentValue != nil, "virtual": a.Virtual != nil,
+					"off-limit": a.OffLimit != nil,
 				})
 				switch {
 				case len(sent) == 0:
-					return nil, errors.New("give at least one of title, description, value, installment_value, type, category, tags, account, date, goal, virtual")
+					return nil, errors.New("give at least one of title, description, value, installment_value, type, category, tags, account, date, goal, virtual, off_limit")
 				case a.Value != nil && a.InstallmentValue != nil:
 					return nil, errors.New("give value or installment_value, not the two")
 				case a.InstallmentValue != nil && !values.all && !values.next:

@@ -225,12 +225,17 @@ func TestBotGuideAsksTheVirtualCardForACreditCard(t *testing.T) {
 		t.Fatalf("buttons of the virtual card = %v", question.buttons)
 	}
 	question = f.step(question, "Paid with a virtual card?", "Yes", "Virtual card: <b>Yes</b>")
+	// The question of the limit comes after it.
+	if !reflect.DeepEqual(question.buttons, []string{"No", "Yes", "Cancel"}) {
+		t.Fatalf("buttons of the limit = %v", question.buttons)
+	}
+	question = f.step(question, "Outside the limit of the card?", "Yes", "Off limit: <b>Yes</b>")
 	question = f.step(question, "Category?", "FOOD", "Category: <b>FOOD</b>")
 	result := f.step(question, "Date? Press a button or send a date as DD/MM/YYYY.", "Today", "Date: <b>Today</b>")
 	if result.text != pre("✓ Transaction 1 created") {
 		t.Fatalf("result = %+v", result)
 	}
-	if card := f.ask(42, "/tx 1"); !strings.Contains(card, "Virtual   yes") || !strings.Contains(card, "VISA") {
+	if card := f.ask(42, "/tx 1"); !strings.Contains(card, "Virtual   yes") || !strings.Contains(card, "Off limit yes") || !strings.Contains(card, "VISA") {
 		t.Fatalf("the transaction has no mark:\n%s", card)
 	}
 }

@@ -22,9 +22,10 @@ const (
 )
 
 // Changed tells which values of a draft UpdateParts gives to the parts.
-// Place is the account or the credit card.
+// Place is the account or the credit card. OffLimit goes to all the
+// parts of the transaction, not only to the parts of the scope.
 type Changed struct {
-	Title, Description, Type, Category, Tags, Goal, Place, Value, Date, Virtual bool
+	Title, Description, Type, Category, Tags, Goal, Place, Value, Date, Virtual, OffLimit bool
 }
 
 // createParts inserts the parts of a transaction in installments, from
@@ -67,7 +68,7 @@ func (s *Store) createParts(draft Draft) (Transaction, error) {
 		for number := draft.From; number <= draft.Installments; number++ {
 			part := Transaction{
 				Title: draft.Title, Description: draft.Description, Type: draft.Type, Amount: signed(draft.Type, values[number-1]),
-				AccountID: draft.AccountID, CardID: draft.CardID, CategoryID: draft.CategoryID, Tags: draft.Tags, GoalID: draft.GoalID, Virtual: draft.Virtual,
+				AccountID: draft.AccountID, CardID: draft.CardID, CategoryID: draft.CategoryID, Tags: draft.Tags, GoalID: draft.GoalID, Virtual: draft.Virtual, OffLimit: draft.OffLimit,
 				Date: monthsLater(draft.Date, number-draft.From), InstallmentID: first.ID, Part: number, Parts: draft.Installments,
 			}
 			if draft.CardID != 0 {
@@ -190,13 +191,16 @@ func (s *Store) UpdateParts(id uint, scope Scope, draft Draft, changed Changed) 
 			}
 			if changed.Place {
 				next.AccountID, next.CardID = draft.AccountID, draft.CardID
-				// Only a credit card has virtual cards.
+				// Only a credit card has virtual cards and a limit.
 				if next.CardID == 0 {
-					next.Virtual = false
+					next.Virtual, next.OffLimit = false, false
 				}
 			}
 			if changed.Virtual {
 				next.Virtual = draft.Virtual
+			}
+			if changed.OffLimit {
+				next.OffLimit = draft.OffLimit
 			}
 			if changed.Value {
 				next.Value = values[i]
@@ -217,6 +221,11 @@ func (s *Store) UpdateParts(id uint, scope Scope, draft Draft, changed Changed) 
 				return inPart(part, err)
 			}
 			updated = append(updated, result)
+		}
+		if changed.OffLimit {
+			if err := bound.spreadOffLimit(updated[0]); err != nil {
+				return err
+			}
 		}
 		// The parts are one purchase: they teach one time.
 		return bound.learn(first, updated[0])

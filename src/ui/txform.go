@@ -37,6 +37,9 @@ const (
 	// TxVirtual tells that the person paid with a virtual card. The form
 	// shows it only for a credit card.
 	TxVirtual
+	// TxOffLimit tells that the transaction does not use the limit of the
+	// credit card. The form shows it only for a credit card.
+	TxOffLimit
 	TxTo
 	TxReceived
 	TxCategory
@@ -49,7 +52,7 @@ const (
 	txFieldCount
 )
 
-var txLabels = [txFieldCount]string{"Type", "Title", "Value", "Installments", "Account", "Virtual card", "To account", "Received", "Category", "Goal", "Date", "Tags", "Description"}
+var txLabels = [txFieldCount]string{"Type", "Title", "Value", "Installments", "Account", "Virtual card", "Off limit", "To account", "Received", "Category", "Goal", "Date", "Tags", "Description"}
 
 // TransactionFormOptions configures a transaction form.
 type TransactionFormOptions struct {
@@ -106,10 +109,12 @@ type TransactionForm struct {
 	goalID     uint
 	// virtual is the mark of a virtual card. It counts only for a card.
 	virtual bool
-	tags    []string
-	types   []string
-	hidden  [txFieldCount]bool
-	inputs  [txFieldCount]textinput.Model
+	// offLimit is the mark of a transaction outside the limit of a card.
+	offLimit bool
+	tags     []string
+	types    []string
+	hidden   [txFieldCount]bool
+	inputs   [txFieldCount]textinput.Model
 	// The current choices: an index in types and the ids of records.
 	kind                        int
 	accountID, toID, categoryID uint
@@ -133,7 +138,7 @@ func NewTransactionForm(options TransactionFormOptions) TransactionForm {
 	f := TransactionForm{
 		title: title, initial: options.Initial, edit: options.Edit,
 		accounts: slices.Clone(options.Accounts), categories: options.Categories, tags: options.Tags,
-		goals: options.Goals, goalID: options.Initial.GoalID, virtual: options.Initial.Virtual,
+		goals: options.Goals, goalID: options.Initial.GoalID, virtual: options.Initial.Virtual, offLimit: options.Initial.OffLimit,
 		accountID: options.Initial.AccountID, toID: options.Initial.ToAccountID, categoryID: options.Initial.CategoryID,
 		help: help.New(), width: formWidth,
 	}
@@ -213,7 +218,7 @@ func (f TransactionForm) Init() tea.Cmd { return textinput.Blink }
 func (f TransactionForm) kindName() string { return f.types[f.kind] }
 
 func (f TransactionForm) isText(field TxField) bool {
-	return field != TxType && field != TxAccount && field != TxTo && field != TxCategory && field != TxGoal && field != TxVirtual
+	return field != TxType && field != TxAccount && field != TxTo && field != TxCategory && field != TxGoal && field != TxVirtual && field != TxOffLimit
 }
 
 // fields returns the fields the form shows now, in order.
@@ -222,7 +227,7 @@ func (f TransactionForm) fields() []TxField {
 	for field := TxType; field < txFieldCount; field++ {
 		switch {
 		case f.hidden[field],
-			field == TxVirtual && !isCard(f.accountID),
+			(field == TxVirtual || field == TxOffLimit) && !isCard(f.accountID),
 			field == TxTo && f.kindName() != transaction.Transfer,
 			field == TxInstallments && f.kindName() == transaction.Transfer,
 			field == TxReceived && !f.twoCurrencies():
@@ -340,6 +345,8 @@ func (f TransactionForm) Value(field TxField) string {
 		return ""
 	case TxVirtual:
 		return yesNo(f.virtual)
+	case TxOffLimit:
+		return yesNo(f.offLimit)
 	case TxGoal:
 		for _, current := range f.goals {
 			if current.ID == f.goalID {
@@ -388,8 +395,9 @@ func (f TransactionForm) Draft() transaction.Draft {
 	draft.Type = f.kindName()
 	draft.AccountID, draft.CardID, draft.CategoryID = f.accountID, 0, f.categoryID
 	draft.GoalID = f.goalID
-	// Only a credit card has virtual cards.
+	// Only a credit card has virtual cards and a limit.
 	draft.Virtual = f.virtual && isCard(f.accountID)
+	draft.OffLimit = f.offLimit && isCard(f.accountID)
 	if isCard(f.accountID) {
 		draft.AccountID, draft.CardID = 0, f.accountID-cardOffset
 	}
@@ -618,6 +626,14 @@ func (f *TransactionForm) choose(press tea.KeyPressMsg) {
 		if next := cycle([][2]string{{"no", ""}, {"yes", ""}}, position, press); next >= 0 {
 			f.virtual = next == 1
 		}
+	case TxOffLimit:
+		position := 0
+		if f.offLimit {
+			position = 1
+		}
+		if next := cycle([][2]string{{"no", ""}, {"yes", ""}}, position, press); next >= 0 {
+			f.offLimit = next == 1
+		}
 	case TxTo:
 		f.toID = pickAccount(f.destinations(), f.toID, press)
 	case TxCategory:
@@ -776,6 +792,12 @@ func (f TransactionForm) row(field TxField, focused bool) string {
 	case TxVirtual:
 		selected := 0
 		if f.virtual {
+			selected = 1
+		}
+		return label + pills([]string{"no", "yes"}, selected, focused)
+	case TxOffLimit:
+		selected := 0
+		if f.offLimit {
 			selected = 1
 		}
 		return label + pills([]string{"no", "yes"}, selected, focused)

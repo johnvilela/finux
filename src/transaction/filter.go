@@ -17,6 +17,9 @@ type Filter struct {
 	// Virtual is "yes" for the transactions made with a virtual card
 	// and "no" for the other ones. The start of the word is enough.
 	Virtual string
+	// OffLimit is "yes" for the transactions outside the limit of the
+	// credit card and "no" for the other ones, in the same way.
+	OffLimit string
 	// Tags lists tags the transaction must have, with the # sign.
 	Tags []string
 	// Period is the start of a YYYY-MM-DD date: a year, a month or a day.
@@ -38,7 +41,8 @@ func (f Filter) same(value, want string) bool {
 	return value == want
 }
 
-// virtualWord is the word of the filter for a mark of a virtual card.
+// virtualWord is the word of the filter for a mark of a virtual card or
+// of a transaction outside the limit.
 func virtualWord(virtual bool) string {
 	if virtual {
 		return "yes"
@@ -55,6 +59,7 @@ func (f Filter) Match(v View) bool {
 		f.Type != "" && !f.same(v.Type, f.Type),
 		f.Goal != "" && (v.Goal == nil || !f.same(v.Goal.Code, f.Goal)),
 		f.Virtual != "" && strings.HasPrefix(virtualWord(!v.Virtual), strings.ToLower(f.Virtual)),
+		f.OffLimit != "" && strings.HasPrefix(virtualWord(!v.OffLimit), strings.ToLower(f.OffLimit)),
 		!strings.HasPrefix(v.Date, f.Period),
 		f.Mine && f.Account == "" && !v.Account.Mine():
 		return false
@@ -90,6 +95,9 @@ func (f Filter) String() string {
 	if f.Virtual != "" {
 		parts = append(parts, "virtual:"+f.Virtual)
 	}
+	if f.OffLimit != "" {
+		parts = append(parts, "offlimit:"+f.OffLimit)
+	}
 	if f.Period != "" {
 		parts = append(parts, f.Period)
 	}
@@ -100,8 +108,9 @@ func (f Filter) String() string {
 var partialDate = regexp.MustCompile(`^\d{4}(-\d{0,2}(-\d{0,2})?)?$`)
 
 // ParseSearch reads the text of the search input. A word is a filter
-// when it is #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes or a date (2026,
-// 2026-11, 11/2026, 17/11/2026). The other words are text of the title.
+// when it is #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes, offlimit:yes
+// or a date (2026, 2026-11, 11/2026, 17/11/2026). The other words are
+// text of the title.
 func ParseSearch(text string) Filter {
 	filter := Filter{Prefix: true}
 	var title []string
@@ -122,6 +131,8 @@ func ParseSearch(text string) Filter {
 			filter.Type = word[len("type:"):]
 		case strings.HasPrefix(lower, "virtual:"):
 			filter.Virtual = lower[len("virtual:"):]
+		case strings.HasPrefix(lower, "offlimit:"):
+			filter.OffLimit = lower[len("offlimit:"):]
 		case partialDate.MatchString(word):
 			filter.Period = word
 		default:

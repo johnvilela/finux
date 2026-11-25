@@ -45,6 +45,10 @@ type Card struct {
 	// Used is the total of the bills that are not paid. The store fills
 	// it; it is not a column.
 	Used int64 `gorm:"-"`
+	// OffLimit is the total of the transactions outside the limit in the
+	// bills that are not paid. Used does not count it. The store fills
+	// it.
+	OffLimit int64 `gorm:"-"`
 }
 
 // Available returns the part of the limit that is free.
@@ -220,6 +224,9 @@ type Bill struct {
 	// Spent is the sum of the transactions of the bill: purchases less
 	// refunds. The store fills it; it is not a column.
 	Spent int64 `gorm:"-"`
+	// OffLimit is the part of Spent that is outside the limit of the
+	// card. It is in the total of the bill.
+	OffLimit int64 `gorm:"-"`
 }
 
 // Total returns the value to pay.

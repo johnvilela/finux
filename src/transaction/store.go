@@ -138,7 +138,8 @@ func (s *Store) linkable(goalID uint, currency string, kept bool) error {
 }
 
 // place checks that a draft has an account or a credit card, and that
-// only a credit card has the mark of a virtual card.
+// only a credit card has the mark of a virtual card or the mark of a
+// transaction outside the limit.
 func place(draft Draft) error {
 	switch {
 	case draft.AccountID != 0 && draft.CardID != 0:
@@ -149,6 +150,8 @@ func place(draft Draft) error {
 		return errors.New("a credit card cannot have a transfer")
 	case draft.CardID == 0 && draft.Virtual:
 		return errors.New("only a credit card transaction can be made with a virtual card")
+	case draft.CardID == 0 && draft.OffLimit:
+		return errors.New("only a credit card transaction can be outside the limit")
 	}
 	return nil
 }
@@ -201,7 +204,7 @@ func (s *Store) create(draft Draft) (Transaction, error) {
 	created := Transaction{
 		Title: draft.Title, Description: draft.Description, Type: draft.Type, Amount: signed(draft.Type, draft.Value),
 		AccountID: draft.AccountID, CardID: draft.CardID, CategoryID: draft.CategoryID, Date: draft.Date, Tags: draft.Tags,
-		GoalID: draft.GoalID, ScheduleID: draft.ScheduleID, Virtual: draft.Virtual,
+		GoalID: draft.GoalID, ScheduleID: draft.ScheduleID, Virtual: draft.Virtual, OffLimit: draft.OffLimit,
 	}
 	if draft.CardID != 0 {
 		owner, err := s.card(draft.CardID, false)
@@ -302,12 +305,28 @@ func (s *Store) Update(id uint, draft Draft) (Transaction, error) {
 		if updated, err = bound.update(id, draft, ""); err != nil {
 			return err
 		}
+		if before.OffLimit != updated.OffLimit {
+			if err := bound.spreadOffLimit(updated); err != nil {
+				return err
+			}
+		}
 		return bound.learn(before, updated)
 	})
 	if err != nil {
 		return Transaction{}, err
 	}
 	return updated, s.stamp(nil, &updated)
+}
+
+// spreadOffLimit gives the mark of a part to all the parts of its
+// transaction in installments: the mark belongs to the purchase. It does
+// not look at the bills, because the mark changes no bill.
+func (s *Store) spreadOffLimit(part Transaction) error {
+	if part.InstallmentID == 0 {
+		return nil
+	}
+	return s.db.Model(&Transaction{}).Where("installment_id = ?", part.InstallmentID).
+		Update("off_limit", part.OffLimit).Error
 }
 
 // update is Update for a transaction that goes to the bill of the given
@@ -335,7 +354,11 @@ func (s *Store) update(id uint, draft Draft, period string) (Transaction, error)
 	if _, err := s.category(draft); err != nil {
 		return Transaction{}, err
 	}
-	if current.CardID != 0 {
+	// The mark of a transaction outside the limit changes no bill: a paid
+	// bill does not stop a change of the mark only.
+	markOnly := DraftOf(current)
+	markOnly.OffLimit = draft.OffLimit
+	if current.CardID != 0 && draft != markOnly {
 		if err := s.unlocked(current.BillID); err != nil {
 			return Transaction{}, err
 		}
@@ -395,7 +418,8 @@ func (s *Store) update(id uint, draft Draft, period string) (Transaction, error)
 	current.Title, current.Description, current.Type, current.Amount = draft.Title, draft.Description, draft.Type, amount
 	current.AccountID, current.CategoryID, current.Date, current.Tags = draft.AccountID, draft.CategoryID, draft.Date, draft.Tags
 	current.CardID, current.BillID, current.GoalID, current.Virtual = draft.CardID, billID, draft.GoalID, draft.Virtual
-	columns := append([]string{"Type", "Amount", "AccountID", "CardID", "BillID", "Virtual"}, shared...)
+	current.OffLimit = draft.OffLimit
+	columns := append([]string{"Type", "Amount", "AccountID", "CardID", "BillID", "Virtual", "OffLimit"}, shared...)
 	if current.PairID == 0 {
 		return current, s.db.Model(&current).Select(columns).Updates(&current).Error
 	}

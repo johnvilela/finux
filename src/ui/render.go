@@ -295,10 +295,18 @@ func titled(view transaction.View) string {
 	return marked(title, view)
 }
 
-// marked adds the mark of a virtual card to a title.
+// offLimitMark shows that a transaction does not use the limit of its
+// credit card.
+const offLimitMark = "[off limit]"
+
+// marked adds the mark of a virtual card and the mark of a transaction
+// outside the limit to a title.
 func marked(title string, view transaction.View) string {
 	if view.Virtual {
-		return title + " " + virtualMark
+		title += " " + virtualMark
+	}
+	if view.OffLimit {
+		title += " " + offLimitMark
 	}
 	return title
 }
@@ -413,6 +421,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 		if view.Virtual {
 			fields = append(fields, [2]string{"Virtual", "yes"})
 		}
+		if view.OffLimit {
+			fields = append(fields, [2]string{"Off limit", "yes"})
+		}
 		if view.Tags != "" {
 			fields = append(fields, [2]string{"Tags", view.Tags})
 		}
@@ -496,6 +507,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 	)
 	if view.Virtual {
 		lines = append(lines, row("Virtual", "yes"))
+	}
+	if view.OffLimit {
+		lines = append(lines, row("Off limit", "yes"))
 	}
 	if view.Status != "" {
 		lines = append(lines, row("Status", view.Status))

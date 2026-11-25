@@ -133,8 +133,9 @@ func (s *Store) Find(reference string, includeArchived bool) (Card, error) {
 	return found[0], nil
 }
 
-// usage fills the Used of cards: the total of their bills that are not
-// paid.
+// usage fills the Used and the OffLimit of cards from their bills that
+// are not paid: Used is their total less the transactions outside the
+// limit. A value carried from a paid bill counts in Used in full.
 func (s *Store) usage(cards []Card) error {
 	if len(cards) == 0 {
 		return nil
@@ -146,38 +147,45 @@ func (s *Store) usage(cards []Card) error {
 	if err := s.spent(bills); err != nil {
 		return err
 	}
-	used := map[uint]int64{}
+	used, offLimit := map[uint]int64{}, map[uint]int64{}
 	for _, bill := range bills {
-		used[bill.CardID] += bill.Total()
+		used[bill.CardID] += bill.Total() - bill.OffLimit
+		offLimit[bill.CardID] += bill.OffLimit
 	}
 	for i := range cards {
-		cards[i].Used = used[cards[i].ID]
+		cards[i].Used, cards[i].OffLimit = used[cards[i].ID], offLimit[cards[i].ID]
 	}
 	return nil
 }
 
-// spent fills the Spent of bills from the transactions of the cards.
-// The transactions table belongs to the transaction package; a
-// database from before that package does not have it.
+// spent fills the Spent and the OffLimit of bills from the transactions
+// of the cards. The transactions table belongs to the transaction
+// package; a database from before that package does not have it, and an
+// older database does not have the off_limit column.
 func (s *Store) spent(bills []Bill) error {
 	if len(bills) == 0 || !s.db.Migrator().HasTable("transactions") {
 		return nil
 	}
 	var sums []struct {
-		BillID uint
-		Total  int64
+		BillID   uint
+		Total    int64
+		OffLimit int64
 	}
-	err := s.db.Table("transactions").Select("bill_id, -SUM(amount) AS total").
+	columns := "bill_id, -SUM(amount) AS total"
+	if s.db.Migrator().HasColumn("transactions", "off_limit") {
+		columns += ", -SUM(CASE WHEN off_limit THEN amount ELSE 0 END) AS off_limit"
+	}
+	err := s.db.Table("transactions").Select(columns).
 		Where("card_id <> 0").Group("bill_id").Scan(&sums).Error
 	if err != nil {
 		return err
 	}
-	totals := map[uint]int64{}
+	totals := map[uint][2]int64{}
 	for _, sum := range sums {
-		totals[sum.BillID] = sum.Total
+		totals[sum.BillID] = [2]int64{sum.Total, sum.OffLimit}
 	}
 	for i := range bills {
-		bills[i].Spent = totals[bills[i].ID]
+		bills[i].Spent, bills[i].OffLimit = totals[bills[i].ID][0], totals[bills[i].ID][1]
 	}
 	return nil
 }

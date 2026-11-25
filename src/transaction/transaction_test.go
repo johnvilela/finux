@@ -209,6 +209,20 @@ func TestParseSearch(t *testing.T) {
 	if !ParseSearch("virtual:y").Match(online) || ParseSearch("virtual:no").Match(online) || !ParseSearch("virtual:").Match(online) {
 		t.Fatal("the virtual token does not select a virtual transaction")
 	}
+	if got := ParseSearch("offlimit:yes repair"); got.OffLimit != "yes" || got.Title != "repair" {
+		t.Fatalf("offlimit token = %+v", got)
+	}
+	repair := View{Transaction: Transaction{Title: "Repair", OffLimit: true, Amount: -3000}}
+	if !ParseSearch("offlimit:y").Match(repair) || ParseSearch("offlimit:no").Match(repair) || !ParseSearch("offlimit:").Match(repair) ||
+		ParseSearch("offlimit:yes").Match(online) || !ParseSearch("offlimit:no").Match(online) {
+		t.Fatal("the offlimit token does not select a transaction outside the limit")
+	}
+	if got := (Filter{OffLimit: "yes", Period: "2026"}).String(); got != "offlimit:yes 2026" {
+		t.Fatalf("String with offlimit = %q", got)
+	}
+	if total, count := OffLimitTotal([]View{online, repair, repair}); total != 6000 || count != 2 {
+		t.Fatalf("OffLimitTotal = %d, %d", total, count)
+	}
 	if got := (Filter{Virtual: "yes", Period: "2026"}).String(); got != "virtual:yes 2026" {
 		t.Fatalf("String with virtual = %q", got)
 	}

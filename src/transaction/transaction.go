@@ -99,6 +99,11 @@ type Transaction struct {
 	// Virtual tells that the person paid with a virtual card of the
 	// credit card. Only a transaction of a credit card can have it.
 	Virtual bool
+	// OffLimit tells that the transaction does not use the limit of the
+	// credit card. It stays in its bill. Only a transaction of a credit
+	// card can have it, and all the parts of a transaction in
+	// installments have the same value.
+	OffLimit bool
 	// Date is the day of the transaction as YYYY-MM-DD.
 	Date string `gorm:"size:10;index"`
 	// Tags holds the tags separated by one space, for example
@@ -184,6 +189,9 @@ type Draft struct {
 	// Virtual tells that the person paid with a virtual card of the
 	// credit card.
 	Virtual bool
+	// OffLimit tells that the transaction does not use the limit of the
+	// credit card.
+	OffLimit bool
 	// ToAccountID is the account that receives a transfer.
 	ToAccountID uint
 	// Received is the amount the other account receives, for a transfer
@@ -213,12 +221,25 @@ func VirtualTotal(views []View) (total int64, count int) {
 	return total, count
 }
 
+// OffLimitTotal returns the sum and the number of the transactions
+// outside the limit of the credit card. The sum is positive for money
+// spent, as the total of a bill is.
+func OffLimitTotal(views []View) (total int64, count int) {
+	for _, view := range views {
+		if view.OffLimit {
+			total -= view.Amount
+			count++
+		}
+	}
+	return total, count
+}
+
 // DraftOf returns the draft that describes a transaction as it is.
 func DraftOf(t Transaction) Draft {
 	return Draft{
 		Title: t.Title, Description: t.Description, Type: t.Type, Value: t.Value(),
 		AccountID: t.AccountID, CardID: t.CardID, CategoryID: t.CategoryID, Date: t.Date, Tags: t.Tags, GoalID: t.GoalID,
-		Virtual: t.Virtual,
+		Virtual: t.Virtual, OffLimit: t.OffLimit,
 	}
 }
 

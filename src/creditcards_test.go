@@ -257,6 +257,63 @@ func TestVirtualCardTransactions(t *testing.T) {
 	}
 }
 
+func TestOffLimitCardTransactions(t *testing.T) {
+	h := newCardsHome(t)
+	h.purchase("Market", "100", "17/11/2026")
+	if got := h.ok("tx", "a", "--title", "Repair", "--value", "300", "--account", "VISA", "--category", "FOOD", "--date", "16/11/2026", "--off-limit"); got != "✓ Transaction 2 created\n" {
+		t.Fatalf("add output = %q", got)
+	}
+	// Only a credit card has a limit.
+	h.fail(1, "only a credit card transaction can be outside the limit",
+		"tx", "a", "--title", "Bread", "--value", "5", "--account", "NU", "--category", "FOOD", "--off-limit")
+
+	h.has(h.ok("tx", "2"), "Card      VISA  Visa Gold\n", "Off limit yes\n")
+	if got := h.ok("tx", "1"); strings.Contains(got, "Off limit") {
+		t.Fatalf("card of a transaction with no mark:\n%s", got)
+	}
+	h.has(h.ok("tx"), "Repair [off limit]  ", "Market     ")
+	if got := h.ok("tx", "l", "--off-limit"); !strings.Contains(got, "Repair [off limit]") || strings.Contains(got, "Market") || !strings.Contains(got, "1 transaction\n") {
+		t.Fatalf("list --off-limit =\n%s", got)
+	}
+	if got := h.ok("tx", "l", "--off-limit=false"); strings.Contains(got, "Repair") || !strings.Contains(got, "Market") {
+		t.Fatalf("list --off-limit=false =\n%s", got)
+	}
+
+	// The bill has the purchase. The limit in use does not.
+	h.has(h.ok("cc", "VISA"), "Used       R$ 100,00\n", "Available  R$ 4.900,00\n", "Off limit  R$ 300,00\n", "Repair [off limit]", "Total  R$ 400,00\n")
+
+	// An edit takes the mark away, and gives it.
+	h.ok("tx", "e", "2", "--off-limit=false")
+	if got := h.ok("cc", "VISA"); strings.Contains(got, "ff limit") || !strings.Contains(got, "Used       R$ 400,00\n") {
+		t.Fatalf("card with no transaction outside the limit:\n%s", got)
+	}
+	h.ok("tx", "e", "1", "--off-limit")
+	h.has(h.ok("tx", "1"), "Off limit yes\n")
+	// A transaction that goes to an account loses the mark.
+	h.ok("tx", "e", "1", "--account", "NU")
+	if got := h.ok("tx", "1"); strings.Contains(got, "Off limit") {
+		t.Fatalf("card of a transaction that went to an account:\n%s", got)
+	}
+	h.fail(1, "only a credit card transaction", "tx", "e", "1", "--off-limit")
+
+	// The mark is of the purchase: all the parts have it, and a change of
+	// one part goes to all of them.
+	h.ok("tx", "a", "--title", "Car", "--value", "1200", "--account", "VISA", "--category", "FOOD", "--date", "17/11/2026", "--installments", "10", "--off-limit")
+	if got := h.ok("tx", "l", "--off-limit"); !strings.Contains(got, "10 transactions\n") || !strings.Contains(got, "Car 2/10 [off limit]") {
+		t.Fatalf("parts with the mark =\n%s", got)
+	}
+	h.has(h.ok("cc", "VISA"), "Used       R$ 300,00\n", "Off limit  R$ 1.200,00\n")
+	h.ok("tx", "e", "5", "--off-limit=false")
+	if got := h.ok("tx", "l", "--off-limit"); !strings.Contains(got, "No transactions") && !strings.Contains(got, "0 transactions") {
+		t.Fatalf("parts after the change of one part =\n%s", got)
+	}
+	h.has(h.ok("cc", "VISA"), "Used       R$ 1.500,00\n")
+	h.ok("tx", "e", "7", "--off-limit", "--next")
+	if got := h.ok("tx", "l", "--off-limit"); !strings.Contains(got, "10 transactions\n") {
+		t.Fatalf("parts after --next =\n%s", got)
+	}
+}
+
 func TestCreditCardsOfAnotherPerson(t *testing.T) {
 	h := newCardsHome(t)
 	if got := h.ok("cc", "add", "--name", "Master Ana", "--currency", "BRL", "--limit", "1000", "--closing", "25", "--due", "5", "--code", "MANA", "--owner", "Ana"); got != "✓ Credit card MANA created\n" {

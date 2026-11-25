@@ -48,6 +48,7 @@ in one line each before the draft.
 | `description` | Details that do not fit the title. Usually empty |
 | `goal` | Only when the user says the money is for a goal. See below |
 | `virtual` | `true` only for a purchase on a credit card that the user says was made with a virtual card |
+| `off_limit` | `true` only for a purchase on a credit card that the user says does not use the limit of the card |
 | `installments` | Only for a purchase or an income in monthly parts. See below |
 
 **Title.** The title must be a name the user can read later. When the
@@ -183,7 +184,8 @@ bill it went to (`bill` in the result) and the new total of that bill.
 For installments, the result has all the parts in `transactions`: report
 the ids of the first and the last part, the amount of each part, the bill
 of the first part and the month of the last one. On a credit card, tell
-the user that the limit in use went up by the total. For a transaction
+the user that the limit in use went up by the total, or that it did not
+change for a purchase with `off_limit`. For a transaction
 with a goal, also report the new progress of the goal (`goal_show`). When the result has `budget_warnings`, report the
 `message` of each one: the transaction left a budget near or over its
 limit. Do not link a transaction to a budget: it counts by its category.

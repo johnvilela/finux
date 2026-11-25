@@ -195,6 +195,10 @@ const carriedLabel = "Carried from the bill before"
 // virtualLabel names the total of the transactions of a virtual card.
 const virtualLabel = "Virtual card"
 
+// offLimitLabel names the total of the transactions outside the limit
+// of a card.
+const offLimitLabel = "Off limit"
+
 // CardDetailsView renders the details of one credit card and the
 // transactions of its open bill. Plain output has no colors and no
 // borders, for pipes and files.
@@ -214,6 +218,9 @@ func CardDetailsView(details CardDetails, plain bool) string {
 		{"Color", current.Color},
 		{"Created", current.CreatedAt.Local().Format(timeLayout)},
 		{"Updated", current.UpdatedAt.Local().Format(timeLayout)},
+	}
+	if current.OffLimit != 0 {
+		fields = slices.Insert(fields, 5, [2]string{offLimitLabel, money.Format(current.OffLimit, current.Currency)})
 	}
 	if !current.Mine() {
 		fields = slices.Insert(fields, 1, [2]string{"Owner", current.Owner})
@@ -322,6 +329,11 @@ func styledCardDetails(details CardDetails) string {
 		"",
 		limitBar(current, bar)+"  "+money.Format(current.Used, current.Currency)+" used "+
 			styleDim.Render("of "+money.Format(current.Limit, current.Currency)),
+	)
+	if current.OffLimit != 0 {
+		lines = append(lines, styleDim.Render(money.Format(current.OffLimit, current.Currency)+" outside the limit"))
+	}
+	lines = append(lines,
 		"",
 		styleDim.Render(strings.Repeat("─", width)),
 		styleDim.Render(fmt.Sprintf("Closes day %d  ·  Due day %d", current.ClosingDay, current.DueDay)),
@@ -356,6 +368,9 @@ func styledCardDetails(details CardDetails) string {
 		// The mark of a virtual card comes before the tags.
 		if room := textWidth - lipgloss.Width(text) - 1; view.Virtual && room >= len("virtual") {
 			text += " " + styleDim.Render("virtual")
+		}
+		if room := textWidth - lipgloss.Width(text) - 1; view.OffLimit && room >= len("off limit") {
+			text += " " + styleDim.Render("off limit")
 		}
 		if room := textWidth - lipgloss.Width(text) - 2; view.Tags != "" && room > 3 {
 			text += "  " + styleDim.Render(cut(view.Tags, room))

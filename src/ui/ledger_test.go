@@ -247,6 +247,20 @@ func TestLedgerMarksAVirtualCard(t *testing.T) {
 	}
 }
 
+func TestLedgerMarksATransactionOutsideTheLimit(t *testing.T) {
+	views := sampleTransactions()
+	views[0].OffLimit = true
+	var model tea.Model = NewLedger("Transactions", views, "2026-12-31")
+	if view := ledgerView(t, model); !strings.Contains(view, "▼ Weekly market off limit") || strings.Contains(view, "Salary off limit") {
+		t.Fatalf("view does not mark the transaction outside the limit:\n%s", view)
+	}
+	// The search reads the mark.
+	model = send(t, model, text("offlimit:yes")...)
+	if view := ledgerView(t, model); !strings.Contains(view, "Weekly market") || strings.Contains(view, "Salary") || !strings.Contains(view, "offlimit:yes") {
+		t.Fatalf("search for the transactions outside the limit:\n%s", view)
+	}
+}
+
 // datedTransactions returns one expense of 10,00 for each date, in the
 // order given.
 func datedTransactions(dates ...string) []transaction.View {

@@ -54,10 +54,10 @@ Rules for the CLI:
 | `category_add` | `finux ct add --name <text> --color <red\|green\|grey> [--code <code>] [--description <text>]` |
 | `category_edit` | `finux ct edit <code> [--name] [--code] [--description] [--color]` |
 | `category_delete` | `finux ct delete <code> --yes` |
-| `transaction_list` | `finux tx list [--category <code>] [--tag <tags>] [--search <text>] [--date <date>] [--account <code>] [--type <type>] [--goal <code>] [--virtual[=false]] [--all]` |
+| `transaction_list` | `finux tx list [--category <code>] [--tag <tags>] [--search <text>] [--date <date>] [--account <code>] [--type <type>] [--goal <code>] [--virtual[=false]] [--off-limit[=false]] [--all]` |
 | `transaction_show` | `finux tx show <id>` |
-| `transaction_add` | `finux tx add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--description <text>] [--tags <tags>] [--date <date>] [--to <code>] [--received <amount>] [--goal <code>] [--installments <number>] [--installment-value <amount>] [--from <number>] [--virtual]` |
-| `transaction_edit` | `finux tx edit <id> [--title] [--description] [--value] [--type] [--category] [--tags] [--account] [--date] [--goal <code\|none>] [--virtual[=false]] [--installment-value <amount>] [--all\|--next]` |
+| `transaction_add` | `finux tx add --title <text> --value <amount> --account <code> --category <code> [--type <type>] [--description <text>] [--tags <tags>] [--date <date>] [--to <code>] [--received <amount>] [--goal <code>] [--installments <number>] [--installment-value <amount>] [--from <number>] [--virtual] [--off-limit]` |
+| `transaction_edit` | `finux tx edit <id> [--title] [--description] [--value] [--type] [--category] [--tags] [--account] [--date] [--goal <code\|none>] [--virtual[=false]] [--off-limit[=false]] [--installment-value <amount>] [--all\|--next]` |
 | `transaction_delete` | `finux tx delete <id> [--all\|--next] --yes` |
 | `transaction_suggestions` | No command. Read the titles and the tags in the output of `finux tx list` |
 | `transaction_corrections` | No command. The corrections are for the MCP tools only |

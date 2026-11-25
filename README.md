@@ -503,7 +503,8 @@ Finux creates one transaction for each part.
 - `--from 4` is for a purchase that is already in progress: Finux creates the
   parts 4 to the last one, and `--date` is the date of part 4.
 - On a credit card, each part goes to the bill after the one before. All the
-  parts use the limit of the card from the first day.
+  parts use the limit of the card from the first day, unless the purchase is
+  [outside the limit](#transactions-outside-the-limit).
 - On an account, a part changes the balance on its date.
 - Each part counts in the budgets and in `finux resume` in the month of its
   date.
@@ -550,6 +551,7 @@ and create a new one.
 ./bin/finux tx --account INTER
 ./bin/finux tx --type expense
 ./bin/finux tx --virtual              # made with a virtual card; --virtual=false gives the others
+./bin/finux tx --off-limit            # outside the limit of a credit card; --off-limit=false gives the others
 ./bin/finux tx --all                  # also the transactions of other persons
 ```
 
@@ -636,6 +638,33 @@ field `Virtual card` when the account is a credit card, and the search of the
 interactive list reads `virtual:yes` and `virtual:no`. Only a transaction of
 a credit card can have the mark: one that goes to an account loses it. With
 installments, all the parts have the mark.
+
+### Transactions outside the limit
+
+Some purchases do not use the limit of the card, for example a purchase in
+installments that the shop finances through the card. Add `--off-limit`:
+
+```sh
+./bin/finux tx add --title "Car repair" --value 1200 --account VISA --category TRANS --installments 10 --off-limit
+./bin/finux tx edit 7 --off-limit=false   # take the mark away
+./bin/finux tx --off-limit                # only these transactions
+```
+
+- The transaction stays in its bill, in the total of the bill and in the
+  payment. Only `Used` and `Available` of the card leave it out.
+- `finux cc VISA` shows `Off limit`: the total of these transactions in the
+  bills that are not paid. The lists show `[off limit]` after the title.
+- The mark belongs to the purchase. A change of the mark of one part goes to
+  all the parts, with or without `--all` or `--next`, also when a part is in
+  a paid bill.
+- The form of `tx add` has the field `Off limit` when the account is a credit
+  card, and the search of the interactive list reads `offlimit:yes` and
+  `offlimit:no`.
+- Only a transaction of a credit card can have the mark: one that goes to an
+  account loses it.
+- When you pay a bill in part, the rest goes to the next bill and uses the
+  limit in full, also the part that came from a transaction outside the
+  limit.
 
 ### Bills
 

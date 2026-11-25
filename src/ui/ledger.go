@@ -478,6 +478,9 @@ func (l Ledger) row(view transaction.View, current bool, textWidth, accountWidth
 	if view.Virtual {
 		part += " virtual"
 	}
+	if view.OffLimit {
+		part += " off limit"
+	}
 	title := cut(view.Title, textWidth-lipgloss.Width(part))
 	text := titleStyle.Render(title) + dim.Render(part)
 	title += part
