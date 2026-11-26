@@ -627,12 +627,12 @@ func (c *scheduledCommand) edit(args []string) error {
 }
 
 // occurrenceDraft returns the transaction of an occurrence of a
-// schedule on a date.
+// schedule on a date. The date is also its due date.
 func occurrenceDraft(current schedule.Schedule, date string) transaction.Draft {
 	return transaction.Draft{
 		Title: current.Title, Description: current.Description, Type: current.Type, Value: current.Value,
 		AccountID: current.AccountID, CardID: current.CardID, CategoryID: current.CategoryID, GoalID: current.GoalID,
-		Tags: current.Tags, Date: date, ScheduleID: current.ID,
+		Tags: current.Tags, Date: date, ScheduleID: current.ID, DueDate: date,
 	}
 }
 
@@ -665,6 +665,8 @@ func (c *scheduledCommand) payDraft(current schedule.Schedule, value, date, plac
 		return transaction.Draft{}, errNoOccurrence(current)
 	}
 	draft := occurrenceDraft(current, min(next, today()))
+	// The occurrence stays as the due date, also with another date.
+	draft.DueDate = next
 	holder, err := c.place(current)
 	if err != nil {
 		return draft, err
@@ -718,8 +720,12 @@ func paidMessage(current schedule.Schedule, created transaction.View) string {
 	if created.Type == transaction.Income {
 		verb = "received"
 	}
-	return fmt.Sprintf("Schedule %s %s: transaction %d created (%s, %s)", current.Code, verb, created.ID,
-		transaction.FormatDate(created.Date), money.Format(created.Amount, created.Account.Currency))
+	timing := ""
+	if created.Timing == transaction.TimingLate || created.Timing == transaction.TimingEarly {
+		timing = ", " + created.TimingText()
+	}
+	return fmt.Sprintf("Schedule %s %s: transaction %d created (%s, %s%s)", current.Code, verb, created.ID,
+		transaction.FormatDate(created.Date), money.Format(created.Amount, created.Account.Currency), timing)
 }
 
 func (c *scheduledCommand) pay(args []string) error {

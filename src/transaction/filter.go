@@ -20,6 +20,9 @@ type Filter struct {
 	// OffLimit is "yes" for the transactions outside the limit of the
 	// credit card and "no" for the other ones, in the same way.
 	OffLimit string
+	// Timing is a timing of a transaction with a due date: on_time, late
+	// or early.
+	Timing string
 	// Tags lists tags the transaction must have, with the # sign.
 	Tags []string
 	// Period is the start of a YYYY-MM-DD date: a year, a month or a day.
@@ -60,6 +63,7 @@ func (f Filter) Match(v View) bool {
 		f.Goal != "" && (v.Goal == nil || !f.same(v.Goal.Code, f.Goal)),
 		f.Virtual != "" && strings.HasPrefix(virtualWord(!v.Virtual), strings.ToLower(f.Virtual)),
 		f.OffLimit != "" && strings.HasPrefix(virtualWord(!v.OffLimit), strings.ToLower(f.OffLimit)),
+		f.Timing != "" && !f.same(v.Timing, f.Timing),
 		!strings.HasPrefix(v.Date, f.Period),
 		f.Mine && f.Account == "" && !v.Account.Mine():
 		return false
@@ -98,6 +102,9 @@ func (f Filter) String() string {
 	if f.OffLimit != "" {
 		parts = append(parts, "offlimit:"+f.OffLimit)
 	}
+	if f.Timing != "" {
+		parts = append(parts, "timing:"+f.Timing)
+	}
 	if f.Period != "" {
 		parts = append(parts, f.Period)
 	}
@@ -108,8 +115,8 @@ func (f Filter) String() string {
 var partialDate = regexp.MustCompile(`^\d{4}(-\d{0,2}(-\d{0,2})?)?$`)
 
 // ParseSearch reads the text of the search input. A word is a filter
-// when it is #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes, offlimit:yes
-// or a date (2026, 2026-11, 11/2026, 17/11/2026). The other words are
+// when it is #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes, offlimit:yes,
+// timing:late or a date (2026, 2026-11, 11/2026, 17/11/2026). The other words are
 // text of the title.
 func ParseSearch(text string) Filter {
 	filter := Filter{Prefix: true}
@@ -133,6 +140,8 @@ func ParseSearch(text string) Filter {
 			filter.Virtual = lower[len("virtual:"):]
 		case strings.HasPrefix(lower, "offlimit:"):
 			filter.OffLimit = lower[len("offlimit:"):]
+		case strings.HasPrefix(lower, "timing:"):
+			filter.Timing = lower[len("timing:"):]
 		case partialDate.MatchString(word):
 			filter.Period = word
 		default:

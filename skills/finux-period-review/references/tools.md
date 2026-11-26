@@ -165,6 +165,7 @@ No arguments.
 | `offset` | integer | no | Number of transactions to skip, to read the next page. Default: 0 |
 | `search` | string | no | Only the transactions whose title contains this text |
 | `tags` | string | no | Only the transactions that have all these tags, for example "market weekly" |
+| `timing` | string | no | Only the transactions with a due date that were paid on it (on_time), after it (late) or before it (early). One of: `on_time`, `late`, `early` |
 | `type` | string | no | Only the transactions of this type. One of: `expense`, `income`, `transfer`, `payment` |
 | `virtual` | boolean | no | true: only the transactions made with a virtual card of a credit card. false: only the other ones |
 
@@ -187,6 +188,7 @@ No arguments.
 | `category` | string | no | Code or id of the category. Necessary, but for a transfer, which has the default XFER |
 | `date` | string | no | YYYY-MM-DD or DD/MM/YYYY. Default: today |
 | `description` | string | no | Description, at most 200 characters |
+| `due_date` | string | no | The date the transaction was planned for, when date is the date of the payment. The result then has timing: on_time, late or early. schedule_pay gives it by itself. Not for a transfer or with installments |
 | `first_installment` | integer | no | With installments, for a purchase that is already in progress: the first part to create. date is then the date of that part. Default: 1 |
 | `goal` | string | no | Code or id of the goal the transaction counts toward. The goal must have the currency of the account |
 | `installment_value` | string | no | With installments: the amount of one part, in place of value |
@@ -210,6 +212,7 @@ No arguments.
 | `category` | string | no | Code or id of the new category |
 | `date` | string | no | New date, YYYY-MM-DD or DD/MM/YYYY |
 | `description` | string | no | New description, at most 200 characters |
+| `due_date` | string | no | New date the transaction was planned for; none takes it away. The timing follows it and date. Only with the scope one |
 | `goal` | string | no | Code or id of the new goal. An empty string takes the goal away |
 | `installment_value` | string | no | With the scope next or all: the new amount of each part, in place of value |
 | `off_limit` | boolean | no | true when the transaction does not use the limit of the credit card; false takes the mark away. Only for a transaction of a credit card. For a transaction in installments the change goes to all the parts, with any scope, also to a part in a paid bill |

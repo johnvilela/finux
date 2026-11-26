@@ -437,6 +437,17 @@ func TestTransactionCard(t *testing.T) {
 		t.Fatalf("incoming side:\n%s", got)
 	}
 
+	if strings.Contains(bare, "Due ") || strings.Contains(bare, "Timing") {
+		t.Fatalf("card without a due date has one:\n%s", bare)
+	}
+	planned := views[0]
+	planned.Date, planned.DueDate, planned.Timing = "2026-11-25", "2026-10-06", transaction.TimingLate
+	for _, card := range []string{TransactionCard(planned, true), plain(TransactionCard(planned, false))} {
+		if !strings.Contains(card, "06/10/2026") || !strings.Contains(card, "50 days late") {
+			t.Fatalf("card of a late transaction:\n%s", card)
+		}
+	}
+
 	styled := TransactionCard(views[0], false)
 	if !strings.Contains(styled, "\x1b[") || !strings.Contains(styled, "╭") {
 		t.Fatalf("styled card has no color or border:\n%s", styled)

@@ -113,7 +113,9 @@ planned: rent, internet, a dentist next month.
   Use `schedule_pay` with the code of the schedule. Send `value` when the
   real amount is different, `date` when the user paid on another day, and
   `account` when another account paid. A `transaction_add` here would
-  count the bill two times and leave the occurrence due.
+  count the bill two times and leave the occurrence due. The transaction
+  keeps the date of the occurrence in `due_date` and gets `timing`
+  (`late`, `early` or `on_time`): tell the user when it is late or early.
 - A schedule without an account (no `account` and no `credit_card` in
   the result) needs `account` in `schedule_pay`: the account or the
   credit card that paid. Ask when the user did not tell it.

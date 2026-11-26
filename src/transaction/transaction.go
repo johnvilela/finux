@@ -120,6 +120,14 @@ type Transaction struct {
 	Parts         int
 	// ScheduleID is the schedule that created the transaction, or 0.
 	ScheduleID uint `gorm:"index"`
+	// DueDate is the day the transaction was planned for, as YYYY-MM-DD:
+	// the date of the occurrence of the schedule that it pays. Date is
+	// then the day of the payment. It is empty for a transaction that
+	// was not planned.
+	DueDate string `gorm:"size:10"`
+	// Timing compares Date with DueDate: TimingOf of the two. It is
+	// empty for a transaction without a due date.
+	Timing string `gorm:"size:7;index"`
 	// Status tells if the date of the transaction came: StatusOn of its
 	// date. SyncStatuses of the store writes it.
 	Status    string `gorm:"size:7"`
@@ -137,6 +145,41 @@ func (t Transaction) Value() int64 {
 
 // Outgoing reports whether the money leaves the account.
 func (t Transaction) Outgoing() bool { return t.Amount < 0 }
+
+// DaysLate returns the number of days from the due date to the date of
+// the transaction. It is negative for a transaction before its due date
+// and 0 for one without a due date.
+func (t Transaction) DaysLate() int {
+	due, err := time.Parse(isoDate, t.DueDate)
+	if err != nil {
+		return 0
+	}
+	date, err := time.Parse(isoDate, t.Date)
+	if err != nil {
+		return 0
+	}
+	return int(date.Sub(due).Hours() / 24)
+}
+
+// TimingText tells the timing in words, such as "50 days late", "4 days
+// early" or "on time". It is empty for a transaction without a due
+// date.
+func (t Transaction) TimingText() string {
+	days := t.DaysLate()
+	unit := "days"
+	if days == 1 || days == -1 {
+		unit = "day"
+	}
+	switch t.Timing {
+	case TimingLate:
+		return fmt.Sprintf("%d %s late", days, unit)
+	case TimingEarly:
+		return fmt.Sprintf("%d %s early", -days, unit)
+	case TimingOnTime:
+		return "on time"
+	}
+	return ""
+}
 
 // Installment returns the part of a transaction in installments, such
 // as "3/10". It is empty for a transaction without installments.
@@ -206,6 +249,9 @@ type Draft struct {
 	From int
 	// ScheduleID is the schedule that creates the transaction, or 0.
 	ScheduleID uint
+	// DueDate is the day the transaction was planned for, or empty. It
+	// accepts the same formats as Date.
+	DueDate string
 }
 
 // VirtualTotal returns the sum and the number of the transactions made
@@ -239,7 +285,7 @@ func DraftOf(t Transaction) Draft {
 	return Draft{
 		Title: t.Title, Description: t.Description, Type: t.Type, Value: t.Value(),
 		AccountID: t.AccountID, CardID: t.CardID, CategoryID: t.CategoryID, Date: t.Date, Tags: t.Tags, GoalID: t.GoalID,
-		Virtual: t.Virtual, OffLimit: t.OffLimit,
+		Virtual: t.Virtual, OffLimit: t.OffLimit, DueDate: t.DueDate,
 	}
 }
 
@@ -291,6 +337,17 @@ func (d *Draft) clean() error {
 		return err
 	}
 	d.Date, d.Tags = date, tags
+	if d.DueDate = strings.TrimSpace(d.DueDate); d.DueDate != "" {
+		switch {
+		case d.Type == Transfer:
+			return errors.New("a transfer cannot have a due date")
+		case d.Installments > 1:
+			return errors.New("a transaction in installments cannot have a due date: give it to a part with an edit")
+		}
+		if d.DueDate, err = ParseDate(d.DueDate); err != nil {
+			return err
+		}
+	}
 	return d.cleanInstallments()
 }
 
@@ -377,6 +434,30 @@ func StatusOn(date, today string) string {
 		return StatusPending
 	}
 	return StatusCleared
+}
+
+// The timings of a transaction with a due date.
+const (
+	TimingOnTime = "on_time"
+	TimingLate   = "late"
+	TimingEarly  = "early"
+)
+
+// Timings returns the timings in display order.
+func Timings() []string { return []string{TimingOnTime, TimingLate, TimingEarly} }
+
+// TimingOf compares the date of a transaction with its due date, the
+// two as YYYY-MM-DD. It is empty without a due date.
+func TimingOf(date, due string) string {
+	switch {
+	case due == "":
+		return ""
+	case date > due:
+		return TimingLate
+	case date < due:
+		return TimingEarly
+	}
+	return TimingOnTime
 }
 
 // The credit cards use the same date of today as the transactions.

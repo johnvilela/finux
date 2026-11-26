@@ -876,6 +876,7 @@ change a balance, a bill or a budget until you confirm it.
 ./bin/finux sc RENT               # what is due, the next date, its transactions
 ./bin/finux sc pay RENT           # confirm the next occurrence: creates the transaction
 ./bin/finux sc pay ELEC --value 187,40 --date 12/12/2026   # the real value and date
+./bin/finux tx --timing late      # the transactions paid after their due date
 ./bin/finux sc skip RENT          # drop the next occurrence
 ./bin/finux sc edit RENT --value 1600
 ./bin/finux sc delete RENT        # archive; --hard deletes permanently
@@ -906,6 +907,12 @@ goal. `add` needs `--title`, `--value`, `--account` and `--category`.
 - **Real values**: `sc pay` uses the value, the date of the occurrence and the
   account of the schedule. `--value`, `--date` and `--account` give the real
   ones, for a bill that changes each month.
+- **Late and early**: the transaction of `sc pay` keeps the date of the
+  occurrence as its due date, next to the date of the payment. Finux shows
+  the two and the timing, for example `42 days late`. `tx --timing late`
+  (or `early`, `on_time`) lists these transactions, and the search input of
+  the list reads `timing:late`. `tx add` and `tx edit` take `--due <date>`
+  for a transaction that no schedule made; `--due none` takes it away.
 - **Automatic**: with `--auto`, Finux creates the transaction of each due
   occurrence the next time you run a `finux` command, with the date of the
   occurrence, and tells you. It needs two things: `--auto` on the schedule and

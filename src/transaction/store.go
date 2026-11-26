@@ -205,6 +205,7 @@ func (s *Store) create(draft Draft) (Transaction, error) {
 		Title: draft.Title, Description: draft.Description, Type: draft.Type, Amount: signed(draft.Type, draft.Value),
 		AccountID: draft.AccountID, CardID: draft.CardID, CategoryID: draft.CategoryID, Date: draft.Date, Tags: draft.Tags,
 		GoalID: draft.GoalID, ScheduleID: draft.ScheduleID, Virtual: draft.Virtual, OffLimit: draft.OffLimit,
+		DueDate: draft.DueDate, Timing: TimingOf(draft.Date, draft.DueDate),
 	}
 	if draft.CardID != 0 {
 		owner, err := s.card(draft.CardID, false)
@@ -354,10 +355,10 @@ func (s *Store) update(id uint, draft Draft, period string) (Transaction, error)
 	if _, err := s.category(draft); err != nil {
 		return Transaction{}, err
 	}
-	// The mark of a transaction outside the limit changes no bill: a paid
-	// bill does not stop a change of the mark only.
+	// The mark of a transaction outside the limit and the due date change
+	// no bill: a paid bill does not stop a change of the two only.
 	markOnly := DraftOf(current)
-	markOnly.OffLimit = draft.OffLimit
+	markOnly.OffLimit, markOnly.DueDate = draft.OffLimit, draft.DueDate
 	if current.CardID != 0 && draft != markOnly {
 		if err := s.unlocked(current.BillID); err != nil {
 			return Transaction{}, err
@@ -419,7 +420,8 @@ func (s *Store) update(id uint, draft Draft, period string) (Transaction, error)
 	current.AccountID, current.CategoryID, current.Date, current.Tags = draft.AccountID, draft.CategoryID, draft.Date, draft.Tags
 	current.CardID, current.BillID, current.GoalID, current.Virtual = draft.CardID, billID, draft.GoalID, draft.Virtual
 	current.OffLimit = draft.OffLimit
-	columns := append([]string{"Type", "Amount", "AccountID", "CardID", "BillID", "Virtual", "OffLimit"}, shared...)
+	current.DueDate, current.Timing = draft.DueDate, TimingOf(draft.Date, draft.DueDate)
+	columns := append([]string{"Type", "Amount", "AccountID", "CardID", "BillID", "Virtual", "OffLimit", "DueDate", "Timing"}, shared...)
 	if current.PairID == 0 {
 		return current, s.db.Model(&current).Select(columns).Updates(&current).Error
 	}

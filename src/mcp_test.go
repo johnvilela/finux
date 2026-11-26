@@ -231,8 +231,9 @@ func TestMCPEnums(t *testing.T) {
 		"credit_card_add.color": account.ColorKeys(), "credit_card_edit.color": account.ColorKeys(),
 		"category_add.color": category.ColorKeys(), "category_edit.color": category.ColorKeys(),
 		"transaction_add.type": transaction.Types(), "transaction_edit.type": transaction.Types(),
-		"transaction_list.type":  append(transaction.Types(), transaction.Payment),
-		"transaction_edit.scope": {"one", "next", "all"}, "transaction_delete.scope": {"one", "next", "all"},
+		"transaction_list.type":   append(transaction.Types(), transaction.Payment),
+		"transaction_list.timing": transaction.Timings(),
+		"transaction_edit.scope":  {"one", "next", "all"}, "transaction_delete.scope": {"one", "next", "all"},
 		"schedule_add.type": schedule.Types(), "schedule_edit.type": schedule.Types(),
 		"goal_add.type": goal.Types(), "goal_edit.type": goal.Types(),
 		"note_list.status": {note.StatusOpen, note.StatusDue, note.StatusDone, note.StatusAll},
@@ -255,8 +256,8 @@ func TestMCPEnums(t *testing.T) {
 			checked++
 		}
 	}
-	if checked != 21 {
-		t.Errorf("checked %d enums, want 21", checked)
+	if checked != 22 {
+		t.Errorf("checked %d enums, want 22", checked)
 	}
 }
 
@@ -1016,10 +1017,30 @@ func TestMCPSchedules(t *testing.T) {
 	h.want(paid, "2026-10-05", "transaction", "date")
 	h.want(paid, "-150000", "transaction", "amount", "minor")
 	h.want(paid, "RENT", "transaction", "schedule")
+	h.want(paid, "2026-10-05", "transaction", "due_date")
+	h.want(paid, "on_time", "transaction", "timing")
 	h.want(paid, "[2026-11-05]", "schedule", "due")
 	real := h.ok("schedule_pay", map[string]any{"schedule": "RENT", "value": "1550.50", "date": "2026-11-06"})
 	h.want(real, "-155050", "transaction", "amount", "minor")
 	h.want(real, "2026-11-06", "transaction", "date")
+	h.want(real, "2026-11-05", "transaction", "due_date")
+	h.want(real, "late", "transaction", "timing")
+	h.want(real, "1", "transaction", "days_late")
+	late := h.ok("transaction_list", map[string]any{"timing": "late"})
+	h.want(late, "1", "total")
+	h.want(late, "2", "transactions", 0, "id")
+	h.fail("must be one of on_time, late, early", "transaction_list", map[string]any{"timing": "soon"})
+	// An edit of the due date changes the timing; none takes the two away.
+	early := h.ok("transaction_edit", map[string]any{"id": 2, "due_date": "2026-11-10"})
+	h.want(early, "early", "transaction", "timing")
+	h.want(early, "-4", "transaction", "days_late")
+	cleared := h.ok("transaction_edit", map[string]any{"id": 2, "due_date": "none"})
+	for _, field := range []string{"due_date", "timing", "days_late"} {
+		if _, has := cleared["transaction"].(map[string]any)[field]; has {
+			t.Fatalf("a transaction without a due date has %s: %v", field, cleared)
+		}
+	}
+	h.want(h.ok("transaction_edit", map[string]any{"id": 2, "due_date": "2026-11-05"}), "late", "transaction", "timing")
 	h.want(real, "upcoming", "schedule", "status")
 	skipped := h.ok("schedule_skip", map[string]any{"schedule": "RENT"})
 	h.want(skipped, "2026-12-05", "skipped")
@@ -1138,6 +1159,20 @@ func TestMCPOffLimit(t *testing.T) {
 		t.Fatalf("a bill with no transaction outside the limit has off_limit: %v", card)
 	}
 	h.want(h.ok("transaction_edit", map[string]any{"id": 1, "off_limit": true}), "true", "transaction", "off_limit")
+}
+
+// A transaction that no schedule made can have a due date.
+func TestMCPDueDate(t *testing.T) {
+	h := newMCPHome(t)
+	h.ok("account_add", map[string]any{"name": "Nubank", "currency": "BRL", "code": "NU", "balance": "1000"})
+	water := h.ok("transaction_add", map[string]any{"title": "Water", "value": "80", "account": "NU", "category": "BILLS", "date": "2026-11-17", "due_date": "2026-11-10"})
+	h.want(water, "2026-11-10", "transaction", "due_date")
+	h.want(water, "late", "transaction", "timing")
+	h.want(water, "7", "transaction", "days_late")
+	h.fail("installments cannot have a due date", "transaction_add", map[string]any{"title": "Sofa", "value": "900", "account": "NU", "category": "SHOP", "installments": 3, "due_date": "2026-11-10"})
+	h.ok("transaction_add", map[string]any{"title": "Sofa", "value": "900", "account": "NU", "category": "SHOP", "installments": 3})
+	h.fail("a due date is of one transaction", "transaction_edit", map[string]any{"id": 2, "scope": "all", "due_date": "2026-11-10"})
+	h.want(h.ok("transaction_edit", map[string]any{"id": 2, "due_date": "2026-11-17"}), "on_time", "transaction", "timing")
 }
 
 // The corrections tell an agent how the user changed the transactions

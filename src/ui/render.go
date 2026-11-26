@@ -409,6 +409,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 			{"Category", view.Category.Code + "  " + view.Category.Name},
 			{"Date", date},
 		}
+		if view.DueDate != "" {
+			fields = append(fields, [2]string{"Due", transaction.FormatDate(view.DueDate)}, [2]string{"Timing", view.TimingText()})
+		}
 		if view.Status != "" {
 			fields = append(fields, [2]string{"Status", view.Status})
 		}
@@ -505,6 +508,9 @@ func TransactionCard(view transaction.View, plain bool) string {
 		row("Category", paint(categoryColor.Hex, "●")+" "+styleBold.Render(view.Category.Code)+"  "+view.Category.Name),
 		row("Date", date),
 	)
+	if view.DueDate != "" {
+		lines = append(lines, row("Due", transaction.FormatDate(view.DueDate)), row("Timing", view.TimingText()))
+	}
 	if view.Virtual {
 		lines = append(lines, row("Virtual", "yes"))
 	}

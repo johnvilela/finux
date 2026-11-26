@@ -193,6 +193,12 @@ type transactionJSON struct {
 	InstallmentID uint `json:"installment_id,omitempty"`
 	// Schedule is the code of the schedule that created the transaction.
 	Schedule string `json:"schedule,omitempty"`
+	// DueDate is the date the transaction was planned for. Timing then
+	// compares date with it: on_time, late or early. DaysLate is the
+	// number of days from due_date to date, negative when early.
+	DueDate  string `json:"due_date,omitempty"`
+	Timing   string `json:"timing,omitempty"`
+	DaysLate int    `json:"days_late,omitempty"`
 }
 
 type goalJSON struct {
@@ -280,6 +286,7 @@ func transactionResult(view transaction.View) transactionJSON {
 		Amount: cash(view.Amount, view.Account.Currency), Currency: view.Account.Currency, Date: view.Date, Status: view.Status,
 		Tags: append([]string{}, view.TagList()...), Category: view.Category.Code, PairID: view.PairID,
 		Installment: view.Part, Installments: view.Parts, InstallmentID: view.InstallmentID, Virtual: view.Virtual, OffLimit: view.OffLimit,
+		DueDate: view.DueDate, Timing: view.Timing, DaysLate: view.DaysLate(),
 	}
 	if view.CardID == 0 {
 		result.Account = view.Account.Code
@@ -968,6 +975,7 @@ func transactionTools() []mcp.Tool {
 		Goal          *string `json:"goal,omitempty" mcp:"Only the transactions linked to this goal (code or id)"`
 		Virtual       *bool   `json:"virtual,omitempty" mcp:"true: only the transactions made with a virtual card of a credit card. false: only the other ones"`
 		OffLimit      *bool   `json:"off_limit,omitempty" mcp:"true: only the transactions of a credit card that are outside its limit. false: only the other ones"`
+		Timing        *string `json:"timing,omitempty" mcp:"Only the transactions with a due date that were paid on it (on_time), after it (late) or before it (early)" enum:"on_time,late,early"`
 		IncludeOthers bool    `json:"include_others,omitempty" mcp:"Also return and count the transactions in the accounts and the credit cards of other persons. With account, the transactions of that account come in any case"`
 		Limit         *int    `json:"limit,omitempty" mcp:"Most transactions to return. Default: 100"`
 		Offset        *int    `json:"offset,omitempty" mcp:"Number of transactions to skip, to read the next page. Default: 0"`
@@ -984,6 +992,7 @@ func transactionTools() []mcp.Tool {
 		Description      *string `json:"description,omitempty" mcp:"Description, at most 200 characters"`
 		Tags             *string `json:"tags,omitempty" mcp:"Tags divided by spaces, for example \"market weekly\". Use transaction_suggestions to find the tags in use"`
 		Date             *string `json:"date,omitempty" mcp:"YYYY-MM-DD or DD/MM/YYYY. Default: today"`
+		DueDate          *string `json:"due_date,omitempty" mcp:"The date the transaction was planned for, when date is the date of the payment. The result then has timing: on_time, late or early. schedule_pay gives it by itself. Not for a transfer or with installments"`
 		To               *string `json:"to,omitempty" mcp:"For a transfer: code or id of the account that receives the money. A credit card cannot have a transfer"`
 		Received         *string `json:"received,omitempty" mcp:"For a transfer between accounts of different currencies: the amount the other account receives"`
 		Goal             *string `json:"goal,omitempty" mcp:"Code or id of the goal the transaction counts toward. The goal must have the currency of the account"`
@@ -1003,6 +1012,7 @@ func transactionTools() []mcp.Tool {
 		Tags             *string `json:"tags,omitempty" mcp:"New tags; they replace the tags of the transaction. An empty string removes all tags"`
 		Account          *string `json:"account,omitempty" mcp:"Code or id of the new account or credit card. Give value also when the currency is different"`
 		Date             *string `json:"date,omitempty" mcp:"New date, YYYY-MM-DD or DD/MM/YYYY"`
+		DueDate          *string `json:"due_date,omitempty" mcp:"New date the transaction was planned for; none takes it away. The timing follows it and date. Only with the scope one"`
 		Goal             *string `json:"goal,omitempty" mcp:"Code or id of the new goal. An empty string takes the goal away"`
 		Scope            *string `json:"scope,omitempty" mcp:"For a transaction in installments: one changes this part only, next changes this part and the parts after it, all changes all the parts. With next or all, value is the new total of these parts and date is the new date of the first of them. Default: one" enum:"one,next,all"`
 		InstallmentValue *string `json:"installment_value,omitempty" mcp:"With the scope next or all: the new amount of each part, in place of value"`
@@ -1018,8 +1028,8 @@ func transactionTools() []mcp.Tool {
 		reads(tool("transaction_list", "List transactions, the newest first, with the totals of all transactions that match the filters. All filters are optional and combine. Read more pages with limit and offset. The list and the totals leave out the transactions in the accounts and the credit cards of other persons unless include_others is true.",
 			func(db *gorm.DB, a listArguments) (any, error) {
 				c := agentTransactionsCommand(db)
-				sent := given(map[string]bool{"category": a.Category != nil, "tag": a.Tags != nil, "date": a.Date != nil, "account": a.Account != nil, "type": a.Type != nil, "goal": a.Goal != nil, "virtual": a.Virtual != nil, "off-limit": a.OffLimit != nil})
-				filter, err := c.filter(listFlags{category: text(a.Category), tags: text(a.Tags), search: text(a.Search), date: text(a.Date), account: text(a.Account), kind: text(a.Type), goal: text(a.Goal), virtual: a.Virtual != nil && *a.Virtual, offLimit: a.OffLimit != nil && *a.OffLimit}, sent)
+				sent := given(map[string]bool{"category": a.Category != nil, "tag": a.Tags != nil, "date": a.Date != nil, "account": a.Account != nil, "type": a.Type != nil, "goal": a.Goal != nil, "virtual": a.Virtual != nil, "off-limit": a.OffLimit != nil, "timing": a.Timing != nil})
+				filter, err := c.filter(listFlags{timing: text(a.Timing), category: text(a.Category), tags: text(a.Tags), search: text(a.Search), date: text(a.Date), account: text(a.Account), kind: text(a.Type), goal: text(a.Goal), virtual: a.Virtual != nil && *a.Virtual, offLimit: a.OffLimit != nil && *a.OffLimit}, sent)
 				if err != nil {
 					return nil, err
 				}
@@ -1049,10 +1059,10 @@ func transactionTools() []mcp.Tool {
 					title: a.Title, value: text(a.Value), account: a.Account, category: text(a.Category), kind: text(a.Type),
 					description: text(a.Description), tags: text(a.Tags), date: text(a.Date), to: text(a.To), received: text(a.Received),
 					goal: text(a.Goal), installmentValue: text(a.InstallmentValue), installments: number(a.Installments), from: number(a.FirstInstallment),
-					virtual: a.Virtual != nil && *a.Virtual, offLimit: a.OffLimit != nil && *a.OffLimit,
+					virtual: a.Virtual != nil && *a.Virtual, offLimit: a.OffLimit != nil && *a.OffLimit, due: text(a.DueDate),
 				}
 				sent := given(map[string]bool{
-					"title": true, "value": a.Value != nil, "account": true, "category": a.Category != nil, "type": a.Type != nil,
+					"due": a.DueDate != nil, "title": true, "value": a.Value != nil, "account": true, "category": a.Category != nil, "type": a.Type != nil,
 					"description": a.Description != nil, "tags": a.Tags != nil, "date": a.Date != nil, "to": a.To != nil, "received": a.Received != nil,
 					"goal": a.Goal != nil, "installments": a.Installments != nil, "installment-value": a.InstallmentValue != nil,
 					"from": a.FirstInstallment != nil, "virtual": a.Virtual != nil, "off-limit": a.OffLimit != nil,
@@ -1087,10 +1097,11 @@ func transactionTools() []mcp.Tool {
 					title: text(a.Title), description: text(a.Description), value: text(a.Value), kind: text(a.Type),
 					category: text(a.Category), tags: text(a.Tags), account: text(a.Account), date: text(a.Date), goal: text(a.Goal),
 					installmentValue: text(a.InstallmentValue), virtual: a.Virtual != nil && *a.Virtual,
-					offLimit: a.OffLimit != nil && *a.OffLimit,
+					offLimit: a.OffLimit != nil && *a.OffLimit, due: text(a.DueDate),
 				}
 				values.all, values.next = scopeFlags(a.Scope)
 				sent := given(map[string]bool{
+					"due":   a.DueDate != nil,
 					"title": a.Title != nil, "description": a.Description != nil, "value": a.Value != nil, "type": a.Type != nil,
 					"category": a.Category != nil, "tags": a.Tags != nil, "account": a.Account != nil, "date": a.Date != nil,
 					"goal": a.Goal != nil, "installment-value": a.InstallmentValue != nil, "virtual": a.Virtual != nil,
@@ -1098,7 +1109,7 @@ func transactionTools() []mcp.Tool {
 				})
 				switch {
 				case len(sent) == 0:
-					return nil, errors.New("give at least one of title, description, value, installment_value, type, category, tags, account, date, goal, virtual, off_limit")
+					return nil, errors.New("give at least one of title, description, value, installment_value, type, category, tags, account, date, due_date, goal, virtual, off_limit")
 				case a.Value != nil && a.InstallmentValue != nil:
 					return nil, errors.New("give value or installment_value, not the two")
 				case a.InstallmentValue != nil && !values.all && !values.next:

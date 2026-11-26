@@ -230,6 +230,37 @@ func TestSetupDatabaseAddsTheOffLimitColumn(t *testing.T) {
 	}
 }
 
+func TestSetupDatabaseAddsTheDueDateColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "finux.db")
+	if _, err := setupDatabase(path); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A database from before the due dates has no column for them.
+	for _, column := range []string{"due_date", "timing"} {
+		if db.Migrator().HasIndex(&transaction.Transaction{}, "idx_transactions_"+column) {
+			if err := db.Migrator().DropIndex(&transaction.Transaction{}, "idx_transactions_"+column); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := db.Migrator().DropColumn(&transaction.Transaction{}, column); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if transactionsReady(db) {
+		t.Fatal("a database without the columns is ready")
+	}
+	if _, err := setupDatabase(path); err != nil {
+		t.Fatal(err)
+	}
+	if !transactionsReady(db) {
+		t.Fatal("the setup did not add the columns")
+	}
+}
+
 func TestSetupDatabaseAddsTheOwnerColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "finux.db")
 	if _, err := setupDatabase(path); err != nil {

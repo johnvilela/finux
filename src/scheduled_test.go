@@ -55,11 +55,11 @@ func TestScheduledLifecycle(t *testing.T) {
 	h.has(h.ok("sc", "RENT"), "Status      upcoming\n", "Next        05/12/2026\n", "1   05/11/2026  Rent")
 	// An occurrence can be paid before its date, with another value, date and account.
 	h.ok("ac", "a", "--name", "Wallet", "--currency", "BRL", "--code", "CASH", "--balance", "2000")
-	if got := h.ok("sc", "p", "RENT", "--value", "1550", "--date", "16/11/2026", "--account", "CASH"); got != "✓ Schedule RENT paid: transaction 2 created (16/11/2026, -R$ 1.550,00)\nNext: 05/01/2027\n" {
+	if got := h.ok("sc", "p", "RENT", "--value", "1550", "--date", "16/11/2026", "--account", "CASH"); got != "✓ Schedule RENT paid: transaction 2 created (16/11/2026, -R$ 1.550,00, 19 days early)\nNext: 05/01/2027\n" {
 		t.Fatalf("early pay output = %q", got)
 	}
 	h.has(h.ok("ac", "CASH"), "R$ 450,00")
-	if got := h.ok("sc", "confirm", "SAL"); got != "✓ Schedule SAL received: transaction 3 created (17/11/2026, R$ 4.000,00)\nNext: 30/12/2026\n" {
+	if got := h.ok("sc", "confirm", "SAL"); got != "✓ Schedule SAL received: transaction 3 created (17/11/2026, R$ 4.000,00, 13 days early)\nNext: 30/12/2026\n" {
 		t.Fatalf("income output = %q", got)
 	}
 	if got := h.ok("sc", "skip", "SAL"); got != "✓ Schedule SAL skipped: 30/12/2026\nNext: 30/01/2027\n" {
@@ -335,4 +335,57 @@ func TestScheduledWithoutAccount(t *testing.T) {
 	h.fail(2, "pay: give --value: the account NU is in BRL, not in USD", "sc", "pay", "HOST", "--account", "NU")
 	h.ok("sc", "pay", "HOST", "--account", "WISE")
 	h.has(h.ok("ac", "WISE"), "$88.00")
+}
+
+// A payment keeps the date of its occurrence as the due date of the
+// transaction, and tells if it was late or early.
+func TestScheduledDueDate(t *testing.T) {
+	h := newCardsHome(t)
+	h.ok("sc", "a", "--title", "Energy", "--value", "187", "--account", "NU", "--category", "BILLS", "--every", "month", "--date", "06/10/2026", "--code", "ENERG")
+
+	if got := h.ok("sc", "pay", "ENERG", "--date", "17/11/2026"); got != "✓ Schedule ENERG paid: transaction 1 created (17/11/2026, -R$ 187,00, 42 days late)\nNext: 06/11/2026\n" {
+		t.Fatalf("late pay output = %q", got)
+	}
+	h.has(h.ok("tx", "1"), "Date      17/11/2026\n", "Due       06/10/2026\n", "Timing    42 days late\n")
+	// Without a date, an occurrence that is due keeps its date: on time.
+	if got := h.ok("sc", "pay", "ENERG"); got != "✓ Schedule ENERG paid: transaction 2 created (06/11/2026, -R$ 187,00)\nNext: 06/12/2026\n" {
+		t.Fatalf("on time pay output = %q", got)
+	}
+	h.has(h.ok("tx", "2"), "Due       06/11/2026\n", "Timing    on time\n")
+	if got := h.ok("sc", "pay", "ENERG"); got != "✓ Schedule ENERG paid: transaction 3 created (17/11/2026, -R$ 187,00, 19 days early)\nNext: 06/01/2027\n" {
+		t.Fatalf("early pay output = %q", got)
+	}
+
+	ids := func(args ...string) string {
+		t.Helper()
+		var ids []string
+		for _, line := range strings.Split(h.ok(append([]string{"tx"}, args...)...), "\n")[1:] {
+			if fields := strings.Fields(line); len(fields) > 2 {
+				ids = append(ids, fields[0])
+			}
+		}
+		return strings.Join(ids, " ")
+	}
+	for timing, want := range map[string]string{"late": "1", "on_time": "2", "on-time": "2", "EARLY": "3"} {
+		if got := ids("--timing", timing); got != want {
+			t.Errorf("--timing %s: ids %q, want %q", timing, got, want)
+		}
+	}
+	h.fail(2, "list: unknown timing \"soon\": use one of on_time, late, early", "tx", "--timing", "soon")
+
+	// A new date of the payment changes the timing. The due date stays.
+	h.ok("tx", "edit", "1", "--date", "01/10/2026")
+	h.has(h.ok("tx", "1"), "Date      01/10/2026\n", "Due       06/10/2026\n", "Timing    5 days early\n")
+	h.ok("tx", "edit", "1", "--due", "none")
+	if got := h.ok("tx", "1"); strings.Contains(got, "Due ") || strings.Contains(got, "Timing") {
+		t.Fatalf("transaction without a due date:\n%s", got)
+	}
+	// A transaction that no schedule made can have a due date.
+	h.ok("tx", "add", "--title", "Water", "--value", "80", "--account", "NU", "--category", "BILLS", "--date", "17/11/2026", "--due", "16/11/2026")
+	h.has(h.ok("tx", "4"), "Due       16/11/2026\n", "Timing    1 day late\n")
+	h.ok("tx", "edit", "3", "--due", "17/11/2026")
+	h.has(h.ok("tx", "3"), "Timing    on time\n")
+	h.fail(2, "invalid date", "tx", "edit", "3", "--due", "soon")
+	h.ok("ac", "a", "--name", "Wallet", "--currency", "BRL", "--code", "CASH")
+	h.fail(1, "a transfer cannot have a due date", "tx", "add", "--title", "Move", "--value", "10", "--account", "NU", "--to", "CASH", "--due", "16/11/2026")
 }

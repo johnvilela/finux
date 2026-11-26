@@ -47,6 +47,7 @@ func transactionsHelp() string {
                         --virtual=false gives the other ones
   --off-limit           Transactions of a credit card outside its limit;
                         --off-limit=false gives the other ones
+  --timing <timing>     Transactions with a due date that were paid ` + strings.Join(transaction.Timings(), ", ") + `
   --type <type>         ` + strings.Join(transaction.Types(), ", ") + `, ` + transaction.Payment + `
   --all                 Include the transactions of other persons
 
@@ -61,6 +62,9 @@ func transactionsHelp() string {
   --tags <tags>         Tags, for example "market weekly" or "#market #weekly"
   --account <code>      Account or credit card of the transaction
   --date <date>         DD/MM/YYYY or YYYY/MM/DD (default: today)
+  --due <date>          Date the transaction was planned for, when --date is
+                        the date of the payment; 'none' takes it away.
+                        'finux sc pay' gives it. Not for a transfer
   --goal <code>         Goal the transaction counts toward; 'none' takes it away.
                         See 'finux goals --help'
   --virtual             The person paid with a virtual card of the credit card.
@@ -96,7 +100,11 @@ Delete asks for confirmation.
 
 In the list, the search input finds transactions by title. It also reads
 filters: #tag, @ACCOUNT, cat:CODE, type:TYPE, virtual:yes or virtual:no,
-offlimit:yes or offlimit:no, and a date such as 2026, 2026-11 or 17/11/2026.
+offlimit:yes or offlimit:no, timing:late, timing:early or timing:on_time, and
+a date such as 2026, 2026-11 or 17/11/2026.
+
+A transaction with a due date tells its timing: late when the date of the
+payment is after the due date, early when it is before, and on_time.
 
 The list leaves out the transactions in an account or a credit card of
 another person (see 'finux ac --help'). Use --all for all of them, or
@@ -171,6 +179,7 @@ func transactionsReady(db *gorm.DB) bool {
 		migrator.HasTable(&goal.Goal{}) && migrator.HasColumn(&transaction.Transaction{}, "goal_id") &&
 		migrator.HasColumn(&transaction.Transaction{}, "installment_id") && migrator.HasColumn(&transaction.Transaction{}, "virtual") &&
 		migrator.HasColumn(&transaction.Transaction{}, "off_limit") &&
+		migrator.HasColumn(&transaction.Transaction{}, "due_date") && migrator.HasColumn(&transaction.Transaction{}, "timing") &&
 		migrator.HasColumn(&transaction.Transaction{}, "status") && migrator.HasColumn(&card.Bill{}, "status") &&
 		migrator.HasTable(&schedule.Schedule{}) && migrator.HasColumn(&schedule.Schedule{}, "currency") && migrator.HasColumn(&transaction.Transaction{}, "schedule_id") &&
 		migrator.HasTable(&setting.Setting{}) && migrator.HasTable(&transaction.Correction{}) && migrator.HasTable(&note.Note{}) &&
@@ -311,7 +320,7 @@ func (c *transactionsCommand) findCategory(ref string) (category.Category, error
 }
 
 func (c *transactionsCommand) list(args []string) error {
-	var categoryRef, tags, search, date, accountRef, kind, goalRef string
+	var categoryRef, tags, search, date, accountRef, kind, goalRef, timing string
 	var virtual, offLimit, all bool
 	_, given, err := parse("list", args, func(f *flag.FlagSet) {
 		f.StringVar(&categoryRef, "category", "", "")
@@ -321,6 +330,7 @@ func (c *transactionsCommand) list(args []string) error {
 		f.StringVar(&accountRef, "account", "", "")
 		f.StringVar(&kind, "type", "", "")
 		f.StringVar(&goalRef, "goal", "", "")
+		f.StringVar(&timing, "timing", "", "")
 		f.BoolVar(&virtual, "virtual", false, "")
 		f.BoolVar(&offLimit, "off-limit", false, "")
 		f.BoolVar(&all, "all", false, "")
@@ -331,7 +341,7 @@ func (c *transactionsCommand) list(args []string) error {
 	// The option --all is not a filter: an empty result with it alone
 	// is an empty list.
 	delete(given, "all")
-	filter, err := c.filter(listFlags{category: categoryRef, tags: tags, search: search, date: date, account: accountRef, kind: kind, goal: goalRef, virtual: virtual, offLimit: offLimit}, given)
+	filter, err := c.filter(listFlags{category: categoryRef, tags: tags, search: search, date: date, account: accountRef, kind: kind, goal: goalRef, timing: timing, virtual: virtual, offLimit: offLimit}, given)
 	if err != nil {
 		return err
 	}
@@ -393,6 +403,8 @@ func (c *transactionsCommand) details(view transaction.View) error {
 // listFlags holds the text of the filters of list.
 type listFlags struct {
 	category, tags, search, date, account, kind, goal string
+	// timing is a timing of a transaction with a due date.
+	timing string
 	// virtual selects the transactions made with a virtual card, or the
 	// other ones. offLimit does the same for the transactions outside
 	// the limit of a credit card.
@@ -454,6 +466,12 @@ func (c *transactionsCommand) filter(values listFlags, given map[string]bool) (t
 			filter.OffLimit = "yes"
 		}
 	}
+	if given["timing"] {
+		filter.Timing = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(values.timing)), "-", "_")
+		if !slices.Contains(transaction.Timings(), filter.Timing) {
+			return filter, usageError(fmt.Sprintf("list: unknown timing %q: use one of %s", values.timing, strings.Join(transaction.Timings(), ", ")))
+		}
+	}
 	return filter, nil
 }
 
@@ -472,6 +490,8 @@ func (c *transactionsCommand) show(args []string) error {
 // transactionFlags holds the text of the options of add and edit.
 type transactionFlags struct {
 	title, description, value, kind, category, tags, account, date, to, received, goal string
+	// due is the date the transaction was planned for.
+	due string
 	// installmentValue is the value of one part of a transaction in
 	// installments. installments is the number of parts and from is the
 	// first part to create.
@@ -497,6 +517,7 @@ func (v *transactionFlags) define(flags *flag.FlagSet, create bool) {
 	flags.StringVar(&v.account, "account", "", "")
 	flags.StringVar(&v.date, "date", "", "")
 	flags.StringVar(&v.goal, "goal", "", "")
+	flags.StringVar(&v.due, "due", "", "")
 	flags.StringVar(&v.installmentValue, "installment-value", "", "")
 	flags.BoolVar(&v.virtual, "virtual", false, "")
 	flags.BoolVar(&v.offLimit, "off-limit", false, "")
@@ -564,6 +585,11 @@ func (v *transactionFlags) check(command string, given map[string]bool, draft *t
 	}
 	if err == nil && given["date"] {
 		draft.Date, err = transaction.ParseDate(v.date)
+	}
+	if err == nil && given["due"] {
+		if draft.DueDate = ""; !isNone(v.due) {
+			draft.DueDate, err = transaction.ParseDate(v.due)
+		}
 	}
 	if err != nil {
 		return usageError(command + ": " + err.Error())
@@ -865,7 +891,7 @@ func (c *transactionsCommand) edit(args []string) error {
 	case len(given) == 0 && scoped:
 		return usageError("edit: give the options to change with --all or --next")
 	case len(given) == 0 && !c.interactive:
-		return usageError("edit: give --title, --description, --value, --type, --category, --tags, --account, --date, --goal, --virtual or --off-limit when input is not a terminal")
+		return usageError("edit: give --title, --description, --value, --type, --category, --tags, --account, --date, --due, --goal, --virtual or --off-limit when input is not a terminal")
 	case given["value"] && given["installment-value"]:
 		return usageError("edit: give --value or --installment-value, not the two")
 	case given["installment-value"] && !scoped:
@@ -908,6 +934,9 @@ func (c *transactionsCommand) edit(args []string) error {
 // changeParts applies the options that were given to the parts of a
 // scope. It returns the parts and the title they now have.
 func (c *transactionsCommand) changeParts(current transaction.View, scope transaction.Scope, changes transaction.Draft, values transactionFlags, given map[string]bool) ([]transaction.Transaction, string, error) {
+	if given["due"] {
+		return nil, "", usageError("edit: a due date is of one transaction: do not change it with a scope of parts")
+	}
 	parts, err := c.store.Parts(current.ID, scope)
 	if err != nil {
 		return nil, "", err
@@ -940,6 +969,9 @@ func (c *transactionsCommand) change(current transaction.View, draft, changes tr
 	}
 	if given["date"] {
 		draft.Date = changes.Date
+	}
+	if given["due"] {
+		draft.DueDate = changes.DueDate
 	}
 	if given["category"] {
 		found, err := c.findCategory(values.category)

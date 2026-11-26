@@ -399,6 +399,12 @@ takes the account away again.
   the transaction then goes to a bill of the card. Without `date`, a due occurrence
   gets its own date and an occurrence that is not due yet gets the date
   of today. The transaction has `schedule` with the code of the schedule.
+- The transaction of `schedule_pay` keeps the date of its occurrence in
+  `due_date`, and `date` is the day of the payment. `timing` compares the
+  two: `late`, `early` or `on_time`. So send `date` when the user paid on
+  another day than the occurrence: without it a due occurrence is
+  `on_time`. `days_late` is the number of days from `due_date` to `date`,
+  negative when early.
 - The status of a schedule is `due`, `upcoming` or `done` (no occurrence
   is left). A schedule ends after `times` occurrences or after
   `end_date`; without them it repeats until it is archived.
@@ -493,7 +499,13 @@ the same way. A transaction
 linked to a goal also has `goal` (code). A part of a
 transaction in installments also has `installment`, `installments` and
 `installment_id`. A transaction that a schedule created also has
-`schedule` (code).
+`schedule` (code). A transaction with a planned date also has `due_date`,
+`timing` (`on_time`, `late` or `early`) and, when not zero, `days_late`.
+`schedule_pay` gives them. `transaction_add` and `transaction_edit` take
+`due_date` for a transaction that no schedule made; `none` in an edit
+takes it away. A transfer and a `transaction_add` with installments cannot
+have it. `transaction_list` with `timing` gives the late, the early or
+the on-time transactions.
 
 `transaction_add` and `transaction_edit` return `transaction`, and
 `budget_warnings` when a budget is near or over its limit. For a
